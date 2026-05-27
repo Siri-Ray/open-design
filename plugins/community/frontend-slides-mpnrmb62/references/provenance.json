@@ -1,0 +1,18 @@
+{
+  "candidateId": "b0b78e1f-b901-4c39-a41d-ca28d0af2124",
+  "projectId": "64bd6c45-19c7-40df-9124-0b3b414bdbe2",
+  "runId": "06013efe-bd2d-4414-822f-689fdf5c74b4",
+  "conversationId": "e212e373-a330-4f6c-b119-dbf3ff55898b",
+  "provenance": {
+    "summary": "Detected from https://github.com/zarazhangrui/frontend-slides after a successful run.",
+    "detectedAt": 1779861072806
+  },
+  "sourceRefs": [
+    {
+      "kind": "url",
+      "value": "https://github.com/zarazhangrui/frontend-slides",
+      "label": "https://github.com/zarazhangrui/frontend-slides",
+      "reason": "Referenced repository or plugin-like URL."
+    }
+  ]
+}
