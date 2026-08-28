@@ -156,7 +156,7 @@ export function installResourceErrorObserver(): () => void {
       defer_attr: target.getAttribute('defer') != null ? true : false,
       crossorigin_mode: normalizeCrossorigin(target.getAttribute('crossorigin')),
     };
-    const key = `${tag}\0${resource.normalized_resource}`;
+    const key = resourceWindowKey(src, tag);
     const entry = windows.get(key);
     if (entry) {
       entry.repeatCount += 1;
@@ -175,7 +175,7 @@ export function installResourceErrorObserver(): () => void {
     if (src == null) return;
     const tag = target.tagName.toLowerCase();
     const resource = normalizeResource(src, tag);
-    const key = `${tag}\0${resource.normalized_resource}`;
+    const key = resourceWindowKey(src, tag);
     const entry = windows.get(key);
     if (entry) closeWindow(key, entry);
   };
@@ -220,7 +220,7 @@ function normalizeResource(rawUrl: string, tag: string): NormalizedResource {
 
   const type = resourceType(tag);
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-    return privateResource(parsed.protocol.replace(':', '') || 'opaque', tag);
+    return privateResource('opaque', tag);
   }
   const extension = resourceExtension(parsed.pathname);
 
@@ -251,7 +251,8 @@ function normalizeResource(rawUrl: string, tag: string): NormalizedResource {
   if (productRoute) {
     return {
       category: 'product_asset',
-      normalized_resource: parsed.pathname,
+      normalized_resource:
+        `${productRoute}:${type}${extension ? `.${extension}` : ''}`,
       origin_relation: 'same_origin',
       resource_extension: extension,
       resource_route: productRoute,
@@ -268,6 +269,21 @@ function normalizeResource(rawUrl: string, tag: string): NormalizedResource {
     resource_route: route,
     resource_type: type,
   };
+}
+
+// This identity never leaves the browser. Keep it separate from the scrubbed,
+// low-cardinality telemetry value so distinct private resources do not share a
+// retry/recovery window merely because they have the same route template.
+function resourceWindowKey(rawUrl: string, tag: string): string {
+  try {
+    const parsed = new URL(rawUrl, window.location.href);
+    const identity = parsed.origin === 'null'
+      ? parsed.href
+      : `${parsed.origin}${parsed.pathname}`;
+    return `${tag}\0${identity}`;
+  } catch {
+    return `${tag}\0${rawUrl}`;
+  }
 }
 
 function privateResource(
@@ -287,10 +303,10 @@ function privateResource(
 
 function safeNextChunkId(pathname: string): string {
   const basename = pathname.split('/').at(-1) ?? '';
-  if (basename.length > 120 || !/^[A-Za-z0-9._%+-]+\.(?:js|css)$/i.test(basename)) {
-    return 'unknown';
-  }
-  return basename;
+  if (basename.length > 120) return 'unknown';
+  const match = basename.match(/(?:^|-)([a-f0-9]{6,64})\.(js|css)$/i);
+  if (!match?.[1] || !match[2]) return 'unknown';
+  return `${match[1].toLowerCase()}.${match[2].toLowerCase()}`;
 }
 
 function productAssetRoute(pathname: string): string | null {
