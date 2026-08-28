@@ -619,6 +619,8 @@ describe('classifyRunFailure', () => {
     ).toMatchObject({
       failure_category: 'timeout',
       failure_detail: 'inactivity_timeout',
+      failure_mechanism: 'first_output_deadline',
+      failure_domain: 'cross_boundary',
       terminal_trigger: 'first_output_deadline',
     });
   });
@@ -1588,8 +1590,25 @@ describe('execution_failed close-reason refinement', () => {
       failure_category: 'rate_limit',
       failure_detail: 'membership_concurrency_limit',
       failure_stage: 'session_init',
+      failure_mechanism: 'policy_rejection',
+      failure_domain: 'policy_admission',
+      evidence_level: 'structured_code',
+      repair_owner: 'policy_owner',
+      admission_status: 'rejected_policy',
+      classifier_version: 'run-failure-v2',
       retryable: false,
       user_action: 'none',
+    });
+  });
+
+  it('does not exclude an ordinary provider 429 as a pre-run policy rejection', () => {
+    expect(classifyForAgent('amr', 'RATE_LIMITED', 'HTTP 429: too many requests')).toMatchObject({
+      failure_category: 'rate_limit',
+      failure_detail: 'rate_limit_429',
+      failure_domain: 'provider_control_plane',
+      failure_mechanism: 'provider_rejection',
+      admission_status: 'admitted',
+      repair_owner: 'provider_owner',
     });
   });
 
@@ -1606,6 +1625,48 @@ describe('execution_failed close-reason refinement', () => {
       failure_detail: 'fatal_rpc_error',
       retryable: true,
       user_action: 'retry',
+    });
+  });
+
+  it('classifies an oversized ACP input frame as a local product protocol failure', () => {
+    const message = 'ACP input line exceeds maximum size (1048576 bytes)';
+    expect(
+      classifyForAgent('amr', 'AGENT_EXECUTION_FAILED', message, [
+        errorEvent('AGENT_EXECUTION_FAILED', message, false),
+        runtimeCloseEvent('fatal_rpc_error'),
+      ]),
+    ).toMatchObject({
+      failure_category: 'process_exit',
+      failure_detail: 'acp_frame_too_large',
+      failure_mechanism: 'frame_too_large',
+      failure_domain: 'client_product',
+      evidence_level: 'protocol_error',
+      repair_owner: 'open_design',
+      admission_status: 'admitted',
+      classifier_version: 'run-failure-v2',
+    });
+  });
+
+  it('classifies a missing bundled OpenCode binary as a local product packaging failure', () => {
+    const message = 'bundled OpenCode binary is missing';
+    expect(classifyForAgent('amr', 'AGENT_EXECUTION_FAILED', message)).toMatchObject({
+      failure_category: 'process_exit',
+      failure_detail: 'bundled_binary_missing',
+      failure_mechanism: 'child_exit',
+      failure_domain: 'client_product',
+      evidence_level: 'stderr_fallback',
+      repair_owner: 'open_design',
+    });
+  });
+
+  it('keeps host policy blocks separate from client product failures', () => {
+    const message = 'OpenCode launch was blocked by Windows Application Control policy';
+    expect(classifyForAgent('amr', 'AGENT_EXECUTION_FAILED', message)).toMatchObject({
+      failure_detail: 'host_policy_block',
+      failure_domain: 'client_environment',
+      failure_mechanism: 'child_exit',
+      evidence_level: 'stderr_fallback',
+      repair_owner: 'client_environment',
     });
   });
 

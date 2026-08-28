@@ -32,6 +32,18 @@ import {
 
 const TERMINAL_STATUSES = new Set(['succeeded', 'failed', 'canceled']);
 const RECONCILED_STATUS_MESSAGE = 'Run terminal state reconciled after daemon restart.';
+const STRONGER_TERMINAL_INTEGRITY = new Set([
+  'late',
+  'overwritten',
+  'permanently_missing',
+  'post_terminal_activity',
+]);
+
+function reconciledTerminalIntegrity(value: unknown): string {
+  return typeof value === 'string' && STRONGER_TERMINAL_INTEGRITY.has(value)
+    ? value
+    : 'reconciled';
+}
 
 interface AnalyticsRecovery {
   context: Record<string, unknown>;
@@ -438,6 +450,9 @@ export async function reconcileDurableRunTerminals(
         total_duration_ms: Math.max(0, state.updatedAt - state.createdAt),
         langfuse_trace_id: state.id,
         terminal_reconciled: true,
+        terminal_integrity: reconciledTerminalIntegrity(
+          state.analyticsRecovery.properties.terminal_integrity,
+        ),
         terminal_recovery_reason: recoveryReason,
         ...(errorCode ? { error_code: errorCode } : {}),
         ...(failure ?? {}),

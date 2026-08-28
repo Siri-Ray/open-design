@@ -108,6 +108,7 @@ describe('durable run terminal reconciliation', () => {
         user_action: 'retry',
         terminal_trigger: 'daemon_restart',
         terminal_reconciled: true,
+        terminal_integrity: 'reconciled',
         terminal_recovery_reason: 'daemon_restart',
       }),
     }));
@@ -185,6 +186,7 @@ describe('durable run terminal reconciliation', () => {
           project_id: 'p1',
           conversation_id: 'c1',
           run_id: runId,
+          terminal_integrity: 'overwritten',
         },
         insertId: 'run-created-analytics-incomplete',
       },
@@ -228,6 +230,7 @@ describe('durable run terminal reconciliation', () => {
         retryable: false,
         user_action: 'login',
         terminal_reconciled: true,
+        terminal_integrity: 'overwritten',
         terminal_recovery_reason: 'analytics_incomplete',
       }),
     }));

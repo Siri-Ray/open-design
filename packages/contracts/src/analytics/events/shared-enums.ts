@@ -325,6 +325,12 @@ export type TrackingRunFailureDetail =
   | 'tool_error'
   | 'plugin_artifact_missing'
   | 'cli_not_installed'
+  | 'bundled_binary_missing'
+  | 'host_policy_block'
+  | 'local_storage_failure'
+  | 'certificate_failure'
+  | 'proxy_configuration'
+  | 'network_configuration'
   | 'git_bash_missing'
   | 'agent_config_invalid'
   | 'spawn_failed'
@@ -333,6 +339,7 @@ export type TrackingRunFailureDetail =
   | 'spawn_eperm'
   | 'stdin_write_eof'
   | 'agent_protocol_error'
+  | 'acp_frame_too_large'
   | 'session_resume_expired'
   | 'fabricated_role_marker'
   | 'permission_request_not_found'
@@ -362,6 +369,55 @@ export type TrackingRunFailureStage =
   | 'artifact_write'
   | 'child_close'
   | 'finalize';
+export type TrackingRunFailureMechanism =
+  | 'policy_rejection'
+  | 'provider_rejection'
+  | 'protocol_violation'
+  | 'frame_too_large'
+  | 'startup_readiness_timeout'
+  | 'first_output_deadline'
+  | 'acp_response_deadline'
+  | 'post_tool_resume_timeout'
+  | 'tool_execution_failure'
+  | 'child_exit'
+  | 'stream_idle_timeout'
+  | 'empty_completion'
+  | 'transport_failure'
+  | 'unknown';
+export type TrackingRunFailureDomain =
+  | 'client_product'
+  | 'client_environment'
+  | 'provider_control_plane'
+  | 'policy_admission'
+  | 'cross_boundary'
+  | 'unknown';
+export type TrackingRunEvidenceLevel =
+  | 'structured_error'
+  | 'structured_code'
+  | 'protocol_error'
+  | 'lifecycle_signal'
+  | 'stderr_fallback'
+  | 'close_reason'
+  | 'legacy_text'
+  | 'unknown';
+export type TrackingRunRepairOwner =
+  | 'open_design'
+  | 'client_environment'
+  | 'provider_owner'
+  | 'policy_owner'
+  | 'shared_boundary'
+  | 'unknown';
+export type TrackingRunAdmissionStatus =
+  | 'admitted'
+  | 'rejected_policy'
+  | 'unknown';
+export type TrackingRunTerminalIntegrity =
+  | 'canonical'
+  | 'late'
+  | 'reconciled'
+  | 'overwritten'
+  | 'permanently_missing'
+  | 'post_terminal_activity';
 export type TrackingRunLifecyclePhase =
   | 'queued'
   | 'prompt_build'
@@ -604,4 +660,3 @@ export type TrackingLabsOptOutReason =
   | 'not_what_i_wanted'
   | 'other'
   | 'skipped';
-

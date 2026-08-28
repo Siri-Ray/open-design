@@ -2,8 +2,13 @@ import type {
   TrackingRunCancelOrigin,
   TrackingRunFailureCategory,
   TrackingRunFailureDetail,
+  TrackingRunFailureDomain,
+  TrackingRunFailureMechanism,
   TrackingRunFailureStage,
   TrackingRunFailureUserAction,
+  TrackingRunEvidenceLevel,
+  TrackingRunAdmissionStatus,
+  TrackingRunRepairOwner,
   TrackingRunTerminalTrigger,
 } from '@open-design/contracts/analytics';
 import {
@@ -38,6 +43,12 @@ export interface RunFailureClassification {
   failure_category: TrackingRunFailureCategory;
   failure_detail: TrackingRunFailureDetail;
   failure_stage: TrackingRunFailureStage;
+  failure_mechanism?: TrackingRunFailureMechanism;
+  failure_domain?: TrackingRunFailureDomain;
+  evidence_level?: TrackingRunEvidenceLevel;
+  repair_owner?: TrackingRunRepairOwner;
+  admission_status?: TrackingRunAdmissionStatus;
+  classifier_version?: 'run-failure-v2';
   retryable: boolean;
   user_action: TrackingRunFailureUserAction;
   /** Distinguishes an explicit user stop from lifecycle-driven cancellation. */
@@ -245,6 +256,19 @@ function isCliNotInstalledText(text: string): boolean {
     .test(text);
 }
 
+function isBundledBinaryMissingText(text: string): boolean {
+  return /\bbundled (?:OpenCode|agent) binary (?:is )?missing\b/i.test(text);
+}
+
+function clientEnvironmentFailureDetail(text: string): TrackingRunFailureDetail | null {
+  if (/\b(Windows Application Control|AppLocker|blocked by .* policy)\b/i.test(text)) return 'host_policy_block';
+  if (/\b(SQLite|WAL).*(?:I\/O|readonly|locked|corrupt|failed)\b/i.test(text)) return 'local_storage_failure';
+  if (/\b(certificate|CERT_|self[- ]signed|unable to verify)\b/i.test(text)) return 'certificate_failure';
+  if (/\b(unsupported proxy protocol|proxy configuration)\b/i.test(text)) return 'proxy_configuration';
+  if (/\b(ECONNREFUSED|ENETUNREACH|network unreachable|local connection failed)\b/i.test(text)) return 'network_configuration';
+  return null;
+}
+
 function isGitBashMissingText(text: string): boolean {
   return /\bClaude Code on Windows requires git-bash\b|\bCLAUDE_CODE_GIT_BASH_PATH\b|\bgit-bash\b/i
     .test(text);
@@ -260,6 +284,10 @@ function isAgentProtocolErrorText(text: string): boolean {
     /\bQoder run failed: (?:stop_sequence|end_turn)\b/i.test(text) ||
     /\bthread\/start failed\b/i.test(text) ||
     /\bfailed to parse request\b/i.test(text);
+}
+
+function isAcpFrameTooLargeText(text: string): boolean {
+  return /\bACP input line exceeds maximum size\b/i.test(text);
 }
 
 function isFabricatedRoleMarkerText(text: string): boolean {
@@ -680,10 +708,96 @@ function classification(
   retryable: boolean,
   user_action: TrackingRunFailureUserAction,
 ): RunFailureClassification {
+  const policy = [
+    'hard_quota',
+    'model_window_limit',
+    'membership_concurrency_limit',
+    'workspace_credits_exhausted',
+    'amr_insufficient_balance',
+    'amr_tier_upgrade_required',
+  ].includes(failure_detail) || failure_category === 'entitlement_required';
+  const provider = failure_category === 'model_unavailable'
+    || failure_category === 'upstream_unavailable'
+    || (failure_category === 'rate_limit' && !policy);
+  const environment = [
+    'auth_required', 'stale_profile', 'refresh_token_reused', 'missing_api_key',
+    'invalid_api_key', 'cli_not_installed', 'git_bash_missing',
+    'agent_config_invalid', 'cpu_unsupported', 'host_policy_block',
+    'local_storage_failure', 'certificate_failure', 'proxy_configuration',
+    'network_configuration',
+  ].includes(failure_detail);
+  const product = [
+    'agent_protocol_error', 'acp_frame_too_large', 'bundled_binary_missing', 'empty_output', 'fabricated_role_marker',
+    'permission_request_not_found', 'plugin_artifact_missing',
+  ].includes(failure_detail) || failure_category === 'prompt_too_large';
+  const failure_mechanism: TrackingRunFailureMechanism = policy
+    ? 'policy_rejection'
+    : provider
+      ? 'provider_rejection'
+      : failure_detail === 'acp_frame_too_large'
+        ? 'frame_too_large'
+        : failure_detail === 'agent_protocol_error'
+          ? 'protocol_violation'
+        : failure_category === 'empty_output'
+          ? 'empty_completion'
+          : failure_category === 'timeout'
+            ? failure_detail === 'inactivity_timeout'
+              ? 'stream_idle_timeout'
+              : failure_stage === 'post_tool_resume'
+                ? 'post_tool_resume_timeout'
+                : 'acp_response_deadline'
+            : failure_category === 'tool_error'
+              ? 'tool_execution_failure'
+              : failure_category === 'process_exit'
+                ? 'child_exit'
+                : 'unknown';
+  const failure_domain: TrackingRunFailureDomain = policy
+    ? 'policy_admission'
+    : provider
+      ? 'provider_control_plane'
+      : environment
+        ? 'client_environment'
+        : product
+          ? 'client_product'
+          : failure_category === 'timeout' || failure_category === 'process_exit'
+            ? 'cross_boundary'
+            : 'unknown';
+  const evidence_level: TrackingRunEvidenceLevel = failure_detail === 'membership_concurrency_limit'
+    ? 'structured_code'
+    : provider
+      ? 'structured_code'
+      : failure_detail === 'agent_protocol_error' || failure_detail === 'acp_frame_too_large'
+        ? 'protocol_error'
+        : failure_category === 'timeout'
+          ? 'lifecycle_signal'
+            : failure_detail === 'bundled_binary_missing' || environment
+              ? 'stderr_fallback'
+              : ['fatal_rpc_error', 'stream_error', 'exit_nonzero'].includes(failure_detail)
+            ? 'close_reason'
+            : failure_detail === 'unknown'
+              ? 'unknown'
+              : 'legacy_text';
+  const repair_owner: TrackingRunRepairOwner = failure_domain === 'policy_admission'
+    ? 'policy_owner'
+    : failure_domain === 'provider_control_plane'
+      ? 'provider_owner'
+      : failure_domain === 'client_environment'
+        ? 'client_environment'
+        : failure_domain === 'client_product'
+          ? 'open_design'
+          : failure_domain === 'cross_boundary'
+            ? 'shared_boundary'
+            : 'unknown';
   return {
     failure_category,
     failure_detail,
     failure_stage,
+    failure_mechanism,
+    failure_domain,
+    evidence_level,
+    repair_owner,
+    admission_status: policy ? 'rejected_policy' : 'admitted',
+    classifier_version: 'run-failure-v2',
     retryable,
     user_action,
   };
@@ -699,13 +813,11 @@ function classifyRunFailureBase(
     return {
       // Preserve the legacy category/detail for dashboard compatibility.
       // `cancel_origin` is the authoritative SLO eligibility signal.
-      ...classification(
-        'user_cancel',
-        'user_cancelled',
-        inferFailureStageFromEvents(events, 'first_token_wait'),
-        false,
-        'none',
-      ),
+      failure_category: 'user_cancel',
+      failure_detail: 'user_cancelled',
+      failure_stage: inferFailureStageFromEvents(events, 'first_token_wait'),
+      retryable: false,
+      user_action: 'none',
       cancel_origin: cancelOrigin,
       terminal_trigger: cancelOrigin,
     };
@@ -828,6 +940,27 @@ function classifyRunFailureBase(
     );
   }
 
+  if (isBundledBinaryMissingText(text)) {
+    return classification(
+      'process_exit',
+      'bundled_binary_missing',
+      'spawn',
+      false,
+      'none',
+    );
+  }
+
+  const environmentDetail = clientEnvironmentFailureDetail(text);
+  if (environmentDetail) {
+    return classification(
+      'process_exit',
+      environmentDetail,
+      'spawn',
+      false,
+      'none',
+    );
+  }
+
   if (isCliNotInstalledText(text)) {
     return classification(
       'process_exit',
@@ -883,6 +1016,16 @@ function classifyRunFailureBase(
       'child_close',
       retryableHint ?? true,
       retryableHint === false ? 'none' : 'retry',
+    );
+  }
+
+  if (isAcpFrameTooLargeText(text)) {
+    return classification(
+      'process_exit',
+      'acp_frame_too_large',
+      inferFailureStageFromEvents(events, 'child_close'),
+      false,
+      'none',
     );
   }
 
@@ -1205,9 +1348,27 @@ export function classifyRunFailure(
   input: RunFailureClassificationInput,
 ): RunFailureClassification | undefined {
   const failure = classifyRunFailureBase(input);
-  if (!failure || !input.terminalTrigger) return failure;
+  if (!failure) return failure;
+  const terminalTrigger = input.terminalTrigger ?? failure.terminal_trigger;
+  const failureText = collectFailureText(input);
+  const failureMechanism = failure.failure_category === 'timeout'
+    ? /readiness|became ready|ready deadline/i.test(failureText)
+      ? 'startup_readiness_timeout'
+      : terminalTrigger === 'first_output_deadline'
+        ? 'first_output_deadline'
+        : terminalTrigger === 'acp_stage_timeout'
+          ? failure.failure_stage === 'post_tool_resume'
+            ? 'post_tool_resume_timeout'
+            : failure.failure_stage === 'tool_execution' || failure.failure_stage === 'tool_outstanding'
+              ? 'tool_execution_failure'
+              : 'acp_response_deadline'
+          : terminalTrigger === 'inactivity_watchdog'
+            ? 'stream_idle_timeout'
+            : failure.failure_mechanism
+    : failure.failure_mechanism;
   return {
     ...failure,
-    terminal_trigger: input.terminalTrigger,
+    ...(failureMechanism ? { failure_mechanism: failureMechanism } : {}),
+    ...(terminalTrigger ? { terminal_trigger: terminalTrigger } : {}),
   };
 }
