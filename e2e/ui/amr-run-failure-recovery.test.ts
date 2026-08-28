@@ -547,7 +547,7 @@ test('[P1] Settings AMR wallet fallback balance renders from the daemon wallet e
   expect(walletUrls.every((url) => new URL(url).searchParams.get('refresh') == null)).toBe(true);
 });
 
-test('[P1] Coding Plan badges follow the dynamic daemon wallet model list after reload', async ({ page }) => {
+test('[P1] AMR model rows do not expose unlimited-use badges', async ({ page }) => {
   await stubCatalogsEmpty(page);
   const dynamicModel = { id: 'new-coding-plan-model', label: 'New Coding Plan Model' };
   const meteredModel = { id: 'metered-model', label: 'Metered Model' };
@@ -576,7 +576,6 @@ test('[P1] Coding Plan badges follow the dynamic daemon wallet model list after 
     });
   });
 
-  let codingPlanModels = [dynamicModel.id];
   await page.route('**/api/integrations/vela/wallet**', async (route) => {
     await route.fulfill({
       json: {
@@ -584,7 +583,6 @@ test('[P1] Coding Plan badges follow the dynamic daemon wallet model list after 
         profile: 'test',
         user: { id: 'dynamic-model-user', email: 'dynamic-model@example.com', plan: 'plus' },
         balanceUsd: '0.0000',
-        codingPlanModels,
         updatedAt: '2026-08-26T00:00:00.000Z',
         fetchedAt: '2026-08-26T00:00:00.000Z',
         stale: false,
@@ -603,22 +601,11 @@ test('[P1] Coding Plan badges follow the dynamic daemon wallet model list after 
   await gotoEntryHome(page);
 
   await page.getByTestId('inline-model-switcher-chip').click();
-  let popover = page.getByTestId('inline-model-switcher-popover');
-  await expect(popover.getByTestId(`inline-model-switcher-unlimited-badge-${dynamicModel.id}`))
-    .toBeVisible();
-  await expect(popover.getByTestId(`inline-model-switcher-unlimited-badge-${meteredModel.id}`))
+  const popover = page.getByTestId('inline-model-switcher-popover');
+  await expect(popover.getByText(dynamicModel.label)).toBeVisible();
+  await expect(popover.getByText(meteredModel.label)).toBeVisible();
+  await expect(popover.locator('[data-testid^="inline-model-switcher-unlimited-badge-"]'))
     .toHaveCount(0);
-
-  codingPlanModels = [meteredModel.id];
-  await page.reload({ waitUntil: 'domcontentloaded' });
-  await expect(page.getByTestId('home-hero')).toBeVisible({ timeout: T.long });
-  await expect(page.getByTestId('inline-model-switcher-chip')).toBeVisible();
-  await page.getByTestId('inline-model-switcher-chip').click();
-  popover = page.getByTestId('inline-model-switcher-popover');
-  await expect(popover.getByTestId(`inline-model-switcher-unlimited-badge-${dynamicModel.id}`))
-    .toHaveCount(0);
-  await expect(popover.getByTestId(`inline-model-switcher-unlimited-badge-${meteredModel.id}`))
-    .toBeVisible();
 });
 
 test('[P1] Settings AMR upgrade opens the attributed plans URL for the active profile', async ({ page }) => {
