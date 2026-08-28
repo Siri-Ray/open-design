@@ -663,6 +663,7 @@ describe('classifyRunFailure', () => {
         agentId: 'claude',
         events: [
           { event: 'start', data: { attempt: 1 } },
+          errorEvent('TIMEOUT', 'Runtime readiness deadline timed out.', true),
           { event: 'agent', data: { type: 'text_delta', delta: 'Working.' } },
           { event: 'agent', data: { type: 'tool_use', id: 'tool-1', name: 'Read' } },
           errorEvent('UPSTREAM_UNAVAILABLE', '503 upstream unavailable', true),
@@ -675,6 +676,7 @@ describe('classifyRunFailure', () => {
       failure_category: 'timeout',
       failure_detail: 'inactivity_timeout',
       failure_stage: 'first_token_wait',
+      failure_mechanism: 'stream_idle_timeout',
       retryable: true,
       user_action: 'retry',
     });
@@ -1670,6 +1672,57 @@ describe('execution_failed close-reason refinement', () => {
     });
   });
 
+  it('keeps CLI version incompatibility client-owned', () => {
+    expect(classify(null, "error: unknown option '--trust'")).toMatchObject({
+      failure_category: 'model_unavailable',
+      failure_detail: 'cli_version_incompatible',
+      failure_mechanism: 'unknown',
+      failure_domain: 'client_environment',
+      evidence_level: 'stderr_fallback',
+      repair_owner: 'client_environment',
+    });
+  });
+
+  it('keeps an unloaded local model client-owned', () => {
+    expect(
+      classify(
+        'AGENT_EXECUTION_FAILED',
+        "No models loaded. Please use the 'lms load' command.",
+      ),
+    ).toMatchObject({
+      failure_category: 'model_unavailable',
+      failure_detail: 'local_model_not_loaded',
+      failure_mechanism: 'unknown',
+      failure_domain: 'client_environment',
+      evidence_level: 'stderr_fallback',
+      repair_owner: 'client_environment',
+    });
+  });
+
+  it('keeps text-only network errors at the shared transport boundary', () => {
+    expect(
+      classify('AGENT_EXECUTION_FAILED', 'Transport error: network error'),
+    ).toMatchObject({
+      failure_category: 'upstream_unavailable',
+      failure_detail: 'network_error',
+      failure_mechanism: 'transport_failure',
+      failure_domain: 'cross_boundary',
+      evidence_level: 'legacy_text',
+      repair_owner: 'shared_boundary',
+    });
+  });
+
+  it('keeps a structured upstream code provider-owned', () => {
+    expect(classify('AGENT_CONNECTION_DROPPED')).toMatchObject({
+      failure_category: 'upstream_unavailable',
+      failure_detail: 'network_error',
+      failure_mechanism: 'provider_rejection',
+      failure_domain: 'provider_control_plane',
+      evidence_level: 'structured_code',
+      repair_owner: 'provider_owner',
+    });
+  });
+
   it('honors an explicit non-retryable hint on fatal close reasons', () => {
     const result = classify('AGENT_EXECUTION_FAILED', '', [
       errorEvent('AGENT_EXECUTION_FAILED', '', false),
@@ -2418,6 +2471,10 @@ describe('classifyRunFailure — sampled 0.15.1 provider request failures', () =
         failure_category: 'upstream_unavailable',
         failure_detail: 'stream_disconnected',
         failure_stage: 'first_token_wait',
+        failure_mechanism: 'transport_failure',
+        failure_domain: 'cross_boundary',
+        evidence_level: 'legacy_text',
+        repair_owner: 'shared_boundary',
         retryable: true,
         user_action: 'retry',
       },

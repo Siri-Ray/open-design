@@ -707,6 +707,7 @@ function classification(
   failure_stage: TrackingRunFailureStage,
   retryable: boolean,
   user_action: TrackingRunFailureUserAction,
+  options: { structuredProviderEvidence?: boolean } = {},
 ): RunFailureClassification {
   const policy = [
     'hard_quota',
@@ -716,8 +717,16 @@ function classification(
     'amr_insufficient_balance',
     'amr_tier_upgrade_required',
   ].includes(failure_detail) || failure_category === 'entitlement_required';
-  const provider = failure_category === 'model_unavailable'
-    || failure_category === 'upstream_unavailable'
+  const localModel = [
+    'cli_version_incompatible',
+    'local_model_not_loaded',
+  ].includes(failure_detail);
+  const transport = !options.structuredProviderEvidence && [
+    'stream_disconnected',
+    'network_error',
+  ].includes(failure_detail);
+  const provider = (failure_category === 'model_unavailable' && !localModel)
+    || (failure_category === 'upstream_unavailable' && !transport)
     || (failure_category === 'rate_limit' && !policy);
   const environment = [
     'auth_required', 'stale_profile', 'refresh_token_reused', 'missing_api_key',
@@ -725,7 +734,7 @@ function classification(
     'agent_config_invalid', 'cpu_unsupported', 'host_policy_block',
     'local_storage_failure', 'certificate_failure', 'proxy_configuration',
     'network_configuration',
-  ].includes(failure_detail);
+  ].includes(failure_detail) || localModel;
   const product = [
     'agent_protocol_error', 'acp_frame_too_large', 'bundled_binary_missing', 'empty_output', 'fabricated_role_marker',
     'permission_request_not_found', 'plugin_artifact_missing',
@@ -734,6 +743,8 @@ function classification(
     ? 'policy_rejection'
     : provider
       ? 'provider_rejection'
+      : transport
+        ? 'transport_failure'
       : failure_detail === 'acp_frame_too_large'
         ? 'frame_too_large'
         : failure_detail === 'agent_protocol_error'
@@ -746,8 +757,10 @@ function classification(
               : failure_stage === 'post_tool_resume'
                 ? 'post_tool_resume_timeout'
                 : 'acp_response_deadline'
-            : failure_category === 'tool_error'
+          : failure_category === 'tool_error'
               ? 'tool_execution_failure'
+              : failure_detail === 'interrupted'
+                ? 'unknown'
               : failure_category === 'process_exit'
                 ? 'child_exit'
                 : 'unknown';
@@ -755,6 +768,8 @@ function classification(
     ? 'policy_admission'
     : provider
       ? 'provider_control_plane'
+      : transport
+        ? 'cross_boundary'
       : environment
         ? 'client_environment'
         : product
@@ -764,6 +779,10 @@ function classification(
             : 'unknown';
   const evidence_level: TrackingRunEvidenceLevel = failure_detail === 'membership_concurrency_limit'
     ? 'structured_code'
+    : failure_detail === 'interrupted'
+      ? 'lifecycle_signal'
+    : transport
+      ? 'legacy_text'
     : provider
       ? 'structured_code'
       : failure_detail === 'agent_protocol_error' || failure_detail === 'acp_frame_too_large'
@@ -834,6 +853,16 @@ function classifyRunFailureBase(
     input.agentId,
     text,
   );
+
+  if (errorCode === 'DAEMON_RESTARTED') {
+    return classification(
+      'process_exit',
+      'interrupted',
+      'finalize',
+      true,
+      'retry',
+    );
+  }
 
   if (
     errorCode === 'AMR_INSUFFICIENT_BALANCE' ||
@@ -1091,6 +1120,10 @@ function classifyRunFailureBase(
     isUpstreamDetailText(text) ||
     byokOpenCodeProviderNotFound
   ) {
+    const structuredProviderEvidence =
+      errorCode === 'UPSTREAM_UNAVAILABLE' ||
+      errorCode === 'AGENT_CONNECTION_DROPPED' ||
+      serviceFailure === 'UPSTREAM_UNAVAILABLE';
     const upstreamClientError =
       byokOpenCodeProviderNotFound || isUpstreamClientErrorText(text);
     // A provider/SDK 4xx or request-shape rejection will deterministically fail
@@ -1103,6 +1136,7 @@ function classifyRunFailureBase(
       inferFailureStageFromEvents(events, 'first_token_wait'),
       retryable,
       retryable ? 'retry' : 'none',
+      { structuredProviderEvidence },
     );
   }
 
@@ -1350,7 +1384,10 @@ export function classifyRunFailure(
   const failure = classifyRunFailureBase(input);
   if (!failure) return failure;
   const terminalTrigger = input.terminalTrigger ?? failure.terminal_trigger;
-  const failureText = collectFailureText(input);
+  const failureText = collectFailureText({
+    ...input,
+    events: terminalAttemptEvents(input.events),
+  });
   const failureMechanism = failure.failure_category === 'timeout'
     ? /readiness|became ready|ready deadline/i.test(failureText)
       ? 'startup_readiness_timeout'

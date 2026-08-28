@@ -420,24 +420,15 @@ export async function reconcileDurableRunTerminals(
           : deriveRunErrorCode(state)
         : undefined;
       const failure = failed
-        ? recoveryReason === 'daemon_restart'
-          ? {
-              failure_category: 'process_exit' as const,
-              failure_detail: 'interrupted' as const,
-              failure_stage: 'finalize' as const,
-              retryable: true,
-              user_action: 'retry' as const,
-              terminal_trigger: 'daemon_restart' as const,
-            }
-          : classifyRunFailure({
-              result: runResult,
-              status: state,
-              ...(errorCode ? { errorCode } : {}),
-              agentId: state.agentId,
-              cancelOrigin: state.cancelOrigin ?? null,
-              terminalTrigger: state.terminalTrigger ?? null,
-              events,
-            })
+        ? classifyRunFailure({
+            result: runResult,
+            status: state,
+            ...(errorCode ? { errorCode } : {}),
+            agentId: state.agentId,
+            cancelOrigin: state.cancelOrigin ?? null,
+            terminalTrigger: state.terminalTrigger ?? null,
+            events,
+          })
         : undefined;
       const properties: Record<string, unknown> = {
         ...state.analyticsRecovery.properties,
