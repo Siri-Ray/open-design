@@ -134,7 +134,16 @@ const VISUAL_PROJECTS = [
   },
 ] as const;
 
-type VisualProject = (typeof VISUAL_PROJECTS)[number];
+export type VisualProject = {
+  id: string;
+  name: string;
+  skillId: string | null;
+  designSystemId: string | null;
+  createdAt: number;
+  updatedAt: number;
+  metadata: { kind: string };
+  status: { label: string; tone: string };
+};
 
 /** The single conversation every workspace capture opens into. */
 const VISUAL_CONVERSATION = {
