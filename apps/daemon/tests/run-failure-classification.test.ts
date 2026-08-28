@@ -36,7 +36,11 @@ vi.mock('../src/runtimes/auth.js', () => ({
     if (value.includes('http 429') || value.includes('too many requests') || value.includes('session limit')) {
       return 'RATE_LIMITED' as const;
     }
-    if (value.includes('503 upstream unavailable') || value.includes('upstream unavailable')) {
+    if (
+      value.includes('503 upstream unavailable') ||
+      value.includes('upstream unavailable') ||
+      value.includes('503 service unavailable')
+    ) {
       return 'UPSTREAM_UNAVAILABLE' as const;
     }
     return null;
@@ -625,6 +629,30 @@ describe('classifyRunFailure', () => {
     });
   });
 
+  it('does not treat a positive readiness signal as a readiness timeout', () => {
+    const timeoutMessage = 'Agent stalled after the runtime became ready without emitting any new output.';
+
+    expect(
+      classifyRunFailure({
+        result: 'failed',
+        status: {
+          status: 'failed',
+          error: timeoutMessage,
+          signal: 'SIGTERM',
+          exitCode: null,
+          errorCode: 'AGENT_SIGNAL_SIGTERM',
+        },
+        errorCode: 'AGENT_SIGNAL_SIGTERM',
+        terminalTrigger: 'inactivity_watchdog',
+        events: [errorEvent('AGENT_SIGNAL_SIGTERM', timeoutMessage, true)],
+      }),
+    ).toMatchObject({
+      failure_category: 'timeout',
+      failure_mechanism: 'stream_idle_timeout',
+      terminal_trigger: 'inactivity_watchdog',
+    });
+  });
+
   it('keeps an explicit watchdog trigger when a provider error supplies the failure bucket', () => {
     expect(
       classifyRunFailure({
@@ -643,6 +671,40 @@ describe('classifyRunFailure', () => {
     ).toMatchObject({
       failure_category: 'rate_limit',
       terminal_trigger: 'inactivity_watchdog',
+    });
+  });
+
+  it('keeps explicit service codes ahead of client-environment text heuristics', () => {
+    expect(
+      classify('UPSTREAM_UNAVAILABLE', 'ECONNREFUSED provider endpoint'),
+    ).toMatchObject({
+      failure_category: 'upstream_unavailable',
+      failure_mechanism: 'provider_rejection',
+      failure_domain: 'provider_control_plane',
+      evidence_level: 'structured_code',
+      repair_owner: 'provider_owner',
+    });
+
+    expect(
+      classify('RATE_LIMITED', 'Request blocked by account policy'),
+    ).toMatchObject({
+      failure_category: 'rate_limit',
+      failure_mechanism: 'provider_rejection',
+      failure_domain: 'provider_control_plane',
+      evidence_level: 'structured_code',
+      repair_owner: 'provider_owner',
+    });
+  });
+
+  it('keeps text-only provider failures at legacy-text evidence', () => {
+    expect(
+      classify('AGENT_EXECUTION_FAILED', 'HTTP 503 service unavailable'),
+    ).toMatchObject({
+      failure_category: 'upstream_unavailable',
+      failure_mechanism: 'provider_rejection',
+      failure_domain: 'provider_control_plane',
+      evidence_level: 'legacy_text',
+      repair_owner: 'provider_owner',
     });
   });
 
@@ -2393,6 +2455,10 @@ describe('classifyRunFailure — sampled 0.15.1 provider request failures', () =
         failure_category: 'upstream_unavailable',
         failure_detail: 'attachment_media_type_unsupported',
         failure_stage: 'prompt_send',
+        failure_mechanism: 'unknown',
+        failure_domain: 'client_product',
+        evidence_level: 'legacy_text',
+        repair_owner: 'open_design',
         retryable: false,
         user_action: 'none',
       },
@@ -2406,6 +2472,10 @@ describe('classifyRunFailure — sampled 0.15.1 provider request failures', () =
         failure_category: 'upstream_unavailable',
         failure_detail: 'tool_schema_invalid',
         failure_stage: 'prompt_send',
+        failure_mechanism: 'unknown',
+        failure_domain: 'client_product',
+        evidence_level: 'legacy_text',
+        repair_owner: 'open_design',
         retryable: false,
         user_action: 'none',
       },
@@ -2419,6 +2489,10 @@ describe('classifyRunFailure — sampled 0.15.1 provider request failures', () =
         failure_category: 'upstream_unavailable',
         failure_detail: 'prompt_tokenization_failed',
         failure_stage: 'prompt_send',
+        failure_mechanism: 'unknown',
+        failure_domain: 'client_product',
+        evidence_level: 'legacy_text',
+        repair_owner: 'open_design',
         retryable: false,
         user_action: 'none',
       },
@@ -2458,6 +2532,10 @@ describe('classifyRunFailure — sampled 0.15.1 provider request failures', () =
         failure_category: 'upstream_unavailable',
         failure_detail: 'provider_resource_not_found',
         failure_stage: 'prompt_send',
+        failure_mechanism: 'unknown',
+        failure_domain: 'client_product',
+        evidence_level: 'legacy_text',
+        repair_owner: 'open_design',
         retryable: false,
         user_action: 'none',
       },

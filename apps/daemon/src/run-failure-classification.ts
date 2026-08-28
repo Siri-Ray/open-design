@@ -721,12 +721,18 @@ function classification(
     'cli_version_incompatible',
     'local_model_not_loaded',
   ].includes(failure_detail);
+  const clientRequest = [
+    'attachment_media_type_unsupported',
+    'tool_schema_invalid',
+    'prompt_tokenization_failed',
+    'provider_resource_not_found',
+  ].includes(failure_detail);
   const transport = !options.structuredProviderEvidence && [
     'stream_disconnected',
     'network_error',
   ].includes(failure_detail);
   const provider = (failure_category === 'model_unavailable' && !localModel)
-    || (failure_category === 'upstream_unavailable' && !transport)
+    || (failure_category === 'upstream_unavailable' && !transport && !clientRequest)
     || (failure_category === 'rate_limit' && !policy);
   const environment = [
     'auth_required', 'stale_profile', 'refresh_token_reused', 'missing_api_key',
@@ -738,7 +744,7 @@ function classification(
   const product = [
     'agent_protocol_error', 'acp_frame_too_large', 'bundled_binary_missing', 'empty_output', 'fabricated_role_marker',
     'permission_request_not_found', 'plugin_artifact_missing',
-  ].includes(failure_detail) || failure_category === 'prompt_too_large';
+  ].includes(failure_detail) || clientRequest || failure_category === 'prompt_too_large';
   const failure_mechanism: TrackingRunFailureMechanism = policy
     ? 'policy_rejection'
     : provider
@@ -784,7 +790,7 @@ function classification(
     : transport
       ? 'legacy_text'
     : provider
-      ? 'structured_code'
+      ? options.structuredProviderEvidence ? 'structured_code' : 'legacy_text'
       : failure_detail === 'agent_protocol_error' || failure_detail === 'acp_frame_too_large'
         ? 'protocol_error'
         : failure_category === 'timeout'
@@ -929,6 +935,7 @@ function classifyRunFailureBase(
         : 'model_select',
       false,
       'switch_model',
+      { structuredProviderEvidence: errorCode === 'AMR_MODEL_UNAVAILABLE' },
     );
   }
 
@@ -979,8 +986,14 @@ function classifyRunFailureBase(
     );
   }
 
+  const serviceFailure = classifyAgentServiceFailure(text);
   const environmentDetail = clientEnvironmentFailureDetail(text);
-  if (environmentDetail) {
+  const hasStructuredServiceCode = [
+    'RATE_LIMITED',
+    'UPSTREAM_UNAVAILABLE',
+    'AGENT_CONNECTION_DROPPED',
+  ].includes(errorCode ?? '');
+  if (environmentDetail && !hasStructuredServiceCode) {
     return classification(
       'process_exit',
       environmentDetail,
@@ -1058,7 +1071,6 @@ function classifyRunFailureBase(
     );
   }
 
-  const serviceFailure = classifyAgentServiceFailure(text);
   if (serviceFailure === 'AGENT_AUTH_REQUIRED' || isAuthDetailText(text)) {
     return classification(
       'auth',
@@ -1110,6 +1122,7 @@ function classifyRunFailureBase(
       'session_init',
       retryable,
       retryable ? 'retry' : workspaceCredits ? 'recharge' : 'none',
+      { structuredProviderEvidence: errorCode === 'RATE_LIMITED' },
     );
   }
 
@@ -1122,8 +1135,7 @@ function classifyRunFailureBase(
   ) {
     const structuredProviderEvidence =
       errorCode === 'UPSTREAM_UNAVAILABLE' ||
-      errorCode === 'AGENT_CONNECTION_DROPPED' ||
-      serviceFailure === 'UPSTREAM_UNAVAILABLE';
+      errorCode === 'AGENT_CONNECTION_DROPPED';
     const upstreamClientError =
       byokOpenCodeProviderNotFound || isUpstreamClientErrorText(text);
     // A provider/SDK 4xx or request-shape rejection will deterministically fail
@@ -1389,7 +1401,7 @@ export function classifyRunFailure(
     events: terminalAttemptEvents(input.events),
   });
   const failureMechanism = failure.failure_category === 'timeout'
-    ? /readiness|became ready|ready deadline/i.test(failureText)
+    ? /(?:readiness|ready) deadline[^\n]*(?:timed out|timeout|expired|failed)|(?:readiness failed|failed to become ready|did not become ready|never became ready)/i.test(failureText)
       ? 'startup_readiness_timeout'
       : terminalTrigger === 'first_output_deadline'
         ? 'first_output_deadline'
