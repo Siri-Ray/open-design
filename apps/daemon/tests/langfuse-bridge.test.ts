@@ -1000,6 +1000,72 @@ describe('langfuse-bridge.reportRunCompletedFromDaemon', () => {
     expect(trace.metadata.registration_only).not.toBe(true);
   });
 
+  it('reports a consented relay completion without anonymous registration or object upload', async () => {
+    await writeAppCfg({
+      installationId: 'install-uuid-1',
+      telemetry: { metrics: true, content: true, artifactManifest: true },
+    });
+    const projectDir = path.join(dataDir, 'projects', 'proj-1');
+    await mkdir(projectDir, { recursive: true });
+    await writeFile(path.join(projectDir, 'index.html'), '<!doctype html><h1>artifact body</h1>');
+    const fetchSpy = vi.fn().mockResolvedValue(new Response('{}', { status: 207 }));
+
+    const velaTelemetryEnabled = process.env.OPEN_DESIGN_VELA_TELEMETRY;
+    const velaControlKey = process.env.VELA_CONTROL_KEY;
+    const amrHome = process.env.AMR_HOME;
+    process.env.OPEN_DESIGN_VELA_TELEMETRY = 'on';
+    delete process.env.VELA_CONTROL_KEY;
+    process.env.AMR_HOME = path.join(dataDir, 'signed-out-relay-amr-home');
+    process.env.OPEN_DESIGN_TELEMETRY_RELAY_URL =
+      'https://telemetry.open-design.ai/api/langfuse';
+    process.env.OPEN_DESIGN_OBJECT_RELAY_URL =
+      'https://telemetry.open-design.ai/api/objects/batch';
+    process.env.LANGFUSE_PUBLIC_KEY = 'pk';
+    process.env.LANGFUSE_SECRET_KEY = 'sk';
+    try {
+      await reportRunCompletedFromDaemon({
+        db: makeDbWithListMessages({
+          'conv-1': [
+            { id: 'user-1', role: 'user', content: 'Build it through relay.' },
+            {
+              id: 'msg-1',
+              role: 'assistant',
+              content: 'relay done',
+              producedFiles: [{ name: 'index.html', kind: 'html', size: 35 }],
+            },
+          ],
+        }),
+        dataDir,
+        run: makeRun({ userPrompt: 'Build it through relay.' }) as any,
+        fetchImpl: fetchSpy as any,
+      });
+    } finally {
+      if (velaTelemetryEnabled === undefined) delete process.env.OPEN_DESIGN_VELA_TELEMETRY;
+      else process.env.OPEN_DESIGN_VELA_TELEMETRY = velaTelemetryEnabled;
+      if (velaControlKey === undefined) delete process.env.VELA_CONTROL_KEY;
+      else process.env.VELA_CONTROL_KEY = velaControlKey;
+      if (amrHome === undefined) delete process.env.AMR_HOME;
+      else process.env.AMR_HOME = amrHome;
+      delete process.env.OPEN_DESIGN_TELEMETRY_RELAY_URL;
+      delete process.env.OPEN_DESIGN_OBJECT_RELAY_URL;
+      delete process.env.LANGFUSE_PUBLIC_KEY;
+      delete process.env.LANGFUSE_SECRET_KEY;
+    }
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(fetchSpy.mock.calls[0]![0]).toBe(
+      'https://telemetry.open-design.ai/api/langfuse',
+    );
+    expect(fetchSpy.mock.calls.some(([url]) => String(url).includes('/api/objects/')))
+      .toBe(false);
+    const batch = JSON.parse(fetchSpy.mock.calls[0]![1]!.body as string).batch as any[];
+    expect(batch.filter((event) => event.type === 'trace-create')).toHaveLength(1);
+    const trace = bodyOf(batch, 'trace-create');
+    expect(trace.input).toBe('Build it through relay.');
+    expect(trace.output).toBe('relay done');
+    expect(trace.metadata).not.toHaveProperty('registration_only');
+  });
+
   it('registers object authority through Vela without an anonymous trace shell', async () => {
     await writeAppCfg({
       installationId: 'install-uuid-1',
