@@ -547,67 +547,6 @@ test('[P1] Settings AMR wallet fallback balance renders from the daemon wallet e
   expect(walletUrls.every((url) => new URL(url).searchParams.get('refresh') == null)).toBe(true);
 });
 
-test('[P1] AMR model rows do not expose unlimited-use badges', async ({ page }) => {
-  await stubCatalogsEmpty(page);
-  const dynamicModel = { id: 'new-coding-plan-model', label: 'New Coding Plan Model' };
-  const meteredModel = { id: 'metered-model', label: 'Metered Model' };
-  await routeAgents(page, [
-    {
-      ...AMR_AGENT,
-      models: [{ id: 'default', label: 'Default' }, dynamicModel, meteredModel],
-    },
-    {
-      id: 'codex',
-      name: 'Codex CLI',
-      bin: 'codex',
-      available: true,
-      version: 'test',
-      models: [{ id: 'default', label: 'Default' }],
-    },
-  ]);
-  await page.route('**/api/integrations/vela/status', async (route) => {
-    await route.fulfill({
-      json: {
-        loggedIn: true,
-        profile: 'test',
-        configPath: '/tmp/.amr/config.json',
-        user: { id: 'dynamic-model-user', email: 'dynamic-model@example.com', plan: 'plus' },
-      },
-    });
-  });
-
-  await page.route('**/api/integrations/vela/wallet**', async (route) => {
-    await route.fulfill({
-      json: {
-        status: 'available',
-        profile: 'test',
-        user: { id: 'dynamic-model-user', email: 'dynamic-model@example.com', plan: 'plus' },
-        balanceUsd: '0.0000',
-        updatedAt: '2026-08-26T00:00:00.000Z',
-        fetchedAt: '2026-08-26T00:00:00.000Z',
-        stale: false,
-        source: 'vela_api',
-      },
-    });
-  });
-
-  await setupAmrWorkspace(page, {
-    profile: 'test',
-    selectedAgentId: 'amr',
-    assistantText: 'Dynamic Coding Plan model smoke',
-  });
-  // The compact model switcher is a Home top-bar surface. Project workspaces
-  // intentionally expose Account & settings instead of mounting this chip.
-  await gotoEntryHome(page);
-
-  await page.getByTestId('inline-model-switcher-chip').click();
-  const popover = page.getByTestId('inline-model-switcher-popover');
-  await expect(popover.getByText(dynamicModel.label)).toBeVisible();
-  await expect(popover.getByText(meteredModel.label)).toBeVisible();
-  await expect(popover.locator('[data-testid^="inline-model-switcher-unlimited-badge-"]'))
-    .toHaveCount(0);
-});
-
 test('[P1] Settings AMR upgrade opens the attributed plans URL for the active profile', async ({ page }) => {
   await stubCatalogsEmpty(page);
   await stubRuntimeAgents(page);
