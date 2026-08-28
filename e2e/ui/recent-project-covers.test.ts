@@ -16,7 +16,7 @@ const PROJECT: VisualProject = {
   createdAt: 1_700_000_000_000,
   updatedAt: 1_700_000_050_000,
   metadata: { kind: 'deck' },
-  status: { label: 'Ready', tone: 'success' },
+  status: { value: 'succeeded' },
 };
 
 const DECK_HTML = `<!doctype html>
