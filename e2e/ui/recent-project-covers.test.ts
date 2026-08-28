@@ -5,6 +5,7 @@ import {
   type VisualProject,
   waitForVisualProjects,
 } from '@/playwright/visual';
+import { fixedStageDeckFixtureHtml } from '@/playwright/resources';
 import { T } from '@/timeouts';
 
 const PROJECT_ID = 'visual-fixed-stage-deck';
@@ -19,43 +20,9 @@ const PROJECT: VisualProject = {
   status: { value: 'succeeded' },
 };
 
-const DECK_HTML = `<!doctype html>
-<html>
-  <head>
-    <style>
-      html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
-      .deck-shell {
-        position: fixed;
-        inset: 0;
-        overflow: hidden;
-        transform: translateX(1400px);
-      }
-      .deck-stage {
-        position: relative;
-        width: 1920px;
-        height: 1080px;
-        transform: translate(24px, 16px) scale(.6);
-        transform-origin: top left;
-      }
-      .slide { position: absolute; inset: 0; display: none; }
-      .slide.active { display: grid; place-items: center; background: rgb(21, 73, 117); }
-      .reveal { opacity: 0; transform: translateY(24px); }
-    </style>
-  </head>
-  <body>
-    <div class="deck-shell">
-      <div class="deck-stage">
-        <section class="slide s-title active">
-          <h1 class="reveal">A visible first slide</h1>
-        </section>
-      </div>
-    </div>
-    <script>document.querySelector('.deck-shell').style.transform = 'none'</script>
-  </body>
-</html>`;
-
 test('[P1] renders a nested fixed-stage deck cover inside Recent projects', async ({ page }) => {
   test.setTimeout(T.xlong);
+  const deckHtml = fixedStageDeckFixtureHtml();
   await configureVisualPage(page, { projects: [PROJECT] });
   await page.route(`**/api/projects/${PROJECT_ID}/files`, async (route) => {
     await route.fulfill({
@@ -64,7 +31,7 @@ test('[P1] renders a nested fixed-stage deck cover inside Recent projects', asyn
           name: 'index.html',
           path: 'index.html',
           type: 'file',
-          size: DECK_HTML.length,
+          size: deckHtml.length,
           mtime: PROJECT.updatedAt,
           kind: 'html',
           mime: 'text/html; charset=utf-8',
@@ -86,7 +53,7 @@ test('[P1] renders a nested fixed-stage deck cover inside Recent projects', asyn
     });
   });
   await page.route(`**/api/projects/${PROJECT_ID}/raw/index.html**`, async (route) => {
-    await route.fulfill({ contentType: 'text/html; charset=utf-8', body: DECK_HTML });
+    await route.fulfill({ contentType: 'text/html; charset=utf-8', body: deckHtml });
   });
 
   await gotoVisualHome(page);
