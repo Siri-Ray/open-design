@@ -261,7 +261,7 @@ function isBundledBinaryMissingText(text: string): boolean {
 }
 
 function clientEnvironmentFailureDetail(text: string): TrackingRunFailureDetail | null {
-  if (/\b(Windows Application Control|AppLocker|blocked by .* policy)\b/i.test(text)) return 'host_policy_block';
+  if (/\b(Windows Application Control|AppLocker)\b/i.test(text)) return 'host_policy_block';
   if (/\b(SQLite|WAL).*(?:I\/O|readonly|locked|corrupt|failed)\b/i.test(text)) return 'local_storage_failure';
   if (/\b(certificate|CERT_|self[- ]signed|unable to verify)\b/i.test(text)) return 'certificate_failure';
   if (/\b(unsupported proxy protocol|proxy configuration)\b/i.test(text)) return 'proxy_configuration';
@@ -707,7 +707,10 @@ function classification(
   failure_stage: TrackingRunFailureStage,
   retryable: boolean,
   user_action: TrackingRunFailureUserAction,
-  options: { structuredProviderEvidence?: boolean } = {},
+  options: {
+    structuredProviderEvidence?: boolean;
+    evidenceLevel?: TrackingRunEvidenceLevel;
+  } = {},
 ): RunFailureClassification {
   const policy = [
     'hard_quota',
@@ -783,7 +786,7 @@ function classification(
           : failure_category === 'timeout' || failure_category === 'process_exit'
             ? 'cross_boundary'
             : 'unknown';
-  const evidence_level: TrackingRunEvidenceLevel = failure_detail === 'membership_concurrency_limit'
+  const inferredEvidenceLevel: TrackingRunEvidenceLevel = failure_detail === 'membership_concurrency_limit'
     ? 'structured_code'
     : failure_detail === 'interrupted'
       ? 'lifecycle_signal'
@@ -802,6 +805,7 @@ function classification(
             : failure_detail === 'unknown'
               ? 'unknown'
               : 'legacy_text';
+  const evidence_level = options.evidenceLevel ?? inferredEvidenceLevel;
   const repair_owner: TrackingRunRepairOwner = failure_domain === 'policy_admission'
     ? 'policy_owner'
     : failure_domain === 'provider_control_plane'
@@ -880,6 +884,9 @@ function classifyRunFailureBase(
       'session_init',
       false,
       'recharge',
+      errorCode === 'AMR_INSUFFICIENT_BALANCE'
+        ? { evidenceLevel: 'structured_code' }
+        : {},
     );
   }
 
@@ -893,6 +900,9 @@ function classifyRunFailureBase(
       'session_init',
       false,
       'upgrade',
+      errorCode === 'AMR_TIER_UPGRADE_REQUIRED'
+        ? { evidenceLevel: 'structured_code' }
+        : {},
     );
   }
 
@@ -908,6 +918,13 @@ function classifyRunFailureBase(
       'session_init',
       false,
       'login',
+      [
+        'AMR_AUTH_REQUIRED',
+        'AGENT_AUTH_REQUIRED',
+        'UNAUTHORIZED',
+      ].includes(errorCode ?? '')
+        ? { evidenceLevel: 'structured_code' }
+        : {},
     );
   }
 
@@ -919,6 +936,9 @@ function classifyRunFailureBase(
       'prompt_send',
       false,
       'reduce_context',
+      errorCode === 'AGENT_PROMPT_TOO_LARGE'
+        ? { evidenceLevel: 'structured_code' }
+        : {},
     );
   }
 
@@ -1043,6 +1063,16 @@ function classifyRunFailureBase(
     );
   }
 
+  if (isAcpFrameTooLargeText(text)) {
+    return classification(
+      'process_exit',
+      'acp_frame_too_large',
+      inferFailureStageFromEvents(events, 'child_close'),
+      false,
+      'none',
+    );
+  }
+
   // A protocol failure from AFTER the handshake: a session existed, so the run
   // may simply have hit a bad moment and the old transient treatment stands.
   // Handshake-numbered frames (ids 1 and 2) are deliberately NOT claimed here
@@ -1058,16 +1088,6 @@ function classifyRunFailureBase(
       'child_close',
       retryableHint ?? true,
       retryableHint === false ? 'none' : 'retry',
-    );
-  }
-
-  if (isAcpFrameTooLargeText(text)) {
-    return classification(
-      'process_exit',
-      'acp_frame_too_large',
-      inferFailureStageFromEvents(events, 'child_close'),
-      false,
-      'none',
     );
   }
 

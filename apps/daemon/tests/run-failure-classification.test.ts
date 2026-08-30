@@ -228,6 +228,7 @@ describe('classifyRunFailure', () => {
       failure_category: 'auth',
       failure_detail: 'auth_required',
       failure_stage: 'session_init',
+      evidence_level: 'structured_code',
       retryable: false,
       user_action: 'login',
     });
@@ -555,6 +556,14 @@ describe('classifyRunFailure', () => {
     });
   });
 
+  it('records a direct AMR insufficient-balance code as structured evidence', () => {
+    expect(classify('AMR_INSUFFICIENT_BALANCE')).toMatchObject({
+      failure_category: 'insufficient_balance',
+      failure_detail: 'amr_insufficient_balance',
+      evidence_level: 'structured_code',
+    });
+  });
+
   it('maps prompt-size failures to reduce-context guidance', () => {
     expect(classify('AGENT_PROMPT_TOO_LARGE', 'context window exceeded')).toMatchObject({
       failure_category: 'prompt_too_large',
@@ -562,6 +571,14 @@ describe('classifyRunFailure', () => {
       failure_stage: 'prompt_send',
       retryable: false,
       user_action: 'reduce_context',
+    });
+  });
+
+  it('records a direct prompt-too-large code as structured evidence', () => {
+    expect(classify('AGENT_PROMPT_TOO_LARGE')).toMatchObject({
+      failure_category: 'prompt_too_large',
+      failure_detail: 'prompt_too_large',
+      evidence_level: 'structured_code',
     });
   });
 
@@ -1711,6 +1728,19 @@ describe('execution_failed close-reason refinement', () => {
     });
   });
 
+  it('keeps a wrapped oversized ACP input frame non-retryable without a retry hint', () => {
+    const message =
+      'json-rpc id 4: failed to parse request: ACP input line exceeds maximum size (1048576 bytes)';
+    expect(classifyForAgent('amr', 'AGENT_EXECUTION_FAILED', message, [])).toMatchObject({
+      failure_category: 'process_exit',
+      failure_detail: 'acp_frame_too_large',
+      failure_mechanism: 'frame_too_large',
+      evidence_level: 'protocol_error',
+      retryable: false,
+      user_action: 'none',
+    });
+  });
+
   it('classifies a missing bundled OpenCode binary as a local product packaging failure', () => {
     const message = 'bundled OpenCode binary is missing';
     expect(classifyForAgent('amr', 'AGENT_EXECUTION_FAILED', message)).toMatchObject({
@@ -1731,6 +1761,15 @@ describe('execution_failed close-reason refinement', () => {
       failure_mechanism: 'child_exit',
       evidence_level: 'stderr_fallback',
       repair_owner: 'client_environment',
+    });
+  });
+
+  it('does not treat a text-only account policy rejection as a host policy block', () => {
+    expect(classify('AGENT_EXECUTION_FAILED', 'Request blocked by account policy')).toMatchObject({
+      failure_category: 'process_exit',
+      failure_detail: 'execution_failed',
+      failure_domain: 'cross_boundary',
+      repair_owner: 'shared_boundary',
     });
   });
 
@@ -1845,6 +1884,7 @@ describe('classifyRunFailure — AMR/vela reclassification out of execution_fail
       failure_category: 'entitlement_required',
       failure_detail: 'amr_tier_upgrade_required',
       failure_stage: 'session_init',
+      evidence_level: 'structured_code',
       retryable: false,
       user_action: 'upgrade',
     });
