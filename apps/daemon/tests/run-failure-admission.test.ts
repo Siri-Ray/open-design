@@ -131,6 +131,16 @@ describe('admission and attribution v3', () => {
       failure_domain: 'client_product', repair_owner: 'open_design', evidence_level: 'structured_error',
     });
   });
+  it('uses the confirmed ACP model after the initial session model', () => {
+    expect(classify(routeError, [start,
+      { event: 'agent', data: { type: 'status', label: 'model', model: 'session-default' } },
+      { event: 'agent', data: { type: 'status', label: 'model', model: 'media-example' } },
+      prompt, capabilityError,
+    ], 'AMR_MODEL_UNAVAILABLE')).toMatchObject({
+      failure_mechanism: 'invalid_model_selection', failure_domain: 'client_product',
+      repair_owner: 'open_design', evidence_level: 'structured_error',
+    });
+  });
   it('requires current selection, matching operation and complete capability evidence', () => {
     for (const details of [
       { model: 'other-model', requestKind: 'chat_completions', supportedRequestKinds: ['image_generations'] },

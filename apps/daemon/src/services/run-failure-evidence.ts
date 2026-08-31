@@ -97,15 +97,22 @@ function verifiedModelSelectionMismatch(
   if (input.agentId !== 'amr') return false;
   const selectedModel = record(events.find((event) => event.event === 'start')?.data).model;
   if (typeof selectedModel !== 'string' || !selectedModel.trim() || selectedModel === 'default') return false;
-  if (events.some((event) => {
-    const data = record(event.data);
-    return event.event === 'agent' && data.type === 'status' && data.label === 'model'
-      && data.model !== selectedModel;
-  })) return false;
   let errorEvent: RunEventForFailureClassification | undefined;
+  let errorEventIndex = -1;
   for (let index = events.length - 1; index >= 0; index -= 1) {
     if (events[index]?.event === 'error') {
       errorEvent = events[index];
+      errorEventIndex = index;
+      break;
+    }
+  }
+  // session/new reports its current model before ACP applies the requested
+  // selection. The last model status before the verdict is the confirmed one.
+  for (let index = errorEventIndex - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    const data = record(event?.data);
+    if (event?.event === 'agent' && data.type === 'status' && data.label === 'model') {
+      if (data.model !== selectedModel) return false;
       break;
     }
   }
