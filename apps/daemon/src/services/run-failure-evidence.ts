@@ -24,6 +24,16 @@ function admissionPhase(
   input: RunFailureClassificationInput,
   events: RunEventForFailureClassification[],
 ): TrackingRunAdmissionPhase {
+  if (input.admissionEvidence) {
+    if (input.admissionEvidence.executionEvidenceSeen) return 'during_execution';
+    if (input.admissionEvidence.attemptStarted
+      && input.admissionEvidence.acp
+      && !input.admissionEvidence.promptSent
+      && isAcpHandshakeRpcErrorText(input.status.error)) {
+      return 'before_execution';
+    }
+    return 'unknown';
+  }
   const start = record(events.find((event) => event.event === 'start')?.data);
   const acp = input.agentId === 'amr' || start.streamFormat === 'acp-json-rpc';
   // ACP session/load can replay old messages before session/prompt. The status
@@ -31,9 +41,19 @@ function admissionPhase(
   let promptSent = !acp;
   for (const event of events) {
     if (event.event === 'error' || event.event === 'end') break;
-    if (event.event !== 'agent') continue;
     const data = record(event.data);
     if (data.hostSynthesized === true) continue;
+    if (event.event === 'stdout') {
+      if (promptSent && typeof data.chunk === 'string' && data.chunk.length > 0) {
+        return 'during_execution';
+      }
+      continue;
+    }
+    if (event.event === 'live_artifact') {
+      if (promptSent) return 'during_execution';
+      continue;
+    }
+    if (event.event !== 'agent') continue;
     if (data.type === 'error') break;
     if (data.type === 'status' && data.label === 'waiting_for_first_output') {
       promptSent = true;
@@ -50,6 +70,7 @@ function admissionPhase(
     if (data.type === 'status' && (data.label === 'tool_call' || data.label === 'tool_call_update')) {
       return 'during_execution';
     }
+    if (data.type === 'artifact' || data.type === 'live_artifact') return 'during_execution';
     if (!acp && data.type === 'tool_use') return 'during_execution';
   }
   // Use the terminal error, not an earlier event's error text or the legacy

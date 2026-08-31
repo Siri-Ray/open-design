@@ -160,6 +160,7 @@ import {
   resolveRunProjectKindForAnalytics,
   retryFinalResultForRunStatus,
   runArtifactCountForRun,
+  runAdmissionEvidenceForRun,
   runDesignSystemCreatedForRun,
   runFilesWrittenForRun,
   runPreviewModuleCountForRun,
@@ -12076,6 +12077,7 @@ export async function startServer({
         cancelOrigin: run.cancelOrigin ?? null,
         terminalTrigger: run.terminalTrigger ?? null,
         events: run.events,
+        admissionEvidence: runAdmissionEvidenceForRun(run),
       });
       if (
         result === 'failed' &&

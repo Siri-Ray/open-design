@@ -34,6 +34,30 @@ describe('admission and attribution v3', () => {
       retryable: true, user_action: 'retry',
     });
   });
+  it('keeps a policy failure after guarded plain stdout admitted', () => {
+    expect(classifyRunFailure({
+      result: 'failed', agentId: 'deepseek',
+      status: { status: 'failed', errorCode: 'AGENT_EXECUTION_FAILED', error: windowError },
+      events: [
+        { event: 'start', data: { agentId: 'deepseek', streamFormat: 'plain' } },
+        { event: 'stdout', data: { chunk: 'Example output' } },
+        { event: 'error', data: { message: windowError } },
+      ],
+    })).toMatchObject({
+      policy_reason: 'model_window_limit', admission_phase: 'during_execution',
+      admission_status: 'admitted',
+    });
+  });
+  it.each([
+    { event: 'agent', data: { type: 'artifact', path: 'example.html' } },
+    { event: 'agent', data: { type: 'live_artifact', artifactId: 'artifact-example' } },
+    { event: 'live_artifact', data: { artifactId: 'artifact-example' } },
+  ])('keeps a policy failure after persisted artifact activity admitted', (activity) => {
+    expect(classify(windowError, [start, prompt, activity])).toMatchObject({
+      policy_reason: 'model_window_limit', admission_phase: 'during_execution',
+      admission_status: 'admitted',
+    });
+  });
   it('does not infer rejection before execution from missing tokens', () => {
     expect(classify(windowError)).toMatchObject({ admission_status: 'unknown', admission_phase: 'unknown' });
   });

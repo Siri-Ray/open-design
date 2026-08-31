@@ -24,6 +24,7 @@ import { summarizeRunToolProgress } from './run-diagnostics.js';
 import { isAcpHandshakeRpcErrorText } from './runtimes/acp-handshake-id.js';
 import { classifyAgentServiceFailure } from './runtimes/auth.js';
 import type { RunResult, RunStatusForAnalytics } from './run-result.js';
+import type { RunAdmissionEvidence } from './runtimes/run-lifecycle-analytics.js';
 
 export interface RunEventForFailureClassification {
   event: string;
@@ -40,6 +41,7 @@ export interface RunFailureClassificationInput {
   cancelOrigin?: TrackingRunCancelOrigin | null;
   terminalTrigger?: TrackingRunTerminalTrigger | null;
   events?: RunEventForFailureClassification[];
+  admissionEvidence?: RunAdmissionEvidence | undefined;
 }
 
 export interface RunFailureClassification {
