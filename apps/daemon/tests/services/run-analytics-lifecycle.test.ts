@@ -137,6 +137,30 @@ describe('run analytics lifecycle', () => {
     }
   });
 
+  it('publishes current-attempt admission evidence with legacy failure fields intact', async () => {
+    const h = harness();
+    const message = '[code=model_limit_exceeded] model usage limit exceeded';
+    h.lifecycle.install({
+      run: fakeRun({ agentId: 'amr', events: [
+        { event: 'start', data: { model: 'example-chat-model', streamFormat: 'acp' } },
+        { event: 'agent', data: { type: 'status', label: 'waiting_for_first_output' } },
+        { event: 'agent', data: { type: 'text_delta', delta: 'Example output' } },
+        { event: 'error', data: { error: { code: 'RATE_LIMITED', message } } },
+      ] }),
+      body: { agentId: 'amr' }, requestAnalyticsContext: CONTEXT as never,
+    });
+    await settled(h, 'run_created');
+    h.settle({ status: 'failed', errorCode: 'RATE_LIMITED' });
+    const finished = await settled(h, 'run_finished');
+    expect(finished.properties).toMatchObject({
+      result: 'failed', error_code: 'RATE_LIMITED',
+      failure_category: 'rate_limit', failure_detail: 'model_window_limit',
+      classifier_version: 'run-failure-v3', policy_reason: 'model_window_limit',
+      admission_phase: 'during_execution', admission_status: 'admitted',
+    });
+    expect(h.recoveries.at(-1)?.properties).toMatchObject({ classifier_version: 'run-failure-v3', admission_status: 'admitted' });
+  });
+
   it('stays silent for a run nobody asked for', async () => {
     // A scheduled Automation has no caller to attribute the Run to. Silence is
     // the correct outcome — inventing an identity would be worse than a gap.
