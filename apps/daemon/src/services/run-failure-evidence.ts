@@ -34,7 +34,9 @@ function admissionPhase(
     }
     return 'unknown';
   }
-  const start = record(events.find((event) => event.event === 'start')?.data);
+  const startEvent = events.find((event) => event.event === 'start');
+  if (!startEvent) return 'unknown';
+  const start = record(startEvent.data);
   const acp = input.agentId === 'amr' || start.streamFormat === 'acp-json-rpc';
   // ACP session/load can replay old messages before session/prompt. The status
   // is emitted by sendPrompt only after writing this attempt's prompt frame.

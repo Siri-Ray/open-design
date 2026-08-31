@@ -26,6 +26,12 @@ describe('admission and attribution v3', () => {
       admission_status: 'rejected_policy', classifier_version: 'run-failure-v3',
     });
   });
+  it('keeps an AMR handshake policy error without an attempt boundary unknown', () => {
+    expect(classify(`json-rpc id 2: ${windowError}`, [])).toMatchObject({
+      policy_reason: 'model_window_limit', admission_phase: 'unknown',
+      admission_status: 'unknown', classifier_version: 'run-failure-v3',
+    });
+  });
   it.each([text, tool])('keeps limits after real activity admitted', (activity) => {
     expect(classify(windowError, [start, prompt, activity])).toMatchObject({
       failure_category: 'rate_limit', failure_detail: 'model_window_limit',
