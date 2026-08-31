@@ -142,7 +142,7 @@ describe('run analytics lifecycle', () => {
     const message = '[code=model_limit_exceeded] model usage limit exceeded';
     h.lifecycle.install({
       run: fakeRun({ agentId: 'amr', events: [
-        { event: 'start', data: { model: 'example-chat-model', streamFormat: 'acp' } },
+        { event: 'start', data: { model: 'example-chat-model', streamFormat: 'acp-json-rpc' } },
         { event: 'agent', data: { type: 'status', label: 'waiting_for_first_output' } },
         { event: 'agent', data: { type: 'text_delta', delta: 'Example output' } },
         { event: 'error', data: { error: { code: 'RATE_LIMITED', message } } },

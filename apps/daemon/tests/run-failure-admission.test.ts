@@ -6,7 +6,7 @@ import { classifyRunFailure, type RunEventForFailureClassification } from '../sr
 const windowError = '[code=model_limit_exceeded] model usage limit exceeded';
 const concurrencyError = '[code=tier_limit_exceeded] membership concurrency limit exceeded';
 const routeError = '[code=model_not_found] model "media-example" has no active routes for request kind "chat_completions"';
-const start = { event: 'start', data: { agentId: 'amr', model: 'media-example', streamFormat: 'acp' } };
+const start = { event: 'start', data: { agentId: 'amr', model: 'media-example', streamFormat: 'acp-json-rpc' } };
 const prompt = { event: 'agent', data: { type: 'status', label: 'waiting_for_first_output' } };
 const text = { event: 'agent', data: { type: 'text_delta', delta: 'Example output' } };
 const tool = { event: 'agent', data: { type: 'status', label: 'tool_call', detail: 'read' } };
@@ -54,6 +54,16 @@ describe('admission and attribution v3', () => {
   });
   it('does not count replayed session history before the current prompt', () => {
     expect(classify(windowError, [start, text, tool, prompt])).toMatchObject({ admission_status: 'unknown' });
+  });
+  it('does not count replayed session history for a non-AMR ACP runtime', () => {
+    const hermesStart = { event: 'start', data: {
+      agentId: 'hermes', model: 'example-model', streamFormat: 'acp-json-rpc',
+    } };
+    expect(classifyRunFailure({
+      result: 'failed', agentId: 'hermes',
+      status: { status: 'failed', errorCode: 'AGENT_EXECUTION_FAILED', error: windowError },
+      events: [hermesStart, text, tool, prompt],
+    })).toMatchObject({ admission_status: 'unknown', admission_phase: 'unknown' });
   });
   it('does not count unproven ACP terminal pairs or host text as execution', () => {
     expect(classify(windowError, [start, prompt,
