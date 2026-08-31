@@ -1,4 +1,5 @@
 import { expect, test } from '@/playwright/suite';
+import { ACTIVE_ARTIFACT_PREVIEW_SELECTOR } from '@/playwright/artifact-preview';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { openNewProjectModal as openNewProjectModalFromProjects } from '@/playwright/rail';
@@ -17,7 +18,6 @@ import { T } from '@/timeouts';
 const STORAGE_KEY = 'open-design:config';
 const EXPERIENCE_SURVEY_RETIRED_KEY = 'open-design:experience-survey:v1:retired';
 const EXPERIENCE_SURVEY_DELIVERIES_KEY = 'open-design:experience-survey:v1:deliveries';
-const ACTIVE_ARTIFACT_PREVIEW_SELECTOR = '[data-testid="artifact-preview-frame"]:visible, [data-testid="artifact-preview-frame-url-load"]:visible, [data-testid="artifact-preview-frame-srcdoc"]:visible, [data-testid="live-artifact-preview-frame"]:visible';
 const GENERATED_FILE = 'real-daemon-smoke.html';
 const GENERATED_HEADING = 'Real Daemon Smoke';
 const EDITED_GENERATED_HEADING = 'Real Daemon Smoke Edited';

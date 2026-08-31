@@ -961,6 +961,7 @@ export function createRunAnalyticsLifecycle(
               stable_prompt_changed_sections: run.promptCache?.changedSections ?? undefined,
               area: isDesignSystemRun ? 'design_system_generation' : 'chat_panel',
               result,
+              terminal_integrity: 'canonical',
               ...(activationMilestones ? { $set_once: activationMilestones } : {}),
               model_id: finishedModelId,
               artifact_count: artifactCount,
