@@ -64,6 +64,10 @@ import { buildAcpSessionNewParams, buildPromptBlocks, type AcpMcpServerInput } f
 import { withholdStdioMcpServersForBuild } from './stdio-mcp.js';
 import { createVelaChildEvidenceConsumer } from '../../runtimes/vela-child-evidence.js';
 import { withAcpEmissionProvenance, type AcpEmissionMeta } from './emission-provenance.js';
+import {
+  createToolExecutionLifecycleDeduper,
+  sanitizeToolExecutionLifecycleUpdate,
+} from './tool-execution-lifecycle.js';
 
 const NON_DISPLAYABLE_ACP_SESSION_UPDATES = new Set([
   'usage_update',
@@ -190,6 +194,7 @@ export function attachAcpSession({
   onTerminal,
 }: AttachAcpSessionOptions) {
   const runStartedAt = Date.now();
+  const toolExecutionLifecycleDeduper = createToolExecutionLifecycleDeduper();
   const effectiveCwd = path.resolve(cwd || process.cwd());
   if (!child.stdin || !child.stdout) {
     throw new Error('ACP child process must expose stdin and stdout streams');
@@ -476,10 +481,25 @@ export function attachAcpSession({
 
   const emitAcpExecutionObservability = (update: JsonObject): boolean => {
     const name = typeof update.sessionUpdate === 'string' ? update.sessionUpdate : '';
+    if (name === 'tool_execution_lifecycle') {
+      if (modelUnavailableErrorCode) {
+        const diagnostic = sanitizeToolExecutionLifecycleUpdate(update);
+        if (diagnostic && toolExecutionLifecycleDeduper.accept(diagnostic)) {
+          send('agent', {
+            ...diagnostic,
+            elapsedMs: Date.now() - runStartedAt,
+          });
+        }
+      }
+      // Private adapter diagnostics never fall through to generic status or
+      // tool-result projection, including unknown schema versions.
+      return true;
+    }
     if (
       name !== 'assistant_message_lifecycle' &&
       name !== 'model_step_lifecycle' &&
-      name !== 'model_retry'
+      name !== 'model_retry' &&
+      name !== 'opencode_compaction'
     ) {
       return false;
     }

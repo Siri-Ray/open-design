@@ -244,6 +244,22 @@ describe('durable run terminal reconciliation', () => {
         insertId: 'run-created-1',
       },
     }));
+    fs.writeFileSync(path.join(runDir, 'events.jsonl'), `${JSON.stringify({
+      id: 1,
+      event: 'agent',
+      timestamp: 1_500,
+      data: {
+        type: 'diagnostic',
+        name: 'tool_execution_lifecycle',
+        schema: 'vela.tool_execution_lifecycle',
+        version: 1,
+        toolCallIdHash: 'acp_0123456789abcdef01234567',
+        trigger: 'abort',
+        terminal: 'interrupted',
+        events: [{ phase: 'kill_requested' }],
+        toolTerminal: { source: 'processor_cleanup', confirmed: false },
+      },
+    })}\n`);
     db.prepare(
       `INSERT INTO messages (id, run_id, run_status, events_json)
        VALUES (?, ?, 'running', '[]')`,
@@ -295,6 +311,11 @@ describe('durable run terminal reconciliation', () => {
         posthog_delivery_attempt_count: 1,
         posthog_error_type: null,
         mature_unfinished_state: 'unknown',
+        tool_execution_lifecycle_seen: true,
+        tool_execution_trigger: 'abort',
+        tool_terminal_source: 'processor_cleanup',
+        tool_kill_outcome: 'requested',
+        tool_execution_evidence_incomplete: true,
       }),
     }));
     expect(reportLangfuse).toHaveBeenCalledWith(expect.objectContaining({

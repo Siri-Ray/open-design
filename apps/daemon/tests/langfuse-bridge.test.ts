@@ -510,6 +510,47 @@ describe('langfuse-bridge.reportRunCompletedFromDaemon', () => {
                 files: ['index.html'],
               },
             },
+            {
+              id: 2,
+              event: 'agent',
+              timestamp: Date.now() - 50,
+              data: {
+                type: 'diagnostic',
+                name: 'tool_execution_lifecycle',
+                source: 'amr-opencode',
+                elapsedMs: 50,
+                schema: 'vela.tool_execution_lifecycle',
+                version: 1,
+                status: 'failed',
+                phase: 'close',
+                executionVersion: 1,
+                toolCallIdHash: 'acp_0123456789abcdef01234567',
+                trigger: 'deadline',
+                terminal: 'interrupted',
+                droppedEvents: 1,
+                events: [
+                  { phase: 'kill_sent', elapsedMs: 10, target: 'group', mechanism: 'process_group' },
+                  { phase: 'close', stdoutClosed: true, stderrClosed: false },
+                ],
+                toolTerminal: { source: 'processor_cleanup', confirmed: false },
+                command: 'cat /private/secret',
+                headers: { authorization: 'Bearer secret' },
+              },
+            },
+            {
+              id: 3,
+              event: 'agent',
+              timestamp: Date.now() - 25,
+              data: {
+                type: 'diagnostic',
+                name: 'tool_execution_lifecycle',
+                source: 'amr-opencode',
+                schema: 'vela.tool_execution_lifecycle',
+                version: 1,
+                toolCallIdHash: 'invalid-hash',
+                reason: 'private-command --token super-secret-lifecycle-value',
+              },
+            },
           ] as any,
         }) as any,
         fetchImpl: fetchSpy as any,
@@ -542,6 +583,34 @@ describe('langfuse-bridge.reportRunCompletedFromDaemon', () => {
         diagnostic_name: 'acp_artifact_text_suppression',
       },
     });
+    expect(
+      bodyOf(batch, 'event-create', 'agent-diagnostic:tool_execution_lifecycle'),
+    ).toMatchObject({
+      output: {
+        name: 'tool_execution_lifecycle',
+        source: 'amr-opencode',
+        elapsed_ms: 50,
+        schema: 'vela.tool_execution_lifecycle',
+        version: 1,
+        tool_call_id_hash: 'acp_0123456789abcdef01234567',
+        status: 'failed',
+        phase: 'close',
+        execution_version: 1,
+        trigger: 'deadline',
+        terminal: 'interrupted',
+        dropped_events: 1,
+        events: [
+          { phase: 'kill_sent', elapsed_ms: 10, target: 'group', mechanism: 'process_group' },
+          { phase: 'close', stdout_closed: true, stderr_closed: false },
+        ],
+        tool_terminal: { source: 'processor_cleanup', confirmed: false },
+      },
+      metadata: { diagnostic_name: 'tool_execution_lifecycle' },
+    });
+    const serializedBatch = JSON.stringify(batch);
+    expect(serializedBatch).not.toContain('cat /private/secret');
+    expect(serializedBatch).not.toContain('Bearer secret');
+    expect(serializedBatch).not.toContain('super-secret-lifecycle-value');
   });
 
   it('keeps canonical tool spans without projecting ACP tool snapshot statuses', async () => {
