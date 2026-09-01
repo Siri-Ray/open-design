@@ -197,7 +197,7 @@ function collapseLifecycleEnum<T extends string>(values: Set<T>): T | 'mixed' | 
 function toolExecutionLifecycleAnalytics(
   events: RunEventForDiagnostics[],
 ): Partial<RunDiagnosticsAnalytics> {
-  const fingerprints = new Set<string>();
+  const toolCallIds = new Set<string>();
   const triggers = new Set<'exit' | 'abort' | 'deadline'>();
   const terminals = new Set<'running' | 'returned' | 'failed' | 'interrupted'>();
   const terminalSources = new Set<'tool_result' | 'tool_error' | 'processor_cleanup'>();
@@ -257,29 +257,12 @@ function toolExecutionLifecycleAnalytics(
               : {}),
           }
         : null;
-    const fingerprint = JSON.stringify({
-      toolCallIdHash:
-        typeof data.toolCallIdHash === 'string' && /^acp_[a-f0-9]{24}$/.test(data.toolCallIdHash)
-          ? data.toolCallIdHash
-          : 'unknown',
-      trigger:
-        data.trigger === 'exit' || data.trigger === 'abort' || data.trigger === 'deadline'
-          ? data.trigger
-          : 'unknown',
-      terminal:
-        data.terminal === 'running' || data.terminal === 'returned' ||
-        data.terminal === 'failed' || data.terminal === 'interrupted'
-          ? data.terminal
-          : 'unknown',
-      droppedEvents:
-        typeof data.droppedEvents === 'number' && data.droppedEvents > 0
-          ? 'present'
-          : 'none',
-      events: safeLifecycleEvents,
-      toolTerminal: safeToolTerminal,
-    });
-    if (fingerprints.has(fingerprint)) continue;
-    fingerprints.add(fingerprint);
+    const toolCallIdHash = data.toolCallIdHash;
+    if (typeof toolCallIdHash !== 'string' || !/^acp_[a-f0-9]{24}$/.test(toolCallIdHash)) {
+      continue;
+    }
+    if (toolCallIds.has(toolCallIdHash)) continue;
+    toolCallIds.add(toolCallIdHash);
     lifecycleCount += 1;
 
     if (data.trigger === 'exit' || data.trigger === 'abort' || data.trigger === 'deadline') {

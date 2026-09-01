@@ -922,6 +922,7 @@ test('attachAcpSession consumes bounded tool execution lifecycle diagnostics out
     cwd: '/tmp/od-project',
     model: null,
     mcpServers: [],
+    modelUnavailableErrorCode: 'AMR_MODEL_UNAVAILABLE',
     send: (event, payload) => events.push({ event, payload }),
   });
 
@@ -993,6 +994,61 @@ test('attachAcpSession consumes bounded tool execution lifecycle diagnostics out
   }
 });
 
+test('attachAcpSession swallows non-AMR tool execution lifecycle updates without persisting them', () => {
+  const child = new FakeAcpChild();
+  const events: Array<{ event: string; payload: unknown }> = [];
+
+  attachAcpSession({
+    child: child as never,
+    prompt: 'describe the project',
+    cwd: '/tmp/od-project',
+    model: null,
+    mcpServers: [],
+    send: (event, payload) => events.push({ event, payload }),
+  });
+
+  writeAcpResult(child, 1, {});
+  writeAcpResult(child, 2, { sessionId: 'session-1' });
+  writeAcpUpdate(child, {
+    sessionUpdate: 'tool_execution_lifecycle',
+    schema: 'vela.tool_execution_lifecycle',
+    version: 1,
+    toolCallId: 'tool-1',
+    status: 'completed',
+    phase: 'close',
+    execution: {
+      version: 1,
+      terminal: 'returned',
+      trigger: 'exit',
+      events: [{ phase: 'close', stdout_closed: true, stderr_closed: true }],
+    },
+    toolTerminal: { source: 'tool_result', confirmed: true },
+  });
+  writeAcpUpdate(child, {
+    sessionUpdate: 'agent_message_chunk',
+    content: { text: 'Run continued' },
+  });
+  writeAcpResult(child, 3, { usage: { inputTokens: 1, outputTokens: 2 } });
+
+  const agentPayloads = events
+    .filter((entry) => entry.event === 'agent')
+    .map((entry) => entry.payload as Record<string, unknown>);
+  assert.equal(
+    agentPayloads.some((payload) => payload.name === 'tool_execution_lifecycle'),
+    false,
+  );
+  assert.equal(
+    agentPayloads.some(
+      (payload) => payload.type === 'status' && payload.label === 'tool_execution_lifecycle',
+    ),
+    false,
+  );
+  assert.equal(agentPayloads.some((payload) => payload.type === 'tool_result'), false);
+  assert.ok(agentPayloads.some(
+    (payload) => payload.type === 'text_delta' && payload.delta === 'Run continued',
+  ));
+});
+
 test('attachAcpSession keeps lifecycle observability failures from blocking the run', () => {
   const child = new FakeAcpChild();
   const events: Array<{ event: string; payload: unknown }> = [];
@@ -1003,6 +1059,7 @@ test('attachAcpSession keeps lifecycle observability failures from blocking the 
     cwd: '/tmp/od-project',
     model: null,
     mcpServers: [],
+    modelUnavailableErrorCode: 'AMR_MODEL_UNAVAILABLE',
     send: (event, payload) => {
       if (
         event === 'agent' &&

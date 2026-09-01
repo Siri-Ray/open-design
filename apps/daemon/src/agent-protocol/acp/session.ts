@@ -482,12 +482,14 @@ export function attachAcpSession({
   const emitAcpExecutionObservability = (update: JsonObject): boolean => {
     const name = typeof update.sessionUpdate === 'string' ? update.sessionUpdate : '';
     if (name === 'tool_execution_lifecycle') {
-      const diagnostic = sanitizeToolExecutionLifecycleUpdate(update);
-      if (diagnostic && toolExecutionLifecycleDeduper.accept(diagnostic)) {
-        send('agent', {
-          ...diagnostic,
-          elapsedMs: Date.now() - runStartedAt,
-        });
+      if (modelUnavailableErrorCode) {
+        const diagnostic = sanitizeToolExecutionLifecycleUpdate(update);
+        if (diagnostic && toolExecutionLifecycleDeduper.accept(diagnostic)) {
+          send('agent', {
+            ...diagnostic,
+            elapsedMs: Date.now() - runStartedAt,
+          });
+        }
       }
       // Private adapter diagnostics never fall through to generic status or
       // tool-result projection, including unknown schema versions.

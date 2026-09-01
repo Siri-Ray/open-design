@@ -603,11 +603,12 @@ function collectAgentEvents(
         typeof data.name === 'string' && data.name.length > 0
           ? data.name
           : 'runtime_diagnostic';
-      const index = diagnosticCounts.get(diagnosticName) ?? 0;
-      diagnosticCounts.set(diagnosticName, index + 1);
       const toolExecutionLifecycle = diagnosticName === 'tool_execution_lifecycle'
         ? projectToolExecutionLifecycleDiagnostic(data)
         : null;
+      if (diagnosticName === 'tool_execution_lifecycle' && !toolExecutionLifecycle) continue;
+      const index = diagnosticCounts.get(diagnosticName) ?? 0;
+      diagnosticCounts.set(diagnosticName, index + 1);
       out.push({
         id: `diagnostic-${diagnosticName}-${index}`,
         name: `agent-diagnostic:${diagnosticName}`,

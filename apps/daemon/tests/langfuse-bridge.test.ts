@@ -537,6 +537,20 @@ describe('langfuse-bridge.reportRunCompletedFromDaemon', () => {
                 headers: { authorization: 'Bearer secret' },
               },
             },
+            {
+              id: 3,
+              event: 'agent',
+              timestamp: Date.now() - 25,
+              data: {
+                type: 'diagnostic',
+                name: 'tool_execution_lifecycle',
+                source: 'amr-opencode',
+                schema: 'vela.tool_execution_lifecycle',
+                version: 1,
+                toolCallIdHash: 'invalid-hash',
+                reason: 'private-command --token super-secret-lifecycle-value',
+              },
+            },
           ] as any,
         }) as any,
         fetchImpl: fetchSpy as any,
@@ -596,6 +610,7 @@ describe('langfuse-bridge.reportRunCompletedFromDaemon', () => {
     const serializedBatch = JSON.stringify(batch);
     expect(serializedBatch).not.toContain('cat /private/secret');
     expect(serializedBatch).not.toContain('Bearer secret');
+    expect(serializedBatch).not.toContain('super-secret-lifecycle-value');
   });
 
   it('keeps canonical tool spans without projecting ACP tool snapshot statuses', async () => {

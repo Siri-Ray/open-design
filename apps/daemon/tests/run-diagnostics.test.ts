@@ -17,7 +17,7 @@ describe('run diagnostics', () => {
             name: 'tool_execution_lifecycle',
             schema: 'vela.tool_execution_lifecycle',
             version: 1,
-            toolCallIdHash: 'acp_deadbeef',
+            toolCallIdHash: 'acp_deadbeefdeadbeefdeadbeef',
             trigger: 'deadline',
             terminal: 'interrupted',
             droppedEvents: 2,
@@ -44,7 +44,46 @@ describe('run diagnostics', () => {
       tool_stderr_close_seen: false,
       tool_execution_evidence_incomplete: true,
     });
-    expect(JSON.stringify(result)).not.toContain('acp_deadbeef');
+    expect(JSON.stringify(result)).not.toContain('acp_deadbeefdeadbeefdeadbeef');
+  });
+
+  it('aggregates only the latest lifecycle snapshot for each tool execution', () => {
+    const toolCallIdHash = 'acp_0123456789abcdef01234567';
+    const result = summarizeRunDiagnosticsForAnalytics({
+      events: [
+        {
+          event: 'agent',
+          data: {
+            type: 'diagnostic',
+            name: 'tool_execution_lifecycle',
+            schema: 'vela.tool_execution_lifecycle',
+            version: 1,
+            toolCallIdHash,
+            terminal: 'running',
+          },
+        },
+        {
+          event: 'agent',
+          data: {
+            type: 'diagnostic',
+            name: 'tool_execution_lifecycle',
+            schema: 'vela.tool_execution_lifecycle',
+            version: 1,
+            toolCallIdHash,
+            trigger: 'exit',
+            terminal: 'returned',
+            events: [{ phase: 'close', stdoutClosed: true, stderrClosed: true }],
+            toolTerminal: { source: 'tool_result', confirmed: true },
+          },
+        },
+      ],
+    });
+
+    expect(result).toMatchObject({
+      tool_execution_lifecycle_count_bucket: '1',
+      tool_execution_terminal: 'returned',
+      tool_execution_evidence_incomplete: false,
+    });
   });
 
   it('bounds lifecycle aggregation to the latest 64 distinct diagnostics', () => {
