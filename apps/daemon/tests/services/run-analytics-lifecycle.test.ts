@@ -16,6 +16,7 @@ import {
   createRunSideEffectLedger,
   foldEventIntoRunSideEffectLedger,
 } from '../../src/runtimes/run-lifecycle-analytics.js';
+import { createChatRunService } from '../../src/runtimes/runs.js';
 
 type Captured = {
   eventName: string;
@@ -210,6 +211,84 @@ describe('run analytics lifecycle', () => {
       posthog_delivery_attempt_count: 1,
       posthog_error_type: null,
       mature_unfinished_state: 'unknown',
+      duplicate_terminal_count: 1,
+      late_terminal_count: 1,
+    });
+  });
+
+  it('settles matching and conflicting terminal claims before capturing run_finished', async () => {
+    const captured: Captured[] = [];
+    const runs = createChatRunService({
+      createSseResponse: () => ({
+        send: vi.fn(() => true),
+        end: vi.fn(),
+        cleanup: vi.fn(),
+      }),
+      createSseErrorPayload: (code: string, message: string) => ({
+        error: { code, message },
+      }),
+      shutdownGraceMs: 10,
+      ttlMs: 60_000,
+    });
+    const lifecycle = createRunAnalyticsLifecycle({
+      db: {} as never,
+      design: {
+        runs: {
+          ...runs,
+          beginAnalyticsDelivery: (run: ReturnType<typeof runs.create>) => {
+            runs.beginAnalyticsDelivery(run);
+            queueMicrotask(() => {
+              runs.finish(run, 'failed', 1, null);
+              runs.finish(run, 'succeeded', 0, null);
+            });
+          },
+        } as never,
+        analytics: {
+          capture: (args) => {
+            captured.push(args as Captured);
+            return {
+              status: 'queued',
+              acknowledgement: 'local_buffer',
+              errorType: null,
+            };
+          },
+        },
+        getAppVersion: () => '0.0.0-test',
+      },
+      paths: {
+        PROJECTS_DIR: '/nonexistent/projects',
+        RUNTIME_DATA_DIR: '/nonexistent/data',
+      },
+      agents: { detectAgents: async () => [] },
+      telemetry: {
+        reportRunCompletionTelemetryFallback: () => {},
+        resolveRunProjectKindForAnalytics: () => null,
+        runArtifactBaselines: { take: () => undefined },
+        runRetryEventsForAnalytics: () => [],
+      },
+    });
+    const run = runs.create({
+      projectId: null,
+      conversationId: null,
+      agentId: 'amr',
+    });
+    lifecycle.install({
+      run: run as never,
+      body: { agentId: 'amr' },
+      requestAnalyticsContext: CONTEXT as never,
+    });
+    await vi.waitFor(() => {
+      expect(captured.some((event) => event.eventName === 'run_created')).toBe(true);
+    });
+
+    runs.finish(run, 'failed', 1, null);
+
+    await vi.waitFor(() => {
+      expect(captured.some((event) => event.eventName === 'run_finished')).toBe(true);
+    });
+    const finished = captured.find((event) => event.eventName === 'run_finished');
+    expect(finished?.properties).toMatchObject({
+      terminal_integrity: 'late',
       duplicate_terminal_count: 1,
       late_terminal_count: 1,
     });

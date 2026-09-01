@@ -1,3 +1,4 @@
+import type { RunTerminalLifecycleStatus } from '@open-design/contracts';
 import type {
   TrackingRunCancelOrigin,
   TrackingRunTerminalIntegrity,
@@ -5,60 +6,19 @@ import type {
 } from '@open-design/contracts/analytics';
 import type { AnalyticsCaptureResult } from '../analytics.js';
 
-export const RUN_TERMINAL_LIFECYCLE_VERSION = 1 as const;
+export const RUN_TERMINAL_LIFECYCLE_VERSION =
+  1 satisfies RunTerminalLifecycleStatus['version'];
 
-export type RunTerminationOrigin =
-  | 'user_cancel'
-  | 'project_cleanup'
-  | 'watchdog_cleanup'
-  | 'daemon_quit'
-  | 'update_apply'
-  | 'unknown';
-
+export type RunTerminationOrigin = RunTerminalLifecycleStatus['terminationOrigin'];
+export type RunTerminalPersistenceResult =
+  RunTerminalLifecycleStatus['terminalPersistence'];
 export type RunTerminalPersistenceErrorType =
-  | 'permission_denied'
-  | 'read_only_storage'
-  | 'storage_full'
-  | 'storage_unavailable'
-  | 'serialization_failed'
-  | 'unknown';
-
-export interface RunTerminalPersistenceResult {
-  status: 'acknowledged' | 'failed' | 'unknown';
-  errorType: RunTerminalPersistenceErrorType | null;
-}
-
-export interface RunPosthogDeliveryStateV1 {
-  status: 'unknown' | 'in_flight' | 'queued' | 'not_expected' | 'failed';
-  acknowledgement: 'unknown' | 'local_buffer' | 'none';
-  attemptCount: number;
-  errorType: AnalyticsCaptureResult['errorType'] | null;
-}
-
+  NonNullable<RunTerminalPersistenceResult['errorType']>;
+export type RunPosthogDeliveryStateV1 =
+  RunTerminalLifecycleStatus['posthogDelivery'];
 export type RunMatureUnfinishedState =
-  | 'still_running'
-  | 'terminated_persistence_missing'
-  | 'terminal_persisted_posthog_failed'
-  | 'recovery_pending'
-  | 'permanently_missing'
-  | 'unknown';
-
-export interface RunTerminalLifecycleV1 {
-  version: typeof RUN_TERMINAL_LIFECYCLE_VERSION;
-  runAttempt: number;
-  runtimeGenerationId: string | null;
-  terminationOrigin: RunTerminationOrigin;
-  terminalIntegrity: TrackingRunTerminalIntegrity;
-  terminalPersistence: RunTerminalPersistenceResult;
-  posthogDelivery: RunPosthogDeliveryStateV1;
-  unfinishedState: RunMatureUnfinishedState;
-  duplicateTerminalCount: number;
-  lateTerminalCount: number;
-  reconciliation?: {
-    generationId: string;
-    integrity: 'recovered';
-  };
-}
+  RunTerminalLifecycleStatus['unfinishedState'];
+export type RunTerminalLifecycleV1 = RunTerminalLifecycleStatus;
 
 function normalizedAttemptCount(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0

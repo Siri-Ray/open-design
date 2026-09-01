@@ -13,6 +13,7 @@
 // Nothing here may throw into the caller: analytics is an observer of the Run,
 // never a participant in it.
 
+import { scheduler } from 'node:timers/promises';
 import {
   buildRunCreatedV4Aliases,
   buildRunFinishedV4Aliases,
@@ -286,6 +287,14 @@ export interface RunAnalyticsFacts {
 
 /** The facts plus the Run they describe. */
 export type RunAnalyticsInstallInput = RunAnalyticsFacts & { run: ChatRun };
+
+async function waitForTerminalClaimSettlementBoundary(): Promise<void> {
+  // A physical runtime can report the same terminal outcome through adjacent
+  // error/close callbacks. Give callbacks already queued by the first terminal
+  // transition one check phase to update the lifecycle before freezing the
+  // sole run_finished envelope.
+  await scheduler.yield();
+}
 
 export interface RunAnalyticsLifecycle {
   /**
@@ -952,6 +961,7 @@ export function createRunAnalyticsLifecycle(
             ? supportingAssetFilesChangedForRun(artifactDiff, runProjectKind)
             : undefined;
           design.runs.beginAnalyticsDelivery?.(run);
+          await waitForTerminalClaimSettlementBoundary();
           const terminalLifecycle = run.terminalLifecycle
             ? terminalLifecycleForPosthogLocalQueue(run.terminalLifecycle)
             : undefined;
