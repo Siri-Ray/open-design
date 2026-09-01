@@ -38,6 +38,7 @@ import {
   beginPosthogTerminalDelivery,
   finalizePosthogTerminalDelivery,
   markTerminalLifecycleReconciled,
+  terminalLifecycleForPosthogLocalQueue,
   terminalLifecycleSnapshot,
   type RunTerminalLifecycleV1,
 } from '../observability/run-terminal-lifecycle.js';
@@ -474,6 +475,9 @@ export async function reconcileDurableRunTerminals(
       );
       state.terminalLifecycle = beginPosthogTerminalDelivery(state.terminalLifecycle);
       writeState(entry.filePath, state);
+      const terminalLifecycleForCapture = terminalLifecycleForPosthogLocalQueue(
+        state.terminalLifecycle,
+      );
       const failed = state.status === 'failed';
       const runResult = runResultFromStatus(state.status);
       const errorCode = failed
@@ -503,30 +507,30 @@ export async function reconcileDurableRunTerminals(
         total_duration_ms: Math.max(0, state.updatedAt - state.createdAt),
         langfuse_trace_id: state.id,
         terminal_reconciled: true,
-        terminal_integrity: state.terminalLifecycle.terminalIntegrity,
+        terminal_integrity: terminalLifecycleForCapture.terminalIntegrity,
         terminal_recovery_reason: recoveryReason,
-        run_attempt: state.terminalLifecycle.runAttempt,
-        ...(state.terminalLifecycle.runtimeGenerationId
-          ? { runtime_generation_id: state.terminalLifecycle.runtimeGenerationId }
+        run_attempt: terminalLifecycleForCapture.runAttempt,
+        ...(terminalLifecycleForCapture.runtimeGenerationId
+          ? { runtime_generation_id: terminalLifecycleForCapture.runtimeGenerationId }
           : {}),
-        termination_origin: state.terminalLifecycle.terminationOrigin,
+        termination_origin: terminalLifecycleForCapture.terminationOrigin,
         terminal_persistence_status:
-          state.terminalLifecycle.terminalPersistence.status,
+          terminalLifecycleForCapture.terminalPersistence.status,
         terminal_persistence_error_type:
-          state.terminalLifecycle.terminalPersistence.errorType,
-        posthog_delivery_status: state.terminalLifecycle.posthogDelivery.status,
+          terminalLifecycleForCapture.terminalPersistence.errorType,
+        posthog_delivery_status: terminalLifecycleForCapture.posthogDelivery.status,
         posthog_acknowledgement:
-          state.terminalLifecycle.posthogDelivery.acknowledgement,
+          terminalLifecycleForCapture.posthogDelivery.acknowledgement,
         posthog_delivery_attempt_count:
-          state.terminalLifecycle.posthogDelivery.attemptCount,
-        posthog_error_type: state.terminalLifecycle.posthogDelivery.errorType,
+          terminalLifecycleForCapture.posthogDelivery.attemptCount,
+        posthog_error_type: terminalLifecycleForCapture.posthogDelivery.errorType,
         reconciliation_generation:
-          state.terminalLifecycle.reconciliation?.generationId,
+          terminalLifecycleForCapture.reconciliation?.generationId,
         reconciliation_integrity:
-          state.terminalLifecycle.reconciliation?.integrity,
-        mature_unfinished_state: state.terminalLifecycle.unfinishedState,
-        duplicate_terminal_count: state.terminalLifecycle.duplicateTerminalCount,
-        late_terminal_count: state.terminalLifecycle.lateTerminalCount,
+          terminalLifecycleForCapture.reconciliation?.integrity,
+        mature_unfinished_state: terminalLifecycleForCapture.unfinishedState,
+        duplicate_terminal_count: terminalLifecycleForCapture.duplicateTerminalCount,
+        late_terminal_count: terminalLifecycleForCapture.lateTerminalCount,
         ...(errorCode ? { error_code: errorCode } : {}),
         ...(failure ?? {}),
       };

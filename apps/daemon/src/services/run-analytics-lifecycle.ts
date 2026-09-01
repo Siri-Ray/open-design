@@ -63,6 +63,7 @@ import {
 import { summarizeRunDiagnosticsForAnalytics } from '../run-diagnostics.js';
 import { classifyRunFailure } from '../run-failure-classification.js';
 import { deriveRunErrorCode, runResultFromStatus } from '../run-result.js';
+import { terminalLifecycleForPosthogLocalQueue } from '../observability/run-terminal-lifecycle.js';
 import { runMessageEventPersistenceAnalytics } from '../runtimes/chat-run-messages.js';
 import { getDetectedRuntimeVersions } from '../runtimes/detection.js';
 import {
@@ -951,7 +952,9 @@ export function createRunAnalyticsLifecycle(
             ? supportingAssetFilesChangedForRun(artifactDiff, runProjectKind)
             : undefined;
           design.runs.beginAnalyticsDelivery?.(run);
-          const terminalLifecycle = run.terminalLifecycle;
+          const terminalLifecycle = run.terminalLifecycle
+            ? terminalLifecycleForPosthogLocalQueue(run.terminalLifecycle)
+            : undefined;
           const finishedProperties: Record<string, unknown> = {
               ...baseProps,
               design_system_id: run.designSystemId ?? undefined,

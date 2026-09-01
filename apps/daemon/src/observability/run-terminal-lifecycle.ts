@@ -156,9 +156,14 @@ export function recordIgnoredTerminalClaim(
   lifecycle: RunTerminalLifecycleV1,
   kind: 'duplicate' | 'late',
 ): RunTerminalLifecycleV1 {
+  const terminalIntegrity = lifecycle.terminalIntegrity === 'canonical'
+    ? kind
+    : lifecycle.terminalIntegrity === 'duplicate' && kind === 'late'
+      ? 'late'
+      : lifecycle.terminalIntegrity;
   return {
     ...lifecycle,
-    terminalIntegrity: kind,
+    terminalIntegrity,
     duplicateTerminalCount:
       lifecycle.duplicateTerminalCount + (kind === 'duplicate' ? 1 : 0),
     lateTerminalCount:
@@ -207,6 +212,16 @@ export function finalizePosthogTerminalDelivery(
       terminalLifecycle: next,
     }),
   };
+}
+
+export function terminalLifecycleForPosthogLocalQueue(
+  lifecycle: RunTerminalLifecycleV1,
+): RunTerminalLifecycleV1 {
+  return finalizePosthogTerminalDelivery(lifecycle, {
+    status: 'queued',
+    acknowledgement: 'local_buffer',
+    errorType: null,
+  });
 }
 
 export function classifyMatureUnfinishedRun(input: {

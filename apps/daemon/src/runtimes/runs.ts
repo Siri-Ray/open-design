@@ -1027,6 +1027,7 @@ export function createChatRunService({
   };
 
   const persistTerminalState = (run) => {
+    const priorTerminalPersistence = run.terminalLifecycle?.terminalPersistence;
     const terminalPersistence = run.statePath
       ? { status: 'acknowledged', errorType: null }
       : { status: 'unknown', errorType: null };
@@ -1044,7 +1045,7 @@ export function createChatRunService({
     });
     if (!run.statePath) return { ok: false, errorType: 'storage_unavailable' };
     const result = persistState(run);
-    if (!result.ok) {
+    if (!result.ok && priorTerminalPersistence?.status !== 'acknowledged') {
       run.terminalLifecycle = terminalLifecycleSnapshot({
         retryAttemptCount: run.retryAttemptCount,
         manualResumeAttemptCount: run.manualResumeAttemptCount,
@@ -1220,6 +1221,9 @@ export function createChatRunService({
     run.stdinOpen = false;
     run.eventsLogStream = null;
     run.eventsLogClosed = false;
+    run.runtimeGenerationId = null;
+    run.terminalIntegrity = null;
+    run.terminalLifecycle = undefined;
     // A resumed attempt is a fresh execution, so it must not inherit the prior
     // attempt's lifecycle marks. Keeping them makes every phase boundary
     // measure from before the recharge pause, putting the wait time inside the

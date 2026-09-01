@@ -505,6 +505,56 @@ describe('chat run service shutdown', () => {
     vi.useRealTimers();
   });
 
+  it('starts resumed terminal delivery from a fresh attempt-scoped lifecycle', () => {
+    const runs = createRuns();
+    const run = runs.create({
+      projectId: 'project-1',
+      conversationId: 'conv-1',
+      agentId: 'amr',
+    }) as any;
+    run.runtimeGenerationId = '0f2d4d9e-f034-4ed5-8330-314bd1d525cc';
+
+    runs.finish(run, 'failed', 1, null);
+    runs.beginAnalyticsDelivery(run);
+    runs.finalizeAnalyticsDelivery(run, {
+      status: 'queued',
+      acknowledgement: 'local_buffer',
+      errorType: null,
+    });
+    runs.finish(run, 'succeeded', 0, null);
+    expect(runs.statusBody(run).terminalLifecycle).toMatchObject({
+      posthogDelivery: { status: 'queued', attemptCount: 1 },
+      lateTerminalCount: 1,
+    });
+
+    runs.prepareRestart(run);
+    expect(run.runtimeGenerationId).toBeNull();
+    expect(runs.statusBody(run)).not.toHaveProperty('terminalLifecycle');
+
+    runs.finish(run, 'succeeded', 0, null);
+    expect(runs.statusBody(run).terminalLifecycle).toMatchObject({
+      runAttempt: 1,
+      runtimeGenerationId: null,
+      terminalIntegrity: 'canonical',
+      posthogDelivery: {
+        status: 'unknown',
+        acknowledgement: 'unknown',
+        attemptCount: 0,
+        errorType: null,
+      },
+      duplicateTerminalCount: 0,
+      lateTerminalCount: 0,
+    });
+
+    runs.beginAnalyticsDelivery(run);
+    expect(runs.statusBody(run).terminalLifecycle.posthogDelivery).toMatchObject({
+      status: 'in_flight',
+      acknowledgement: 'none',
+      attemptCount: 1,
+      errorType: null,
+    });
+  });
+
   it('keeps the first accepted plugin attribution immutable across request reuse', () => {
     const runs = createRuns();
     const request = {
@@ -1488,6 +1538,49 @@ describe('run event log persistence', () => {
       terminalPersistence: {
         status: 'failed',
         errorType: 'storage_full',
+      },
+    });
+  });
+
+  it.each([
+    {
+      name: 'preserves acknowledgement when the metadata refresh fails',
+      terminalWrites: [
+        { ok: true as const },
+        { ok: false as const, errorType: 'storage_full' as const },
+      ],
+    },
+    {
+      name: 'promotes a failed first write when the metadata refresh succeeds',
+      terminalWrites: [
+        { ok: false as const, errorType: 'storage_full' as const },
+        { ok: true as const },
+      ],
+    },
+  ])('$name', ({ terminalWrites }) => {
+    let writeCount = 0;
+    const runs = createChatRunService({
+      createSseResponse: () => ({ send: vi.fn(() => true), end: vi.fn(), cleanup: vi.fn() }),
+      createSseErrorPayload: (code: string, message: string) => ({ error: { code, message } }),
+      shutdownGraceMs: 10,
+      ttlMs: 60_000,
+      runsLogDir: tmpDir as unknown as null,
+      writeDurableState: () => {
+        writeCount += 1;
+        return writeCount === 1
+          ? { ok: true as const }
+          : terminalWrites[writeCount - 2] ?? { ok: true as const };
+      },
+    });
+    const run = runs.create({ projectId: 'p1', agentId: 'amr' });
+
+    runs.finish(run, 'failed', 1, null);
+
+    expect(writeCount).toBe(3);
+    expect(runs.statusBody(run).terminalLifecycle).toMatchObject({
+      terminalPersistence: {
+        status: 'acknowledged',
+        errorType: null,
       },
     });
   });

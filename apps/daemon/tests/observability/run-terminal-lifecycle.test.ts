@@ -4,6 +4,7 @@ import {
   boundedRuntimeGenerationId,
   classifyMatureUnfinishedRun,
   deriveRunTerminationOrigin,
+  recordIgnoredTerminalClaim,
   terminalLifecycleSnapshot,
   terminalPersistenceErrorType,
 } from '../../src/observability/run-terminal-lifecycle.js';
@@ -89,5 +90,46 @@ describe('run terminal lifecycle observability', () => {
   ])('maps storage error %s to bounded type %s', (code, expected) => {
     expect(terminalPersistenceErrorType(Object.assign(new Error('sensitive detail'), { code })))
       .toBe(expected);
+  });
+
+  it('keeps late integrity when a matching duplicate arrives afterward', () => {
+    const afterLate = recordIgnoredTerminalClaim(lifecycle(), 'late');
+    const afterDuplicate = recordIgnoredTerminalClaim(afterLate, 'duplicate');
+
+    expect(afterDuplicate).toMatchObject({
+      terminalIntegrity: 'late',
+      duplicateTerminalCount: 1,
+      lateTerminalCount: 1,
+    });
+  });
+
+  it('upgrades duplicate integrity when a late claim arrives afterward', () => {
+    const afterDuplicate = recordIgnoredTerminalClaim(lifecycle(), 'duplicate');
+    const afterLate = recordIgnoredTerminalClaim(afterDuplicate, 'late');
+
+    expect(afterLate).toMatchObject({
+      terminalIntegrity: 'late',
+      duplicateTerminalCount: 1,
+      lateTerminalCount: 1,
+    });
+  });
+
+  it.each([
+    'reconciled',
+    'overwritten',
+    'permanently_missing',
+    'post_terminal_activity',
+  ] as const)('preserves hydrated %s integrity while counting ignored claims', (terminalIntegrity) => {
+    const afterDuplicate = recordIgnoredTerminalClaim(
+      lifecycle({ terminalIntegrity }),
+      'duplicate',
+    );
+    const afterLate = recordIgnoredTerminalClaim(afterDuplicate, 'late');
+
+    expect(afterLate).toMatchObject({
+      terminalIntegrity,
+      duplicateTerminalCount: 1,
+      lateTerminalCount: 1,
+    });
   });
 });

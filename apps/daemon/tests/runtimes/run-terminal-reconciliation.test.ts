@@ -290,6 +290,11 @@ describe('durable run terminal reconciliation', () => {
         terminal_reconciled: true,
         terminal_integrity: 'reconciled',
         terminal_recovery_reason: 'daemon_restart',
+        posthog_delivery_status: 'queued',
+        posthog_acknowledgement: 'local_buffer',
+        posthog_delivery_attempt_count: 1,
+        posthog_error_type: null,
+        mature_unfinished_state: 'unknown',
       }),
     }));
     expect(reportLangfuse).toHaveBeenCalledWith(expect.objectContaining({
