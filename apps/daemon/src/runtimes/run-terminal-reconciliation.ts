@@ -36,6 +36,7 @@ import {
 } from '../observability/delivery-state.js';
 import {
   beginPosthogTerminalDelivery,
+  classifyMatureUnfinishedRun,
   finalizePosthogTerminalDelivery,
   markTerminalLifecycleReconciled,
   terminalLifecycleForPosthogLocalQueue,
@@ -66,6 +67,26 @@ function recoveredTerminalIntegrity(value: unknown): TrackingRunTerminalIntegrit
     ? value as TrackingRunTerminalIntegrity
     : 'reconciled';
 }
+
+function acknowledgeReadableTerminalPersistence(
+  lifecycle: RunTerminalLifecycleV1,
+): RunTerminalLifecycleV1 {
+  const acknowledged = {
+    ...lifecycle,
+    terminalPersistence: {
+      status: 'acknowledged' as const,
+      errorType: null,
+    },
+  };
+  return {
+    ...acknowledged,
+    unfinishedState: classifyMatureUnfinishedRun({
+      runStatus: 'terminal',
+      terminalLifecycle: acknowledged,
+    }),
+  };
+}
+
 interface AnalyticsRecovery {
   context: Record<string, unknown>;
   properties: Record<string, unknown>;
@@ -456,23 +477,23 @@ export async function reconcileDurableRunTerminals(
     const events = readEvents(options.runsLogDir, state.id);
     if (needsAnalytics && state.analyticsRecovery) {
       state.terminalLifecycle = markTerminalLifecycleReconciled(
-        state.terminalLifecycle ?? terminalLifecycleSnapshot({
-          cumulativeRetryAttemptCount: state.cumulativeRetryAttemptCount,
-          retryAttemptCount: state.retryAttemptCount,
-          manualResumeAttemptCount: state.manualResumeAttemptCount,
-          runtimeGenerationId: state.runtimeGenerationId,
-          cancelOrigin: state.cancelOrigin ?? null,
-          terminalTrigger: state.terminalTrigger ?? null,
-          terminalIntegrity: recoveredTerminalIntegrity(
-            state.analyticsRecovery.properties.terminal_integrity,
-          ),
-          terminalPersistence: {
-            // Reading this terminal snapshot from the journal proves the local
-            // terminal write crossed its durable boundary.
-            status: 'acknowledged',
-            errorType: null,
-          },
-        }),
+        acknowledgeReadableTerminalPersistence(
+          state.terminalLifecycle ?? terminalLifecycleSnapshot({
+            cumulativeRetryAttemptCount: state.cumulativeRetryAttemptCount,
+            retryAttemptCount: state.retryAttemptCount,
+            manualResumeAttemptCount: state.manualResumeAttemptCount,
+            runtimeGenerationId: state.runtimeGenerationId,
+            cancelOrigin: state.cancelOrigin ?? null,
+            terminalTrigger: state.terminalTrigger ?? null,
+            terminalIntegrity: recoveredTerminalIntegrity(
+              state.analyticsRecovery.properties.terminal_integrity,
+            ),
+            terminalPersistence: {
+              status: 'acknowledged',
+              errorType: null,
+            },
+          }),
+        ),
         reconciliationGenerationId,
       );
       state.terminalLifecycle = beginPosthogTerminalDelivery(state.terminalLifecycle);

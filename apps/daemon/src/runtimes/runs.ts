@@ -1033,8 +1033,8 @@ export function createChatRunService({
     return writeDurableState(run.statePath, durableRunState(run));
   };
 
-  const persistTerminalState = (run) => {
-    const priorTerminalPersistence = run.terminalLifecycle?.terminalPersistence;
+  const persistTerminalState = (run, lifecycleEvidence = run.terminalLifecycle) => {
+    const priorTerminalPersistence = lifecycleEvidence?.terminalPersistence;
     const terminalPersistence = run.statePath
       ? { status: 'acknowledged', errorType: null }
       : { status: 'unknown', errorType: null };
@@ -1045,11 +1045,12 @@ export function createChatRunService({
       runtimeGenerationId: run.runtimeGenerationId,
       cancelOrigin: run.cancelOrigin ?? null,
       terminalTrigger: run.terminalTrigger ?? null,
-      terminalIntegrity: run.terminalIntegrity ?? 'canonical',
+      terminalIntegrity:
+        lifecycleEvidence?.terminalIntegrity ?? run.terminalIntegrity ?? 'canonical',
       terminalPersistence,
-      posthogDelivery: run.terminalLifecycle?.posthogDelivery,
-      duplicateTerminalCount: run.terminalLifecycle?.duplicateTerminalCount,
-      lateTerminalCount: run.terminalLifecycle?.lateTerminalCount,
+      posthogDelivery: lifecycleEvidence?.posthogDelivery,
+      duplicateTerminalCount: lifecycleEvidence?.duplicateTerminalCount,
+      lateTerminalCount: lifecycleEvidence?.lateTerminalCount,
     });
     if (!run.statePath) return { ok: false, errorType: 'storage_unavailable' };
     const result = persistState(run);
@@ -1061,7 +1062,8 @@ export function createChatRunService({
         runtimeGenerationId: run.runtimeGenerationId,
         cancelOrigin: run.cancelOrigin ?? null,
         terminalTrigger: run.terminalTrigger ?? null,
-        terminalIntegrity: run.terminalIntegrity ?? 'canonical',
+        terminalIntegrity:
+          run.terminalLifecycle?.terminalIntegrity ?? run.terminalIntegrity ?? 'canonical',
         posthogDelivery: run.terminalLifecycle?.posthogDelivery,
         duplicateTerminalCount: run.terminalLifecycle?.duplicateTerminalCount,
         lateTerminalCount: run.terminalLifecycle?.lateTerminalCount,
@@ -1409,7 +1411,13 @@ export function createChatRunService({
       : {}),
   });
 
-  const commitFinish = (run, status, code: number | null = null, signal: string | null = null) => {
+  const commitFinish = (
+    run,
+    status,
+    code: number | null = null,
+    signal: string | null = null,
+    lifecycleEvidence = null,
+  ) => {
     if (TERMINAL_RUN_STATUSES.has(run.status)) return;
     if (beforeFinish) beforeFinish(run, status, code, signal);
     const terminalAt = Date.now();
@@ -1436,7 +1444,7 @@ export function createChatRunService({
         && todoSnapshotHasUnfinishedWork(run.lastTodoSnapshot));
     // Commit the terminal Run snapshot before exposing its terminal event. The
     // optional outbox hook is local-only and synchronous by contract.
-    persistTerminalState(run);
+    persistTerminalState(run, lifecycleEvidence);
     finalizeTerminalLocally(run, status, terminalAt);
     // Release run-scoped resources the starter registered (e.g. the minted
     // tool-token grant + agent event-sink entries). This runs on EVERY
@@ -1497,9 +1505,35 @@ export function createChatRunService({
       }
       return;
     }
-    if (run.pendingTerminalFinish) return;
+    if (run.pendingTerminalFinish) {
+      const pending = run.pendingTerminalFinish;
+      const kind = pending.status === status
+        && (pending.code ?? null) === code
+        && (pending.signal ?? null) === signal
+        ? 'duplicate'
+        : 'late';
+      pending.lifecycle = recordIgnoredTerminalClaim(pending.lifecycle, kind);
+      return;
+    }
     if ((run.processTreeTerminationPending ?? 0) > 0) {
-      run.pendingTerminalFinish = { status, code, signal };
+      run.pendingTerminalFinish = {
+        status,
+        code,
+        signal,
+        lifecycle: terminalLifecycleSnapshot({
+          cumulativeRetryAttemptCount: run.cumulativeRetryAttemptCount,
+          retryAttemptCount: run.retryAttemptCount,
+          manualResumeAttemptCount: run.manualResumeAttemptCount,
+          runtimeGenerationId: run.runtimeGenerationId,
+          cancelOrigin: run.cancelOrigin ?? null,
+          terminalTrigger: run.terminalTrigger ?? null,
+          terminalIntegrity: run.terminalIntegrity ?? 'canonical',
+          terminalPersistence: {
+            status: 'unknown',
+            errorType: null,
+          },
+        }),
+      };
       return;
     }
     commitFinish(run, status, code, signal);
@@ -1812,7 +1846,13 @@ export function createChatRunService({
       if (run.processTreeTerminationPending === 0 && run.pendingTerminalFinish) {
         const pending = run.pendingTerminalFinish;
         run.pendingTerminalFinish = null;
-        commitFinish(run, pending.status, pending.code, pending.signal);
+        commitFinish(
+          run,
+          pending.status,
+          pending.code,
+          pending.signal,
+          pending.lifecycle,
+        );
       }
     });
 

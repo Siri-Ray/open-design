@@ -381,6 +381,81 @@ describe('durable run terminal reconciliation', () => {
       .not.toHaveProperty('analyticsRecovery.completedAt');
   });
 
+  it('treats a readable terminal journal as acknowledged persistence during replay', async () => {
+    const runId = 'run-readable-terminal-journal';
+    const runDir = path.join(tmpDir, runId);
+    fs.mkdirSync(runDir, { recursive: true });
+    fs.writeFileSync(path.join(runDir, 'state.json'), JSON.stringify({
+      schemaVersion: 1,
+      id: runId,
+      projectId: 'p1',
+      conversationId: 'c1',
+      assistantMessageId: null,
+      agentId: 'amr',
+      status: 'failed',
+      createdAt: 1_000,
+      updatedAt: 2_000,
+      errorCode: 'AGENT_EXIT_1',
+      analyticsRecovery: {
+        context: {},
+        properties: { run_id: runId },
+        insertId: 'run-readable-terminal-journal',
+      },
+      langfuseCompletedAt: 2_000,
+      terminalLifecycle: {
+        version: 1,
+        runAttempt: 0,
+        runtimeGenerationId: null,
+        terminationOrigin: 'unknown',
+        terminalIntegrity: 'canonical',
+        terminalPersistence: {
+          status: 'failed',
+          errorType: 'storage_full',
+        },
+        posthogDelivery: {
+          status: 'failed',
+          acknowledgement: 'none',
+          attemptCount: 0,
+          errorType: 'enqueue_failed',
+        },
+        unfinishedState: 'terminated_persistence_missing',
+        duplicateTerminalCount: 0,
+        lateTerminalCount: 0,
+      },
+    }));
+    const capture = vi.fn(async () => ({
+      status: 'queued' as const,
+      acknowledgement: 'local_buffer' as const,
+      errorType: null,
+    }));
+
+    await expect(reconcileDurableRunTerminals({
+      analytics: { capture },
+      appVersion: '0.15.1',
+      db,
+      reportLangfuse: vi.fn(),
+      runsLogDir: tmpDir,
+    })).resolves.toMatchObject({ analyticsReplayed: 1 });
+
+    expect(capture).toHaveBeenCalledWith(expect.objectContaining({
+      properties: expect.objectContaining({
+        terminal_persistence_status: 'acknowledged',
+        terminal_persistence_error_type: null,
+        mature_unfinished_state: 'unknown',
+      }),
+    }));
+    expect(JSON.parse(fs.readFileSync(path.join(runDir, 'state.json'), 'utf8')))
+      .toMatchObject({
+        terminalLifecycle: {
+          terminalPersistence: {
+            status: 'acknowledged',
+            errorType: null,
+          },
+          unfinishedState: 'unknown',
+        },
+      });
+  });
+
   it('repairs legacy queued messages even when no state journal exists', async () => {
     db.prepare(
       `INSERT INTO messages (id, run_id, run_status, events_json)

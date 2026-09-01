@@ -610,6 +610,55 @@ describe('chat run service shutdown', () => {
     expect(run.events.filter((event: { event: string }) => event.event === 'end')).toHaveLength(1);
     await expect(wait).resolves.toMatchObject({ status: 'succeeded', exitCode: 0, signal: null });
   });
+
+  it('retains duplicate and late terminal claims while process-tree teardown is pending', async () => {
+    const childPid = 40_500;
+    const child = new FakeChildProcess({ closeOn: 'SIGTERM', pid: childPid });
+    let releaseInitialSnapshots: (
+      snapshots: Array<{ pid: number; ppid: number; command: string }>,
+    ) => void = () => undefined;
+    const initialSnapshots = new Promise<Array<{
+      pid: number;
+      ppid: number;
+      command: string;
+    }>>((resolve) => {
+      releaseInitialSnapshots = resolve;
+    });
+    platformMocks.listProcessSnapshots
+      .mockReturnValueOnce(initialSnapshots)
+      .mockResolvedValueOnce([{ pid: childPid, ppid: 1, command: 'agent' }])
+      .mockResolvedValueOnce([{ pid: process.pid, ppid: 1, command: 'vitest' }]);
+    platformMocks.stopProcesses.mockResolvedValue({
+      alreadyStopped: false,
+      forcedPids: [],
+      matchedPids: [childPid],
+      remainingPids: [],
+      stoppedPids: [childPid],
+    });
+    const runs = createRuns();
+    const run = runs.create({ projectId: 'project-1', conversationId: 'conv-1' });
+    run.status = 'running';
+
+    const teardown = runs.terminateProcessTree(run, child, null);
+    runs.finish(run, 'failed', 1, null);
+    runs.finish(run, 'failed', 1, null);
+    runs.finish(run, 'succeeded', 0, null);
+
+    expect(run.status).toBe('running');
+    releaseInitialSnapshots([{ pid: childPid, ppid: 1, command: 'agent' }]);
+    await teardown;
+
+    expect(runs.statusBody(run)).toMatchObject({
+      status: 'failed',
+      exitCode: 1,
+      terminalLifecycle: {
+        terminalIntegrity: 'late',
+        duplicateTerminalCount: 1,
+        lateTerminalCount: 1,
+      },
+    });
+  });
+
   it('filters active runs by conversation within the same project', () => {
     const runs = createRuns();
     const runA = runs.create({ projectId: 'project-1', conversationId: 'conv-a' });
