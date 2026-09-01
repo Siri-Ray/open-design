@@ -14582,15 +14582,21 @@ export async function startServer({
       });
     } else if (def.streamFormat === 'acp-json-rpc') {
       const acpStageTimeoutMs = resolveAcpStageTimeoutMs(def.inactivityTimeoutMs);
+      const knownPromptBudgetModel = findKnownModel(
+        def,
+        safeModel,
+        requestedLiveModelScope,
+      );
       const knownContextWindowTokens =
-        findKnownModel(def, safeModel, requestedLiveModelScope)?.metadata
-          ?.contextWindowTokens ?? null;
+        knownPromptBudgetModel?.metadata?.contextWindowTokens ?? null;
       acpSession = attachAcpSession({
         child,
         prompt: composed,
         cwd: effectiveCwd,
         model: safeModel,
         promptBudgetContext: {
+          modelId: knownPromptBudgetModel?.id ?? null,
+          modelIdSource: knownPromptBudgetModel ? 'model_catalog' : 'unknown',
           contextWindowTokens: knownContextWindowTokens,
           contextWindowSource:
             knownContextWindowTokens !== null

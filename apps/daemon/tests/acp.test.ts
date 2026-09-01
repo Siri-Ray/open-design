@@ -66,6 +66,7 @@ test('attachAcpSession emits exact bounded prompt_budget_v1 facts for a new sess
   const writes: string[] = [];
   const events: Array<{ event: string; payload: any }> = [];
   const prompt = '多字节\n"escaped"\\tail';
+  const peerOpaqueModel = 'opaque_peer_controlled_identifier';
   child.stdin.on('data', (chunk) => writes.push(String(chunk)));
 
   attachAcpSession({
@@ -76,6 +77,8 @@ test('attachAcpSession emits exact bounded prompt_budget_v1 facts for a new sess
     resourcePaths: ['/private/customer/secret-input.txt'],
     mcpServers: [],
     promptBudgetContext: {
+      modelId: 'claude-opus-5',
+      modelIdSource: 'model_catalog',
       contextWindowTokens: 200_000,
       contextWindowSource: 'model_metadata',
       priorSessionUsageSource: 'unknown',
@@ -84,8 +87,12 @@ test('attachAcpSession emits exact bounded prompt_budget_v1 facts for a new sess
   });
 
   writeAcpResult(child, 1, {});
-  writeAcpResult(child, 2, { sessionId: 'private-session-id' });
-  writeAcpResult(child, 3, {});
+  writeAcpResult(child, 2, {
+    sessionId: 'private-session-id',
+    models: { currentModelId: peerOpaqueModel },
+  });
+  writeAcpResult(child, 3, { models: { currentModelId: peerOpaqueModel } });
+  writeAcpResult(child, 4, {});
 
   const promptFrame = writes.find((frame) => JSON.parse(frame).method === 'session/prompt');
   assert.ok(promptFrame);
@@ -111,6 +118,7 @@ test('attachAcpSession emits exact bounded prompt_budget_v1 facts for a new sess
   });
   const serializedDiagnostic = JSON.stringify(diagnostic);
   assert.equal(serializedDiagnostic.includes(prompt), false);
+  assert.equal(serializedDiagnostic.includes(peerOpaqueModel), false);
   assert.equal(serializedDiagnostic.includes('private-session-id'), false);
   assert.equal(serializedDiagnostic.includes('/private/customer'), false);
 });
@@ -144,6 +152,42 @@ test('attachAcpSession buckets unavailable resume context without identifiers', 
   assert.equal(diagnostic.priorSessionUsageSource, 'unknown');
   assert.equal('priorSessionInputTokens' in diagnostic, false);
   assert.equal(JSON.stringify(diagnostic).includes('private-'), false);
+});
+
+test('attachAcpSession buckets non-catalog model identities as other', () => {
+  const child = new FakeAcpChild();
+  const events: Array<{ event: string; payload: any }> = [];
+  const requestedOpaqueModel = 'requested_opaque_identifier';
+  const peerOpaqueModel = 'peer_opaque_identifier';
+
+  attachAcpSession({
+    child: child as never,
+    prompt: 'model privacy',
+    model: requestedOpaqueModel,
+    mcpServers: [],
+    promptBudgetContext: {
+      modelId: null,
+      modelIdSource: 'unknown',
+    },
+    send: (event, payload) => events.push({ event, payload }),
+  });
+
+  writeAcpResult(child, 1, {});
+  writeAcpResult(child, 2, {
+    sessionId: 'session-1',
+    models: { currentModelId: peerOpaqueModel },
+  });
+  writeAcpResult(child, 3, { models: { currentModelId: peerOpaqueModel } });
+  writeAcpResult(child, 4, {});
+
+  const diagnostic = events
+    .filter((entry) => entry.event === 'agent')
+    .map((entry) => entry.payload)
+    .find((payload) => payload.type === 'diagnostic' && payload.name === 'prompt_budget_v1');
+  assert.equal(diagnostic.modelId, 'other');
+  const serialized = JSON.stringify(diagnostic);
+  assert.equal(serialized.includes(requestedOpaqueModel), false);
+  assert.equal(serialized.includes(peerOpaqueModel), false);
 });
 
 test('ACP model normalization prefers session configOptions models', () => {

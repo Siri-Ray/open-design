@@ -88,6 +88,8 @@ const NON_DISPLAYABLE_ACP_SESSION_UPDATES = new Set([
 export type { AcpEmissionMeta } from './emission-provenance.js';
 
 export interface AcpPromptBudgetContext {
+  modelId?: string | null;
+  modelIdSource?: 'model_catalog' | 'unknown';
   contextWindowTokens?: number | null;
   contextWindowSource?: 'model_metadata' | 'unknown';
   priorSessionInputTokens?: number | null;
@@ -222,6 +224,13 @@ export function attachAcpSession({
       return 'other';
     }
     return redactSecrets(trimmed) === trimmed ? trimmed : 'redacted';
+  };
+  const promptBudgetModelId = (): string => {
+    if (promptBudgetContext?.modelIdSource === 'model_catalog') {
+      return boundedModelId(promptBudgetContext.modelId);
+    }
+    const requested = typeof model === 'string' ? model.trim() : '';
+    return !requested || requested.toLowerCase() === 'default' ? 'default' : 'other';
   };
   let expectedId = 1;
   let nextId = 2;
@@ -514,7 +523,10 @@ export function attachAcpSession({
                 promptTokenEstimate: Math.ceil(boundedPromptBytes / 3),
                 tokenEstimateMethod: 'utf8_bytes_div_3_ceil_v1',
                 sessionMode: resumeSessionId ? 'resume' : 'new',
-                modelId: boundedModelId(activeModel ?? model),
+                // ACP response fields are peer-controlled. Persist only the
+                // catalog identity supplied by the daemon; bucket everything
+                // else instead of projecting the peer's active model value.
+                modelId: promptBudgetModelId(),
                 contextWindowSource:
                   contextWindowTokens !== undefined &&
                   promptBudgetContext?.contextWindowSource === 'model_metadata'
