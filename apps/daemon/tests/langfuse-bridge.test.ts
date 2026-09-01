@@ -610,6 +610,65 @@ describe('langfuse-bridge.reportRunCompletedFromDaemon', () => {
     expect(JSON.stringify(batch)).not.toContain('PRIVATE_');
   });
 
+  it('projects a retained prompt budget after the diagnostic leaves the 2,000-event tail', async () => {
+    await writeAppCfg({
+      installationId: 'install-uuid-1',
+      telemetry: { metrics: true, content: true, artifactManifest: false },
+    });
+    const fetchSpy = vi.fn().mockResolvedValue(new Response('{}', { status: 207 }));
+    process.env.LANGFUSE_PUBLIC_KEY = 'pk';
+    process.env.LANGFUSE_SECRET_KEY = 'sk';
+    try {
+      await reportRunCompletedFromDaemon({
+        db: makeDbWithListMessages({
+          'conv-1': [{ id: 'msg-1', role: 'assistant', content: '', producedFiles: [] }],
+        }),
+        dataDir,
+        run: makeRun({
+          agentId: 'amr',
+          events: Array.from({ length: 2_001 }, (_, index) => ({
+            id: index + 2,
+            event: 'agent',
+            timestamp: Date.now() - 2_001 + index,
+            data: { type: 'status', label: 'working' },
+          })),
+          promptBudgetDiagnostics: {
+            prompt_budget_version: 'prompt_budget_v1',
+            prompt_frame_bytes: 34_810,
+            prompt_bytes: 34_222,
+            prompt_token_estimate: 11_408,
+            prompt_token_estimate_method: 'utf8_bytes_div_3_ceil_v1',
+            prompt_session_mode: 'resume',
+            prompt_model_id: 'claude-opus-5',
+            prompt_context_window_source: 'model_metadata',
+            prompt_context_window_tokens: 200_000,
+            prompt_prior_session_usage_source: 'agent_session',
+            prompt_prior_session_input_tokens: 123_456,
+          },
+        }) as any,
+        fetchImpl: fetchSpy as any,
+      });
+    } finally {
+      delete process.env.LANGFUSE_PUBLIC_KEY;
+      delete process.env.LANGFUSE_SECRET_KEY;
+    }
+
+    const batch = JSON.parse(fetchSpy.mock.calls[0]![1]!.body as string).batch as any[];
+    expect(
+      bodyOf(batch, 'event-create', 'agent-diagnostic:prompt_budget_v1'),
+    ).toMatchObject({
+      output: {
+        frame_bytes: 34_810,
+        prompt_bytes: 34_222,
+        prior_session_input_tokens: 123_456,
+      },
+    });
+    expect(batch[0].body.metadata.diagnostics).toMatchObject({
+      prompt_budget_version: 'prompt_budget_v1',
+      prompt_frame_bytes: 34_810,
+    });
+  });
+
   it('keeps canonical tool spans without projecting ACP tool snapshot statuses', async () => {
     await writeAppCfg({
       installationId: 'install-uuid-1',

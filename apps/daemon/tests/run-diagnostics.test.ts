@@ -452,4 +452,34 @@ describe('run diagnostics', () => {
     expect(result.prompt_budget_version).toBeUndefined();
     expect(result.prompt_frame_bytes).toBeUndefined();
   });
+
+  it('keeps the retained prompt budget after more than 2,000 later events', () => {
+    const result = summarizeRunDiagnosticsForAnalytics({
+      events: Array.from({ length: 2_001 }, () => ({
+        event: 'agent',
+        data: { type: 'status', label: 'working' },
+      })),
+      promptBudgetDiagnostics: {
+        prompt_budget_version: 'prompt_budget_v1',
+        prompt_frame_bytes: 228,
+        prompt_bytes: 24,
+        prompt_token_estimate: 8,
+        prompt_token_estimate_method: 'utf8_bytes_div_3_ceil_v1',
+        prompt_session_mode: 'new',
+        prompt_model_id: 'claude-opus-5',
+        prompt_context_window_source: 'model_metadata',
+        prompt_context_window_tokens: 200_000,
+        prompt_prior_session_usage_source: 'unknown',
+      },
+      exitCode: 0,
+      signal: null,
+    });
+
+    expect(result).toMatchObject({
+      prompt_budget_version: 'prompt_budget_v1',
+      prompt_frame_bytes: 228,
+      prompt_bytes: 24,
+      prompt_model_id: 'claude-opus-5',
+    });
+  });
 });

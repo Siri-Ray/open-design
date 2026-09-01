@@ -13,6 +13,7 @@ import {
   upsertMessage,
 } from '../src/db.js';
 import {
+  createPhysicalAgentSessionUsageTracker,
   computeIncludeStable,
   hashStableInstructions,
   isAgentResumeFailure,
@@ -26,6 +27,25 @@ import {
   resolveAgentResumeFailurePolicy,
   resolveAgentResumePromptPolicy,
 } from '../src/agent-session-resume.js';
+
+describe('physical agent session usage', () => {
+  it('does not leak usage across sessions and retains it for an exact-session continuation', () => {
+    const attemptA = createPhysicalAgentSessionUsageTracker();
+    attemptA.observe('agent', {
+      type: 'usage',
+      usage: { input_tokens: 12, output_tokens: 3 },
+    });
+    expect(attemptA.inputTokens()).toBe(12);
+
+    const differentSessionAttempt = createPhysicalAgentSessionUsageTracker();
+    expect(differentSessionAttempt.inputTokens()).toBeNull();
+
+    const forcedSameSessionContinuation = createPhysicalAgentSessionUsageTracker(
+      attemptA.inputTokens(),
+    );
+    expect(forcedSameSessionContinuation.inputTokens()).toBe(12);
+  });
+});
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 

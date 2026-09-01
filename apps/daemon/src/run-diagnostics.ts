@@ -380,6 +380,8 @@ export function collectStdoutTailSummary(
 
 export function summarizeRunDiagnosticsForAnalytics(args: {
   events?: RunEventForDiagnostics[];
+  /** Validated projection folded before the in-memory event tail can evict it. */
+  promptBudgetDiagnostics?: Partial<RunDiagnosticsAnalytics> | null | undefined;
   exitCode?: number | null;
   signal?: string | null;
   cancelRequested?: boolean;
@@ -401,7 +403,8 @@ export function summarizeRunDiagnosticsForAnalytics(args: {
   let recordedCloseReason: RunCloseReason | null = null;
   let resumeAutoReseeded = false;
   let amrOpenCodeDiagnostics: Partial<RunDiagnosticsAnalytics> = {};
-  let promptBudgetDiagnostics: Partial<RunDiagnosticsAnalytics> = {};
+  let promptBudgetDiagnostics: Partial<RunDiagnosticsAnalytics> =
+    args.promptBudgetDiagnostics ?? {};
   for (const event of events) {
     if (event.event === 'stderr') {
       const chunk = readStderrChunk(event.data);

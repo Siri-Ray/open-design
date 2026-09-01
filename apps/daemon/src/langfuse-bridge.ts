@@ -62,6 +62,7 @@ import {
   collectStdoutTailSummary,
   promptBudgetAnalyticsFromDiagnostic,
   summarizeRunDiagnosticsForAnalytics,
+  type RunDiagnosticsAnalytics,
 } from './run-diagnostics.js';
 import {
   classifyRunFailure,
@@ -122,6 +123,7 @@ export interface DaemonRunRecord {
   retryFinalResult?: string;
   retrySuppressedReason?: string;
   retryOriginalFailure?: RunFailureClassification;
+  promptBudgetDiagnostics?: Partial<RunDiagnosticsAnalytics> | null;
   strategyRolloutDecision?: OdNextRolloutDecision | null;
 }
 
@@ -153,6 +155,7 @@ export interface SafeRunQualityDaemonRunRecord {
   cancelOrigin?: TrackingRunCancelOrigin | null | undefined;
   terminalTrigger?: TrackingRunTerminalTrigger | null | undefined;
   analyticsTelemetry?: RunTelemetryTimestamps | null | undefined;
+  promptBudgetDiagnostics?: Partial<RunDiagnosticsAnalytics> | null | undefined;
   userPrompt?: string | undefined;
   projectAttachmentPaths?: string[] | undefined;
   projectMetadata?: Record<string, unknown> | null | undefined;
@@ -498,12 +501,14 @@ function collectAgentEvents(
   runStartedAt: number,
   runEndedAt: number,
   agentId: string | null | undefined,
+  retainedPromptBudget?: Partial<RunDiagnosticsAnalytics> | null,
 ): AgentEventSummary[] {
   const out: AgentEventSummary[] = [];
   const statusCounts = new Map<string, number>();
   const diagnosticCounts = new Map<string, number>();
   let thinkingCount = 0;
   let usageCount = 0;
+  let promptBudgetObserved = false;
   const source =
     typeof agentId === 'string' && agentId.trim().length > 0
       ? agentId.trim()
@@ -608,6 +613,7 @@ function collectAgentEvents(
       const promptBudget = promptBudgetAnalyticsFromDiagnostic(
         data as Record<string, unknown>,
       );
+      if (promptBudget) promptBudgetObserved = true;
       out.push({
         id: `diagnostic-${diagnosticName}-${index}`,
         name: `agent-diagnostic:${diagnosticName}`,
@@ -660,6 +666,38 @@ function collectAgentEvents(
         },
       });
     }
+  }
+  if (!promptBudgetObserved && retainedPromptBudget?.prompt_budget_version === 'prompt_budget_v1') {
+    out.push({
+      id: 'diagnostic-prompt_budget_v1-retained',
+      name: 'agent-diagnostic:prompt_budget_v1',
+      timestamp: runStartedAt,
+      input: eventInput('diagnostic'),
+      output: {
+        name: 'prompt_budget_v1',
+        source: 'acp-json-rpc',
+        schema_version: 1,
+        frame_bytes: retainedPromptBudget.prompt_frame_bytes,
+        prompt_bytes: retainedPromptBudget.prompt_bytes,
+        prompt_token_estimate: retainedPromptBudget.prompt_token_estimate,
+        token_estimate_method: retainedPromptBudget.prompt_token_estimate_method,
+        session_mode: retainedPromptBudget.prompt_session_mode,
+        model_id: retainedPromptBudget.prompt_model_id,
+        context_window_source: retainedPromptBudget.prompt_context_window_source,
+        ...(retainedPromptBudget.prompt_context_window_tokens !== undefined
+          ? { context_window_tokens: retainedPromptBudget.prompt_context_window_tokens }
+          : {}),
+        prior_session_usage_source:
+          retainedPromptBudget.prompt_prior_session_usage_source,
+        ...(retainedPromptBudget.prompt_prior_session_input_tokens !== undefined
+          ? {
+              prior_session_input_tokens:
+                retainedPromptBudget.prompt_prior_session_input_tokens,
+            }
+          : {}),
+      },
+      metadata: { diagnostic_name: 'prompt_budget_v1' },
+    });
   }
   return out;
 }
@@ -1106,6 +1144,7 @@ export async function buildSafeRunQualityProjectionFromDaemon(
     : collectStdoutTailSummary(run.events);
   const diagnostics = summarizeRunDiagnosticsForAnalytics({
     events: run.events,
+    promptBudgetDiagnostics: run.promptBudgetDiagnostics,
     exitCode: run.exitCode ?? null,
     signal: run.signal ?? null,
     cancelRequested: status === 'canceled',
@@ -1241,6 +1280,7 @@ export async function reportRunCompletedFromDaemon(
     const artifacts = summarizeProducedFiles(traceObjectFilesRaw);
     const diagnostics = summarizeRunDiagnosticsForAnalytics({
       events: run.events,
+      promptBudgetDiagnostics: run.promptBudgetDiagnostics,
       exitCode: run.exitCode ?? null,
       signal: run.signal ?? null,
       cancelRequested: run.status === 'canceled',
@@ -1322,7 +1362,13 @@ export async function reportRunCompletedFromDaemon(
       manifestCompleteness: finalManifests.completeness,
       traceObjectSummary,
       tools: collectToolCalls(run.events, startedAt, endedAt),
-      agentEvents: collectAgentEvents(run.events, startedAt, endedAt, run.agentId),
+      agentEvents: collectAgentEvents(
+        run.events,
+        startedAt,
+        endedAt,
+        run.agentId,
+        run.promptBudgetDiagnostics,
+      ),
       eventsSummary: summarizeEvents(run.events, durationMs),
       prefs,
       ...(turn ? { turn } : {}),

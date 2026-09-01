@@ -13,6 +13,7 @@ import {
   parseStableSections,
   type StableSectionHashes,
 } from './prompts/stable-sections.js';
+import { scanRunEventsForUsageAnalytics } from './run-analytics-observability.js';
 
 type SqliteDb = Database.Database;
 
@@ -39,6 +40,45 @@ export interface AgentResumeContext {
   storedStableSections: StableSectionHashes | null;
   /** Set when a stored session existed but was rejected; see the type. */
   invalidationReason: ResumeInvalidationReason | null;
+}
+
+/**
+ * Tracks input usage for one physical agent session attempt. Logical Run
+ * retries retain their event history, so a different session needs a fresh
+ * tracker; only an exact-session continuation may seed the retained value.
+ */
+export function createPhysicalAgentSessionUsageTracker(
+  retainedInputTokens: number | null = null,
+): {
+  observe(event: string, data: unknown): void;
+  inputTokens(): number | null;
+} {
+  const usageEvents: Array<{ event: string; data: unknown }> = [];
+  const bounded = (value: unknown): number | null =>
+    typeof value === 'number' && Number.isSafeInteger(value) &&
+      value >= 0 && value <= 1_000_000_000
+      ? value
+      : null;
+  let latestInputTokens = bounded(retainedInputTokens);
+  return {
+    observe(event, data) {
+      if (
+        event !== 'agent' ||
+        !data ||
+        typeof data !== 'object' ||
+        Array.isArray(data) ||
+        (data as Record<string, unknown>).type !== 'usage'
+      ) {
+        return;
+      }
+      usageEvents.push({ event, data });
+      const usage = scanRunEventsForUsageAnalytics(usageEvents, null, 0);
+      latestInputTokens = bounded(
+        usage.input_tokens_effective ?? usage.input_tokens,
+      );
+    },
+    inputTokens: () => latestInputTokens,
+  };
 }
 
 export type CapturedAgentSessionResult = 'stored' | 'cleared' | 'skipped';

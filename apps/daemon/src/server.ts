@@ -556,6 +556,7 @@ import {
   type RunLifecycleStreamEventMarkers,
 } from './run-lifecycle-tracer.js';
 import { deriveRunErrorCode, runResultFromStatus } from './run-result.js';
+import { promptBudgetAnalyticsFromDiagnostic } from './run-diagnostics.js';
 import { classifyRunFailure, isResumableFailure } from './run-failure-classification.js';
 import { validateRunDeliverable } from './run-deliverable-validation.js';
 import {
@@ -802,6 +803,7 @@ import {
   upsertPreviewComment,
 } from './db.js';
 import {
+  createPhysicalAgentSessionUsageTracker,
   computeIncludeStable,
   hashStableInstructions,
   persistCapturedAgentSession,
@@ -7527,6 +7529,13 @@ export async function startServer({
       onEventEmitted: (run, record) => {
         if (!run.sideEffectLedger) run.sideEffectLedger = createRunSideEffectLedger();
         foldEventIntoRunSideEffectLedger(run.sideEffectLedger, record);
+        const data = record.data && typeof record.data === 'object' && !Array.isArray(record.data)
+          ? record.data
+          : null;
+        const promptBudget = data
+          ? promptBudgetAnalyticsFromDiagnostic(data as Record<string, unknown>)
+          : null;
+        if (promptBudget) run.promptBudgetDiagnostics = promptBudget;
       },
       onTerminal: createAmrTerminalReportFinalizer(amrTerminalReportOutbox),
       beforeFinish: (run, status) => {
@@ -11382,6 +11391,8 @@ export async function startServer({
             pendingNativeSessionContinue.stablePromptHash ?? null,
           storedStableSections:
             pendingNativeSessionContinue.stablePromptSections ?? null,
+          storedInputTokens:
+            pendingNativeSessionContinue.lastInputTokens ?? null,
           invalidationReason: null,
         }
       : resolvedAgentResumeCtx;
@@ -11403,10 +11414,13 @@ export async function startServer({
         nativeSessionRecovery: run.nativeSessionRecovery,
       });
     };
-    const observedInputTokensForSession = (): number | null => {
-      const usage = scanRunEventsForUsageAnalytics(run.events, null, 0);
-      return usage.input_tokens_effective ?? usage.input_tokens ?? null;
-    };
+    // Physical attempts share run.events, so scanning that logical-run tail can
+    // assign attempt A's usage to attempt B's different session. Keep only this
+    // attempt's usage frames here; a fresh startChatRun closure starts empty.
+    const physicalSessionUsage = createPhysicalAgentSessionUsageTracker(
+      pendingNativeSessionContinue?.lastInputTokens ?? null,
+    );
+    const observedInputTokensForSession = physicalSessionUsage.inputTokens;
     run.nativeSessionRecovery = initialNativeSessionRecoveryMetadata({
       agent: def,
       supportsSessionResume: agentSupportsSessionResume,
@@ -11746,6 +11760,9 @@ export async function startServer({
       }
     };
     const send = (event, data) => {
+      if (event === 'agent' && data?.type === 'usage') {
+        physicalSessionUsage.observe(event, data);
+      }
       if (strategyProtocol && event === 'agent' && data?.type === 'tool_use') {
         strategyToolUseCount += 1;
       }
@@ -12212,6 +12229,7 @@ export async function startServer({
           sessionId: liveSessionId,
           stablePromptHash: currentStableHash,
           stablePromptSections: currentStableSections,
+          lastInputTokens: observedInputTokensForSession(),
         };
         scheduleRetryRestart(postToolResumeDecision.retryDelayMs, {
           ...chatBody,
