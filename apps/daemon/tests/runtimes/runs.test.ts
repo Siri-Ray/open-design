@@ -1516,6 +1516,39 @@ describe('run event log persistence', () => {
     expect(runs.statusBody(run).terminalLifecycle).toEqual(state.terminalLifecycle);
   });
 
+  it('advances the durable terminal attempt after an automatic retry and manual resume', () => {
+    const runs = createRunsWithLog(tmpDir);
+    const run = runs.create({
+      projectId: 'p1',
+      conversationId: 'c1',
+      agentId: 'amr',
+    });
+    Object.assign(run, { retryAttemptCount: 1 });
+
+    runs.finish(run, 'failed', 1, null);
+    expect(runs.statusBody(run).terminalLifecycle?.runAttempt).toBe(1);
+
+    const runsAfterRestart = createRunsWithLog(tmpDir);
+    const runAfterRestart = runsAfterRestart.get(run.id);
+    expect(runAfterRestart).toMatchObject({ retryAttemptCount: 1 });
+
+    runsAfterRestart.prepareRestart(runAfterRestart);
+    const resumedState = JSON.parse(
+      fs.readFileSync(path.join(tmpDir, run.id, 'state.json'), 'utf8'),
+    );
+    expect(resumedState).toMatchObject({
+      status: 'queued',
+      cumulativeRetryAttemptCount: 1,
+      manualResumeAttemptCount: 1,
+    });
+
+    runsAfterRestart.finish(runAfterRestart, 'succeeded', 0, null);
+    const terminalState = JSON.parse(
+      fs.readFileSync(path.join(tmpDir, run.id, 'state.json'), 'utf8'),
+    );
+    expect(terminalState.terminalLifecycle.runAttempt).toBe(2);
+  });
+
   it('retains a bounded terminal persistence failure when the durable terminal write fails', () => {
     const runs = createChatRunService({
       createSseResponse: () => ({ send: vi.fn(() => true), end: vi.fn(), cleanup: vi.fn() }),

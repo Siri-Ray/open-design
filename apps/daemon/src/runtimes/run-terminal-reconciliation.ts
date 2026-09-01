@@ -102,6 +102,7 @@ interface DurableRunState extends RestartRecoverableDurableRunState {
   analyticsRecovery?: AnalyticsRecovery;
   langfuseCompletedAt?: number;
   telemetryDelivery?: RunTelemetryDeliveryStateV1;
+  cumulativeRetryAttemptCount?: number;
   retryAttemptCount?: number;
   manualResumeAttemptCount?: number;
   runtimeGenerationId?: string | null;
@@ -456,6 +457,7 @@ export async function reconcileDurableRunTerminals(
     if (needsAnalytics && state.analyticsRecovery) {
       state.terminalLifecycle = markTerminalLifecycleReconciled(
         state.terminalLifecycle ?? terminalLifecycleSnapshot({
+          cumulativeRetryAttemptCount: state.cumulativeRetryAttemptCount,
           retryAttemptCount: state.retryAttemptCount,
           manualResumeAttemptCount: state.manualResumeAttemptCount,
           runtimeGenerationId: state.runtimeGenerationId,

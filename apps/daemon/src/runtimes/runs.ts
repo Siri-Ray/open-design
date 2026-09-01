@@ -579,6 +579,12 @@ function durableRunState(run) {
     ...(run.externalPluginAnalytics
       ? { externalPluginAnalytics: run.externalPluginAnalytics }
       : {}),
+    ...(typeof run.cumulativeRetryAttemptCount === 'number'
+      ? { cumulativeRetryAttemptCount: run.cumulativeRetryAttemptCount }
+      : {}),
+    ...(typeof run.retryAttemptCount === 'number'
+      ? { retryAttemptCount: run.retryAttemptCount }
+      : {}),
     ...(typeof run.manualResumeAttemptCount === 'number'
       ? { manualResumeAttemptCount: run.manualResumeAttemptCount }
       : {}),
@@ -966,6 +972,7 @@ export function createChatRunService({
       // can't lazily re-open a stream nothing will ever close (FD leak).
       eventsLogClosed: false,
       cleanupGeneration: 0,
+      cumulativeRetryAttemptCount: 0,
       manualResumeAttemptCount: 0,
       rechargeWaitDurationMs: 0,
     };
@@ -1032,6 +1039,7 @@ export function createChatRunService({
       ? { status: 'acknowledged', errorType: null }
       : { status: 'unknown', errorType: null };
     run.terminalLifecycle = terminalLifecycleSnapshot({
+      cumulativeRetryAttemptCount: run.cumulativeRetryAttemptCount,
       retryAttemptCount: run.retryAttemptCount,
       manualResumeAttemptCount: run.manualResumeAttemptCount,
       runtimeGenerationId: run.runtimeGenerationId,
@@ -1047,6 +1055,7 @@ export function createChatRunService({
     const result = persistState(run);
     if (!result.ok && priorTerminalPersistence?.status !== 'acknowledged') {
       run.terminalLifecycle = terminalLifecycleSnapshot({
+        cumulativeRetryAttemptCount: run.cumulativeRetryAttemptCount,
         retryAttemptCount: run.retryAttemptCount,
         manualResumeAttemptCount: run.manualResumeAttemptCount,
         runtimeGenerationId: run.runtimeGenerationId,
@@ -1200,6 +1209,8 @@ export function createChatRunService({
     run.terminalTrigger = null;
     run.runtimeFailureObservedBeforeCancellation = false;
     run.retryRestartTimer = null;
+    run.cumulativeRetryAttemptCount = (run.cumulativeRetryAttemptCount ?? 0)
+      + (run.retryAttemptCount ?? 0);
     run.retryAttemptCount = 0;
     run.retryFinalResult = undefined;
     run.retrySuppressedReason = undefined;

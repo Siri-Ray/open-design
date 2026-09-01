@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  beginPosthogTerminalDelivery,
   boundedRuntimeGenerationId,
   classifyMatureUnfinishedRun,
   deriveRunTerminationOrigin,
+  finalizePosthogTerminalDelivery,
   recordIgnoredTerminalClaim,
   terminalLifecycleSnapshot,
   terminalPersistenceErrorType,
@@ -79,6 +81,24 @@ describe('run terminal lifecycle observability', () => {
   ])('classifies mature unfinished state %s without changing the denominator', (expected, input) => {
     expect(classifyMatureUnfinishedRun(input)).toBe(expected);
   });
+
+  it.each(['failed', 'in_flight'] as const)(
+    'keeps unfinished state unknown when persistence is unknown and delivery is %s',
+    (deliveryStatus) => {
+      const snapshot = terminalLifecycleSnapshot({
+        terminalPersistence: { status: 'unknown', errorType: null },
+      });
+      const afterDelivery = deliveryStatus === 'failed'
+        ? finalizePosthogTerminalDelivery(snapshot, {
+            status: 'failed',
+            acknowledgement: 'none',
+            errorType: 'enqueue_failed',
+          })
+        : beginPosthogTerminalDelivery(snapshot);
+
+      expect(afterDelivery.unfinishedState).toBe('unknown');
+    },
+  );
 
   it.each([
     ['EACCES', 'permission_denied'],

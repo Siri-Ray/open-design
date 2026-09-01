@@ -67,10 +67,12 @@ function normalizedAttemptCount(value: unknown): number {
 }
 
 export function runAttemptForTerminalLifecycle(input: {
+  cumulativeRetryAttemptCount?: unknown;
   retryAttemptCount?: unknown;
   manualResumeAttemptCount?: unknown;
 }): number {
-  return normalizedAttemptCount(input.retryAttemptCount)
+  return normalizedAttemptCount(input.cumulativeRetryAttemptCount)
+    + normalizedAttemptCount(input.retryAttemptCount)
     + normalizedAttemptCount(input.manualResumeAttemptCount);
 }
 
@@ -117,6 +119,7 @@ export function terminalPersistenceErrorType(
 }
 
 export function terminalLifecycleSnapshot(input: {
+  cumulativeRetryAttemptCount?: unknown;
   retryAttemptCount?: unknown;
   manualResumeAttemptCount?: unknown;
   runtimeGenerationId?: unknown;
@@ -236,10 +239,16 @@ export function classifyMatureUnfinishedRun(input: {
   if (input.terminalLifecycle.terminalPersistence.status === 'failed') {
     return 'terminated_persistence_missing';
   }
-  if (input.terminalLifecycle.posthogDelivery.status === 'failed') {
+  if (
+    input.terminalLifecycle.terminalPersistence.status === 'acknowledged'
+    && input.terminalLifecycle.posthogDelivery.status === 'failed'
+  ) {
     return 'terminal_persisted_posthog_failed';
   }
-  if (input.terminalLifecycle.posthogDelivery.status === 'in_flight') {
+  if (
+    input.terminalLifecycle.terminalPersistence.status === 'acknowledged'
+    && input.terminalLifecycle.posthogDelivery.status === 'in_flight'
+  ) {
     return 'recovery_pending';
   }
   return 'unknown';

@@ -161,6 +161,7 @@ export interface ChatRun {
   analyticsContext?: AnalyticsContext;
   analyticsRecovery?: { context?: AnalyticsContext } | null;
   externalPluginAnalytics?: Record<string, unknown> | null;
+  cumulativeRetryAttemptCount?: number;
   manualResumeAttemptCount?: number;
   rechargeWaitDurationMs?: number;
   artifactOriginStatus?:
