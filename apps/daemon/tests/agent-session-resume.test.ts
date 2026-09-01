@@ -99,6 +99,28 @@ describe('resolveAgentResumeContext', () => {
     expect(ctx.invalidationReason).toBeNull();
   });
 
+  it('exposes stored input usage only as resume observability context', () => {
+    const db = seed();
+    seedMessage(db, 'asst-1', 'assistant');
+    upsertAgentSession(db, {
+      conversationId: 'conv-1',
+      agentId: 'claude',
+      sessionId: 'sess-A',
+      lastMessageId: 'asst-1',
+      model: null,
+      cwd: null,
+      lastInputTokens: 123_456,
+    });
+
+    const ctx = resolveAgentResumeContext(db, {
+      conversationId: 'conv-1',
+      agentId: 'claude',
+    });
+
+    expect(ctx.isResuming).toBe(true);
+    expect(ctx.storedInputTokens).toBe(123_456);
+  });
+
   it('still resumes when only the current run placeholder is newer (normal follow-up)', () => {
     const db = seed();
     seedMessage(db, 'asst-1', 'assistant');

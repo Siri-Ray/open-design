@@ -29,6 +29,8 @@ export interface AgentResumeContext {
   isResuming: boolean;
   /** Hash of the stable instruction block last sent on this session, or null. */
   storedStablePromptHash: string | null;
+  /** Last effective input usage reported for this exact resumed session. */
+  storedInputTokens: number | null;
   /**
    * Per-section digests behind `storedStablePromptHash`, for naming which input
    * drifted when the hash no longer matches. Diagnostic only — never an input
@@ -203,6 +205,7 @@ export function resolveAgentResumeContext(
     newSessionId: randomUUID(),
     isResuming: resumable,
     storedStablePromptHash: resumable ? (record?.stablePromptHash ?? null) : null,
+    storedInputTokens: resumable ? (record?.lastInputTokens ?? null) : null,
     storedStableSections: resumable ? parseStableSections(record?.stablePromptSections) : null,
     invalidationReason,
   };
@@ -231,6 +234,7 @@ export function persistCapturedAgentSession(
     model?: string | null;
     cwd?: string | null;
     lastMessageId?: string | null;
+    lastInputTokens?: number | null;
   },
 ): CapturedAgentSessionResult {
   if (!input.conversationId) return 'skipped';
@@ -244,6 +248,7 @@ export function persistCapturedAgentSession(
       model: input.model ?? null,
       cwd: input.cwd ?? null,
       lastMessageId: input.lastMessageId ?? null,
+      lastInputTokens: input.lastInputTokens ?? null,
     });
     return 'stored';
   }

@@ -87,6 +87,13 @@ const NON_DISPLAYABLE_ACP_SESSION_UPDATES = new Set([
  */
 export type { AcpEmissionMeta } from './emission-provenance.js';
 
+export interface AcpPromptBudgetContext {
+  contextWindowTokens?: number | null;
+  contextWindowSource?: 'model_metadata' | 'unknown';
+  priorSessionInputTokens?: number | null;
+  priorSessionUsageSource?: 'agent_session' | 'unknown';
+}
+
 /**
  * Options for `attachAcpSession`. All fields except `child`, `prompt`, and
  * `send` are optional and carry sensible defaults.
@@ -124,6 +131,8 @@ export interface AttachAcpSessionOptions {
   // `session/new`. The agent verifies the session and, if it is gone, returns a
   // structured `resume_failed` error the caller maps to its reseed path.
   resumeSessionId?: string | null;
+  /** Safe model/session metadata attached to the exact prompt-frame diagnostic. */
+  promptBudgetContext?: AcpPromptBudgetContext;
   // Subsegment timing markers for spawn->first-token attribution (#3408 §4).
   // `onCliReady` fires once on the first well-formed ACP JSON-RPC message
   // (the CLI is up and speaking the protocol); `onSessionInit` fires once when
@@ -184,6 +193,7 @@ export function attachAcpSession({
   modelUnavailableErrorCode,
   completePromptOnTurnEnd = false,
   resumeSessionId,
+  promptBudgetContext,
   onCliReady,
   onSessionInit,
   onPromptComplete,
@@ -196,6 +206,23 @@ export function attachAcpSession({
   }
   const stdin = child.stdin;
   const stdout = child.stdout;
+
+  const nonNegativeInteger = (value: unknown): number | undefined =>
+    typeof value === 'number' &&
+    Number.isSafeInteger(value) &&
+    value >= 0 &&
+    value <= 1_000_000_000
+      ? value
+      : undefined;
+
+  const boundedModelId = (value: unknown): string => {
+    const trimmed = typeof value === 'string' ? value.trim() : '';
+    if (!trimmed) return 'default';
+    if (trimmed.length > 128 || !/^[A-Za-z0-9][A-Za-z0-9._/:@-]*$/.test(trimmed)) {
+      return 'other';
+    }
+    return redactSecrets(trimmed) === trimmed ? trimmed : 'redacted';
+  };
   let expectedId = 1;
   let nextId = 2;
   let promptRequestId: JsonRpcId | null = null;
@@ -455,7 +482,57 @@ export function attachAcpSession({
     currentStage = timeoutLabel;
     resetStageTimer(timeoutLabel);
     try {
-      sendRpc(stdin, id, method, params);
+      sendRpc(
+        stdin,
+        id,
+        method,
+        params,
+        method === 'session/prompt'
+          ? ({ frameBytes }) => {
+              const promptBytes = Buffer.byteLength(prompt, 'utf8');
+              const boundedFrameBytes = nonNegativeInteger(frameBytes);
+              const boundedPromptBytes = nonNegativeInteger(promptBytes);
+              if (
+                boundedFrameBytes === undefined ||
+                boundedPromptBytes === undefined
+              ) {
+                return;
+              }
+              const contextWindowTokens = nonNegativeInteger(
+                promptBudgetContext?.contextWindowTokens,
+              );
+              const priorSessionInputTokens = nonNegativeInteger(
+                promptBudgetContext?.priorSessionInputTokens,
+              );
+              send('agent', {
+                type: 'diagnostic',
+                name: 'prompt_budget_v1',
+                source: 'acp-json-rpc',
+                schemaVersion: 1,
+                frameBytes: boundedFrameBytes,
+                promptBytes: boundedPromptBytes,
+                promptTokenEstimate: Math.ceil(boundedPromptBytes / 3),
+                tokenEstimateMethod: 'utf8_bytes_div_3_ceil_v1',
+                sessionMode: resumeSessionId ? 'resume' : 'new',
+                modelId: boundedModelId(activeModel ?? model),
+                contextWindowSource:
+                  contextWindowTokens !== undefined &&
+                  promptBudgetContext?.contextWindowSource === 'model_metadata'
+                    ? 'model_metadata'
+                    : 'unknown',
+                ...(contextWindowTokens !== undefined ? { contextWindowTokens } : {}),
+                priorSessionUsageSource:
+                  priorSessionInputTokens !== undefined &&
+                  promptBudgetContext?.priorSessionUsageSource === 'agent_session'
+                    ? 'agent_session'
+                    : 'unknown',
+                ...(priorSessionInputTokens !== undefined
+                  ? { priorSessionInputTokens }
+                  : {}),
+              });
+            }
+          : undefined,
+      );
     } catch (err) {
       fail(`stdin write failed: ${errorMessage(err)}`);
     }

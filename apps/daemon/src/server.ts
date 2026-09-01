@@ -240,6 +240,7 @@ import {
   spawnEnvForAgent,
 } from './agents.js';
 import {
+  findKnownModel,
   getRememberedLiveModels,
   preferFreshLiveModels,
   rememberLiveModels,
@@ -11361,7 +11362,7 @@ export async function startServer({
             currentCwd: effectiveCwd,
             currentAssistantMessageId: run.assistantMessageId ?? null,
           })
-        : { storedSessionId: null as string | null, resumeSessionId: null as string | null, newSessionId: undefined as string | undefined, isResuming: false, storedStablePromptHash: null as string | null, storedStableSections: null as StableSectionHashes | null, invalidationReason: null };
+        : { storedSessionId: null as string | null, resumeSessionId: null as string | null, newSessionId: undefined as string | undefined, isResuming: false, storedStablePromptHash: null as string | null, storedInputTokens: null as number | null, storedStableSections: null as StableSectionHashes | null, invalidationReason: null };
     // A same-run post-tool recovery resumes the exact session id captured from
     // the interrupted attempt. The ordinary cross-turn cursor guard cannot
     // admit it yet because the current assistant placeholder is still in
@@ -11401,6 +11402,10 @@ export async function startServer({
         type: 'native_session_recovery',
         nativeSessionRecovery: run.nativeSessionRecovery,
       });
+    };
+    const observedInputTokensForSession = (): number | null => {
+      const usage = scanRunEventsForUsageAnalytics(run.events, null, 0);
+      return usage.input_tokens_effective ?? usage.input_tokens ?? null;
     };
     run.nativeSessionRecovery = initialNativeSessionRecoveryMetadata({
       agent: def,
@@ -12189,6 +12194,7 @@ export async function startServer({
           model: safeModel ?? null,
           cwd: effectiveCwd,
           lastMessageId: run.assistantMessageId ?? null,
+          lastInputTokens: observedInputTokensForSession(),
         });
         run.nativeSessionRecovery = markNativeSessionCaptured({
           previous: run.nativeSessionRecovery,
@@ -12299,6 +12305,7 @@ export async function startServer({
           model: safeModel ?? null,
           cwd: effectiveCwd,
           lastMessageId: run.assistantMessageId ?? null,
+          lastInputTokens: observedInputTokensForSession(),
         });
         run.nativeSessionRecovery = markNativeSessionCaptured({
           previous: run.nativeSessionRecovery,
@@ -12931,6 +12938,7 @@ export async function startServer({
             model: safeModel ?? null,
             cwd: effectiveCwd,
             lastMessageId: run.assistantMessageId ?? null,
+            lastInputTokens: observedInputTokensForSession(),
           });
           if (!agentCapturesSessionId) {
             run.nativeSessionRecovery = markNativeSessionCaptured({
@@ -12958,6 +12966,7 @@ export async function startServer({
             model: safeModel ?? null,
             cwd: effectiveCwd,
             lastMessageId: run.assistantMessageId ?? null,
+            lastInputTokens: observedInputTokensForSession(),
           });
           if (!agentCapturesSessionId) {
             run.nativeSessionRecovery = markNativeSessionCaptured({
@@ -14573,11 +14582,28 @@ export async function startServer({
       });
     } else if (def.streamFormat === 'acp-json-rpc') {
       const acpStageTimeoutMs = resolveAcpStageTimeoutMs(def.inactivityTimeoutMs);
+      const knownContextWindowTokens =
+        findKnownModel(def, safeModel, requestedLiveModelScope)?.metadata
+          ?.contextWindowTokens ?? null;
       acpSession = attachAcpSession({
         child,
         prompt: composed,
         cwd: effectiveCwd,
         model: safeModel,
+        promptBudgetContext: {
+          contextWindowTokens: knownContextWindowTokens,
+          contextWindowSource:
+            knownContextWindowTokens !== null
+              ? 'model_metadata'
+              : 'unknown',
+          priorSessionInputTokens: agentResumeCtx.isResuming
+            ? agentResumeCtx.storedInputTokens
+            : null,
+          priorSessionUsageSource:
+            agentResumeCtx.isResuming && agentResumeCtx.storedInputTokens !== null
+              ? 'agent_session'
+              : 'unknown',
+        },
         imagePaths: def.supportsImagePaths ? acpPromptImagePaths : [],
         resourcePaths: odNextTaskInputSnapshot?.attachmentPaths ?? [],
         mcpServers,
@@ -15508,6 +15534,7 @@ export async function startServer({
             model: safeModel ?? null,
             cwd: effectiveCwd,
             lastMessageId: run.assistantMessageId ?? null,
+            lastInputTokens: observedInputTokensForSession(),
           });
           run.nativeSessionRecovery = markNativeSessionCaptured({
             previous: run.nativeSessionRecovery,
@@ -15538,6 +15565,7 @@ export async function startServer({
           model: safeModel ?? null,
           cwd: effectiveCwd,
           lastMessageId: run.assistantMessageId ?? null,
+          lastInputTokens: observedInputTokensForSession(),
         });
         run.nativeSessionRecovery = markNativeSessionCaptured({
           previous: run.nativeSessionRecovery,

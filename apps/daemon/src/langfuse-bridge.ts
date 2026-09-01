@@ -60,6 +60,7 @@ import {
 import {
   collectStderrTailSummary,
   collectStdoutTailSummary,
+  promptBudgetAnalyticsFromDiagnostic,
   summarizeRunDiagnosticsForAnalytics,
 } from './run-diagnostics.js';
 import {
@@ -604,6 +605,9 @@ function collectAgentEvents(
           : 'runtime_diagnostic';
       const index = diagnosticCounts.get(diagnosticName) ?? 0;
       diagnosticCounts.set(diagnosticName, index + 1);
+      const promptBudget = promptBudgetAnalyticsFromDiagnostic(
+        data as Record<string, unknown>,
+      );
       out.push({
         id: `diagnostic-${diagnosticName}-${index}`,
         name: `agent-diagnostic:${diagnosticName}`,
@@ -627,6 +631,29 @@ function collectAgentEvents(
             : {}),
           ...(typeof data.suppressing === 'boolean' ? { suppressing: data.suppressing } : {}),
           ...(data.shape && typeof data.shape === 'object' ? { shape: data.shape } : {}),
+          ...(promptBudget
+            ? {
+                schema_version: 1,
+                frame_bytes: promptBudget.prompt_frame_bytes,
+                prompt_bytes: promptBudget.prompt_bytes,
+                prompt_token_estimate: promptBudget.prompt_token_estimate,
+                token_estimate_method: promptBudget.prompt_token_estimate_method,
+                session_mode: promptBudget.prompt_session_mode,
+                model_id: promptBudget.prompt_model_id,
+                context_window_source: promptBudget.prompt_context_window_source,
+                ...(promptBudget.prompt_context_window_tokens !== undefined
+                  ? { context_window_tokens: promptBudget.prompt_context_window_tokens }
+                  : {}),
+                prior_session_usage_source:
+                  promptBudget.prompt_prior_session_usage_source,
+                ...(promptBudget.prompt_prior_session_input_tokens !== undefined
+                  ? {
+                      prior_session_input_tokens:
+                        promptBudget.prompt_prior_session_input_tokens,
+                    }
+                  : {}),
+              }
+            : {}),
         },
         metadata: {
           diagnostic_name: diagnosticName,

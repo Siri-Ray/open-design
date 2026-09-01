@@ -691,6 +691,18 @@ export interface RunFinishedProps extends Omit<RunCreatedProps, 'area'> {
   retry_original_failure_category?: TrackingRunFailureCategory;
   retry_original_failure_detail?: TrackingRunFailureDetail;
   retry_original_failure_stage?: TrackingRunFailureStage;
+  /** Exact, content-free ACP prompt frame measurement captured at the writer boundary. */
+  prompt_budget_version?: 'prompt_budget_v1';
+  prompt_frame_bytes?: number;
+  prompt_bytes?: number;
+  prompt_token_estimate?: number;
+  prompt_token_estimate_method?: 'utf8_bytes_div_3_ceil_v1';
+  prompt_session_mode?: 'new' | 'resume';
+  prompt_model_id?: string;
+  prompt_context_window_source?: 'model_metadata' | 'unknown';
+  prompt_context_window_tokens?: number;
+  prompt_prior_session_usage_source?: 'agent_session' | 'unknown';
+  prompt_prior_session_input_tokens?: number;
 }
 
 export interface LangfuseReportResultProps {
