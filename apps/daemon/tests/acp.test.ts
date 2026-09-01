@@ -866,6 +866,185 @@ test('attachAcpSession preserves AMR assistant and model-step lifecycle diagnost
   });
 });
 
+test('attachAcpSession consumes bounded tool execution lifecycle diagnostics out of band', () => {
+  const child = new FakeAcpChild();
+  const events: Array<{ event: string; payload: unknown }> = [];
+  const toolCallId = 'bash:/Users/alice/private/.env?token=secret';
+  const update = {
+    sessionUpdate: 'tool_execution_lifecycle',
+    schema: 'vela.tool_execution_lifecycle',
+    version: 1,
+    toolCallId,
+    status: 'failed',
+    phase: 'close',
+    execution: {
+      version: 1,
+      requested_timeout_ms: 120_000,
+      effective_timeout_ms: 120_100,
+      force_kill_after_ms: 3_000,
+      trigger: 'deadline',
+      terminal: 'interrupted',
+      dropped_events: 2,
+      events: [
+        { phase: 'deadline', at_ms: 1_700_000_000_000, elapsed_ms: 120_000 },
+        {
+          phase: 'kill_sent',
+          at_ms: 1_700_000_000_010,
+          elapsed_ms: 120_010,
+          target: 'group',
+          mechanism: 'process_group',
+        },
+        {
+          phase: 'close',
+          at_ms: 1_700_000_000_020,
+          elapsed_ms: 120_020,
+          code: null,
+          signal: 'SIGKILL',
+          stdout_closed: true,
+          stderr_closed: false,
+        },
+      ],
+    },
+    toolTerminal: {
+      source: 'processor_cleanup',
+      confirmed: false,
+      at_ms: 1_700_000_000_030,
+    },
+    command: 'cat /Users/alice/private/.env',
+    path: '/Users/alice/private/.env',
+    rawOutput: 'OPENAI_API_KEY=secret',
+    metadata: { headers: { authorization: 'Bearer secret' } },
+  };
+
+  attachAcpSession({
+    child: child as never,
+    prompt: 'describe the project',
+    cwd: '/tmp/od-project',
+    model: null,
+    mcpServers: [],
+    send: (event, payload) => events.push({ event, payload }),
+  });
+
+  writeAcpResult(child, 1, {});
+  writeAcpResult(child, 2, { sessionId: 'session-1' });
+  writeAcpUpdate(child, update);
+  writeAcpUpdate(child, update);
+  writeAcpResult(child, 3, { usage: { inputTokens: 1, outputTokens: 2 } });
+
+  const agentPayloads = events
+    .filter((entry) => entry.event === 'agent')
+    .map((entry) => entry.payload as Record<string, unknown>);
+  const diagnostics = agentPayloads.filter(
+    (payload) => payload.type === 'diagnostic' && payload.name === 'tool_execution_lifecycle',
+  );
+  assert.equal(diagnostics.length, 1, 'duplicate lifecycle snapshots must be deduplicated');
+  assert.deepEqual(diagnostics[0], {
+    type: 'diagnostic',
+    name: 'tool_execution_lifecycle',
+    source: 'amr-opencode',
+    elapsedMs: diagnostics[0]?.elapsedMs,
+    schema: 'vela.tool_execution_lifecycle',
+    version: 1,
+    toolCallIdHash: acpTelemetryToolCallId(toolCallId),
+    status: 'failed',
+    phase: 'close',
+    executionVersion: 1,
+    requestedTimeoutMs: 120_000,
+    effectiveTimeoutMs: 120_100,
+    forceKillAfterMs: 3_000,
+    trigger: 'deadline',
+    terminal: 'interrupted',
+    droppedEvents: 2,
+    events: [
+      { phase: 'deadline', atMs: 1_700_000_000_000, elapsedMs: 120_000 },
+      {
+        phase: 'kill_sent',
+        atMs: 1_700_000_000_010,
+        elapsedMs: 120_010,
+        target: 'group',
+        mechanism: 'process_group',
+      },
+      {
+        phase: 'close',
+        atMs: 1_700_000_000_020,
+        elapsedMs: 120_020,
+        code: null,
+        signal: 'SIGKILL',
+        stdoutClosed: true,
+        stderrClosed: false,
+      },
+    ],
+    toolTerminal: {
+      source: 'processor_cleanup',
+      confirmed: false,
+      atMs: 1_700_000_000_030,
+    },
+  });
+  assert.equal(
+    agentPayloads.some(
+      (payload) => payload.type === 'status' && payload.label === 'tool_execution_lifecycle',
+    ),
+    false,
+  );
+  assert.equal(agentPayloads.some((payload) => payload.type === 'tool_result'), false);
+  const serialized = JSON.stringify(diagnostics);
+  for (const forbidden of ['cat ', '/Users/alice', 'OPENAI_API_KEY', 'authorization', 'Bearer']) {
+    assert.equal(serialized.includes(forbidden), false, `diagnostic leaked ${forbidden}`);
+  }
+});
+
+test('attachAcpSession keeps lifecycle observability failures from blocking the run', () => {
+  const child = new FakeAcpChild();
+  const events: Array<{ event: string; payload: unknown }> = [];
+
+  attachAcpSession({
+    child: child as never,
+    prompt: 'describe the project',
+    cwd: '/tmp/od-project',
+    model: null,
+    mcpServers: [],
+    send: (event, payload) => {
+      if (
+        event === 'agent' &&
+        (payload as { name?: unknown })?.name === 'tool_execution_lifecycle'
+      ) {
+        throw new Error('diagnostic persistence unavailable');
+      }
+      events.push({ event, payload });
+    },
+  });
+
+  writeAcpResult(child, 1, {});
+  writeAcpResult(child, 2, { sessionId: 'session-1' });
+  assert.doesNotThrow(() => writeAcpUpdate(child, {
+    sessionUpdate: 'tool_execution_lifecycle',
+    schema: 'vela.tool_execution_lifecycle',
+    version: 1,
+    toolCallId: 'tool-1',
+    status: 'completed',
+    phase: 'close',
+    execution: {
+      version: 1,
+      terminal: 'returned',
+      trigger: 'exit',
+      events: [{ phase: 'close', stdout_closed: true, stderr_closed: true }],
+    },
+    toolTerminal: { source: 'tool_result', confirmed: true },
+  }));
+  writeAcpUpdate(child, {
+    sessionUpdate: 'agent_message_chunk',
+    content: { text: 'Run continued' },
+  });
+  writeAcpResult(child, 3, { usage: { inputTokens: 1, outputTokens: 2 } });
+
+  assert.ok(events.some(
+    ({ event, payload }) =>
+      event === 'agent' &&
+      (payload as { type?: unknown; delta?: unknown }).type === 'text_delta' &&
+      (payload as { delta?: unknown }).delta === 'Run continued',
+  ));
+});
+
 test('attachAcpSession consumes negotiated Vela child evidence only on the AMR path', () => {
   const child = new FakeAcpChild();
   const events: Array<{ event: string; payload: unknown }> = [];
