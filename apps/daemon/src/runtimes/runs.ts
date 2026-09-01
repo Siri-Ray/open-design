@@ -30,6 +30,13 @@ import {
   finalizeRunTelemetryDelivery,
   recordRunTelemetryDeliveryAttempt,
 } from '../observability/delivery-state.js';
+import {
+  beginPosthogTerminalDelivery,
+  finalizePosthogTerminalDelivery,
+  recordIgnoredTerminalClaim,
+  terminalLifecycleSnapshot,
+  terminalPersistenceErrorType,
+} from '../observability/run-terminal-lifecycle.js';
 import { normalizeTelemetryAppVersionInfo } from '../app-version.js';
 
 export const TERMINAL_RUN_STATUSES = new Set(['succeeded', 'failed', 'canceled']);
@@ -510,8 +517,10 @@ function atomicWriteJson(filePath, value) {
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
     fs.writeFileSync(tempPath, `${JSON.stringify(value)}\n`, { encoding: 'utf8', mode: 0o600 });
     fs.renameSync(tempPath, filePath);
-  } catch {
+    return { ok: true };
+  } catch (error) {
     try { fs.unlinkSync(tempPath); } catch { /* best-effort cleanup */ }
+    return { ok: false, errorType: terminalPersistenceErrorType(error) };
   }
 }
 
@@ -602,6 +611,7 @@ function durableRunState(run) {
       ? { langfuseCompletedAt: run.langfuseCompletedAt }
       : {}),
     ...(run.telemetryDelivery ? { telemetryDelivery: run.telemetryDelivery } : {}),
+    ...(run.terminalLifecycle ? { terminalLifecycle: run.terminalLifecycle } : {}),
   };
 }
 
@@ -684,6 +694,9 @@ export function createChatRunService({
   // Snapshot the daemon version at Run creation so a later daemon version
   // cannot rewrite this Run's terminal telemetry during restart recovery.
   getAppVersionInfo = () => null,
+  // Test seam for deterministic storage-failure coverage. Production callers
+  // use the atomic writer above; the result carries only a bounded error type.
+  writeDurableState = atomicWriteJson,
 }) {
   const runs = new Map();
   const runIdsByClientRequestId = new Map();
@@ -743,7 +756,7 @@ export function createChatRunService({
     if (!state || state.id !== id) return null;
     const interruptedAfterRestart =
       interruptDurableRunAfterDaemonRestart(state);
-    if (interruptedAfterRestart) atomicWriteJson(statePath, state);
+    if (interruptedAfterRestart) writeDurableState(statePath, state);
     backfillDurableTerminal(state);
     if (!TERMINAL_RUN_STATUSES.has(state.status)) return null;
     const eventsLogPath = path.join(runsLogDir, id, 'events.jsonl');
@@ -977,7 +990,7 @@ export function createChatRunService({
         run.id,
       );
     }
-    if (run.statePath) atomicWriteJson(run.statePath, durableRunState(run));
+    if (run.statePath) writeDurableState(run.statePath, durableRunState(run));
     return run;
   };
 
@@ -1009,7 +1022,46 @@ export function createChatRunService({
   };
 
   const persistState = (run) => {
-    if (run?.statePath) atomicWriteJson(run.statePath, durableRunState(run));
+    if (!run?.statePath) return { ok: false, errorType: 'storage_unavailable' };
+    return writeDurableState(run.statePath, durableRunState(run));
+  };
+
+  const persistTerminalState = (run) => {
+    const terminalPersistence = run.statePath
+      ? { status: 'acknowledged', errorType: null }
+      : { status: 'unknown', errorType: null };
+    run.terminalLifecycle = terminalLifecycleSnapshot({
+      retryAttemptCount: run.retryAttemptCount,
+      manualResumeAttemptCount: run.manualResumeAttemptCount,
+      runtimeGenerationId: run.runtimeGenerationId,
+      cancelOrigin: run.cancelOrigin ?? null,
+      terminalTrigger: run.terminalTrigger ?? null,
+      terminalIntegrity: run.terminalIntegrity ?? 'canonical',
+      terminalPersistence,
+      posthogDelivery: run.terminalLifecycle?.posthogDelivery,
+      duplicateTerminalCount: run.terminalLifecycle?.duplicateTerminalCount,
+      lateTerminalCount: run.terminalLifecycle?.lateTerminalCount,
+    });
+    if (!run.statePath) return { ok: false, errorType: 'storage_unavailable' };
+    const result = persistState(run);
+    if (!result.ok) {
+      run.terminalLifecycle = terminalLifecycleSnapshot({
+        retryAttemptCount: run.retryAttemptCount,
+        manualResumeAttemptCount: run.manualResumeAttemptCount,
+        runtimeGenerationId: run.runtimeGenerationId,
+        cancelOrigin: run.cancelOrigin ?? null,
+        terminalTrigger: run.terminalTrigger ?? null,
+        terminalIntegrity: run.terminalIntegrity ?? 'canonical',
+        posthogDelivery: run.terminalLifecycle?.posthogDelivery,
+        duplicateTerminalCount: run.terminalLifecycle?.duplicateTerminalCount,
+        lateTerminalCount: run.terminalLifecycle?.lateTerminalCount,
+        terminalPersistence: {
+          status: 'failed',
+          errorType: result.errorType ?? 'unknown',
+        },
+      });
+    }
+    return result;
   };
 
   const setAnalyticsRecovery = (run, recovery) => {
@@ -1026,6 +1078,23 @@ export function createChatRunService({
     if (!run?.analyticsRecovery) return;
     run.analyticsRecovery.completedAt = Date.now();
     persistState(run);
+  };
+
+  const beginAnalyticsDelivery = (run) => {
+    if (!run?.terminalLifecycle) return null;
+    run.terminalLifecycle = beginPosthogTerminalDelivery(run.terminalLifecycle);
+    persistState(run);
+    return run.terminalLifecycle.posthogDelivery;
+  };
+
+  const finalizeAnalyticsDelivery = (run, delivery) => {
+    if (!run?.terminalLifecycle || !delivery) return null;
+    run.terminalLifecycle = finalizePosthogTerminalDelivery(
+      run.terminalLifecycle,
+      delivery,
+    );
+    persistState(run);
+    return run.terminalLifecycle.posthogDelivery;
   };
 
   const beginTelemetryDelivery = (run) => {
@@ -1319,6 +1388,7 @@ export function createChatRunService({
       ? { deliverableArtifactKind: run.deliverableArtifactKind }
       : {}),
     ...(run.strategyTask ? { strategyTask: run.strategyTask } : {}),
+    ...(run.terminalLifecycle ? { terminalLifecycle: run.terminalLifecycle } : {}),
     ...(TERMINAL_RUN_STATUSES.has(run.status)
       ? { executionDiagnostics: buildExecutionDiagnostics(run) }
       : {}),
@@ -1351,7 +1421,7 @@ export function createChatRunService({
         && todoSnapshotHasUnfinishedWork(run.lastTodoSnapshot));
     // Commit the terminal Run snapshot before exposing its terminal event. The
     // optional outbox hook is local-only and synchronous by contract.
-    persistState(run);
+    persistTerminalState(run);
     finalizeTerminalLocally(run, status, terminalAt);
     // Release run-scoped resources the starter registered (e.g. the minted
     // tool-token grant + agent event-sink entries). This runs on EVERY
@@ -1366,7 +1436,7 @@ export function createChatRunService({
     // Terminal finalizers can add artifact metadata after the authoritative
     // terminal timestamp snapshot. Persist once more before publishing `end`
     // so restart hydration sees the same artifact result as live clients.
-    persistState(run);
+    persistTerminalState(run);
     emit(run, 'end', {
       code,
       signal,
@@ -1400,7 +1470,19 @@ export function createChatRunService({
   // `close`. The first verdict owns the terminal fields; duplicate close/error
   // paths wait on the same pending finish instead of publishing twice.
   const finish = (run, status, code: number | null = null, signal: string | null = null) => {
-    if (TERMINAL_RUN_STATUSES.has(run.status) || run.pendingTerminalFinish) return;
+    if (TERMINAL_RUN_STATUSES.has(run.status)) {
+      if (run.terminalLifecycle) {
+        const kind = run.status === status
+          && (run.exitCode ?? null) === code
+          && (run.signal ?? null) === signal
+          ? 'duplicate'
+          : 'late';
+        run.terminalLifecycle = recordIgnoredTerminalClaim(run.terminalLifecycle, kind);
+        persistState(run);
+      }
+      return;
+    }
+    if (run.pendingTerminalFinish) return;
     if ((run.processTreeTerminationPending ?? 0) > 0) {
       run.pendingTerminalFinish = { status, code, signal };
       return;
@@ -1925,6 +2007,8 @@ export function createChatRunService({
     emit,
     persistState,
     setAnalyticsRecovery,
+    beginAnalyticsDelivery,
+    finalizeAnalyticsDelivery,
     markAnalyticsCompleted,
     beginTelemetryDelivery,
     recordTelemetryDeliveryAttempt,
