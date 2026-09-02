@@ -26,7 +26,6 @@ test('[P2] captures the projects page surface', async ({ page }) => {
       await teamProjectsNav.click();
       await expect(page.getByRole('heading', { name: /all projects|全部项目/i })).toBeVisible();
     } else {
-      await page.getByTestId('entry-nav-drafts').click();
       await expect(page.getByTestId('recent-projects-strip')).toBeVisible();
       await expect(page.getByText('Launchpad dashboard').first()).toBeVisible();
     }
@@ -54,7 +53,6 @@ test('[P2] captures the projects kanban surface', async ({ page }) => {
       await teamProjectsNav.click();
       await expect(page.getByRole('heading', { name: /all projects|全部项目/i })).toBeVisible();
     } else {
-      await page.getByTestId('entry-nav-drafts').click();
       await expect(page.getByTestId('recent-projects-strip')).toBeVisible();
       await expect(page.getByText('Launchpad dashboard').first()).toBeVisible();
     }
@@ -123,8 +121,12 @@ test('[P2] captures the integrations page surface', async ({ page }) => {
   await gotoVisualHome(page);
 
   // Navigated directly: the composer "+" menu no longer carries a connectors
-  // row to reach this page through.
+  // row to reach this page through. The page mounts on its default (MCP) tab,
+  // so the connectors tab is clicked the way the MCP capture below clicks
+  // its own; the click also absorbs the cold-load wait a bare assertion
+  // cannot.
   await page.goto('/integrations', { waitUntil: 'domcontentloaded' });
+  await page.getByTestId('integrations-tab-connectors').click();
   await expect(page).toHaveURL(/\/integrations$/);
   await expect(page.getByTestId('integrations-tab-connectors')).toHaveAttribute(
     'aria-selected',
