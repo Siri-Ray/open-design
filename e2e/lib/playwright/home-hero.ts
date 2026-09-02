@@ -51,19 +51,48 @@ export async function clearHomeTemplate(page: Page): Promise<void> {
  * (`project-ds-picker-create`), plugin authoring → the Extensions page
  * (`plugins-create-button`), Figma import → the composer plus menu.
  */
+/**
+ * The window event a surface outside the hero raises to hand it a template
+ * pick (the workspace tabs-bar's template fan dispatches it; HomeHero applies
+ * the chip exactly as a row click). Mirrors `HOME_APPLY_TEMPLATE_EVENT` in
+ * `apps/web/src/components/home-hero/chips.ts` — restated here because e2e
+ * must not import app source.
+ */
+const HOME_APPLY_TEMPLATE_EVENT = 'open-design:home-apply-template';
+
+/** The types the row itself offers: three inline, two behind 更多. */
+export const HOME_TYPE_ROW_CHIP_IDS = ['prototype', 'deck', 'document'] as const;
+export const HOME_TYPE_ROW_MORE_CHIP_IDS = ['image', 'web-clone'] as const;
+
 export async function pickHomeTemplate(page: Page, chipId: string): Promise<void> {
   // A type already picked retires the row, so switching means clearing first.
   await clearHomeTemplate(page);
-  const pill = page.getByTestId(`home-hero-type-pill-${chipId}`);
-  if ((await pill.count()) === 0) {
-    // Beyond the row's fit budget → it lives in the 全部 overflow popover.
-    await page.getByTestId('home-hero-type-pills-more').click();
+  const row = homeTypeRow(page);
+  await expect(row).toBeVisible();
+  const pill = row.getByTestId(`home-hero-type-pill-${chipId}`);
+  if ((await pill.count()) > 0) {
+    await expect(pill).toBeEnabled();
+    await pill.click();
+  } else if ((HOME_TYPE_ROW_MORE_CHIP_IDS as readonly string[]).includes(chipId)) {
+    // Behind 更多: the popover only mounts while open.
+    const more = page.getByTestId('home-hero-type-pills-more');
+    await expect(more).toBeEnabled();
+    await more.click();
     const overflowPill = page.getByTestId(`home-hero-type-pill-${chipId}-more`);
     await expect(overflowPill).toBeVisible();
     await overflowPill.click();
   } else {
-    await expect(pill).toBeVisible();
-    await pill.click();
+    // The row is a curated entry set (product, 2026-08-31); every other create
+    // type reaches the hero only through the cross-surface hand-off, so drive
+    // that contract directly. Wait for the row to be in service first — the
+    // hero drops a pick that lands while the plugin catalogue is still loading.
+    await expect(row.getByTestId('home-hero-type-pill-prototype')).toBeEnabled();
+    await page.evaluate(
+      ({ eventName, id }) => {
+        window.dispatchEvent(new CustomEvent(eventName, { detail: { chipId: id } }));
+      },
+      { eventName: HOME_APPLY_TEMPLATE_EVENT, id: chipId },
+    );
   }
   // The pill in the card is the observable "it is set".
   await expect(page.getByTestId('home-hero-template-picker')).toHaveClass(/has-selection/);
