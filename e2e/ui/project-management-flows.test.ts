@@ -707,7 +707,7 @@ test('[P1] project detail composer working directory picker opens without leavin
   await expect(page).toHaveURL(/\/projects\//);
 });
 
-test('[P1] project detail composer plus menu exposes attachment, connector, plugin, and MCP entries', async ({ page }) => {
+test('[P1] project detail composer plus menu exposes the attachment entry and no resource submenus', async ({ page }) => {
   await routeComposerPlusFixtures(page);
   await page.goto('/');
   await createProject(page, 'Composer plus context menu');
@@ -716,18 +716,11 @@ test('[P1] project detail composer plus menu exposes attachment, connector, plug
   const composer = page.getByTestId('chat-composer');
   await composer.getByTestId('chat-plus-trigger').click();
   await expect(page.getByTestId('composer-plus-attach')).toBeVisible();
-  await expect(page.getByTestId('composer-plus-connectors')).toBeVisible();
-  await expect(page.getByTestId('composer-plus-plugins')).toBeVisible();
-  await expect(page.getByTestId('composer-plus-mcp')).toBeVisible();
-
-  await page.getByTestId('composer-plus-connectors').click();
-  await expect(page.getByRole('menuitem', { name: /Figma Connector/i })).toBeVisible();
-
-  await page.getByTestId('composer-plus-plugins').click();
-  await expect(page.getByRole('menuitem', { name: /Composer Context Plugin/i })).toBeVisible();
-
-  await page.getByTestId('composer-plus-mcp').click();
-  await expect(page.getByRole('menuitem', { name: /Design Docs MCP/i })).toBeVisible();
+  // Plugins, connectors and MCP were removed from this menu; they stay
+  // reachable from their own surfaces.
+  await expect(page.getByTestId('composer-plus-plugins')).toHaveCount(0);
+  await expect(page.getByTestId('composer-plus-connectors')).toHaveCount(0);
+  await expect(page.getByTestId('composer-plus-mcp')).toHaveCount(0);
 });
 
 test('[P1] project detail composer plus menu opens project, local code, Figma help, and design system context actions', async ({ page }) => {
@@ -796,6 +789,8 @@ test('[P1] project detail composer plus menu opens project, local code, Figma he
   const input = page.getByTestId('chat-composer-input');
 
   await composer.getByTestId('chat-plus-trigger').click();
+  // Both context actions sit inside the "+" menu's working-dir group.
+  await page.getByTestId('composer-plus-working-dir').click();
   await page.getByTestId('composer-plus-reference-project').click();
   const referenceDialog = page.getByRole('dialog', { name: 'Reference another project' });
   await expect(referenceDialog).toBeVisible();
@@ -805,6 +800,7 @@ test('[P1] project detail composer plus menu opens project, local code, Figma he
   await expect(input).toContainText('Reference Project Context');
 
   await composer.getByTestId('chat-plus-trigger').click();
+  await page.getByTestId('composer-plus-working-dir').click();
   await page.getByTestId('composer-plus-local-code').click();
   await expect(input).toContainText('local-code-project');
 
@@ -987,6 +983,8 @@ test('[P1] project detail composer sends referenced workspace contexts into the 
   const input = page.getByTestId('chat-composer-input');
 
   await composer.getByTestId('chat-plus-trigger').click();
+  // Both context actions sit inside the "+" menu's working-dir group.
+  await page.getByTestId('composer-plus-working-dir').click();
   await page.getByTestId('composer-plus-reference-project').click();
   const referenceDialog = page.getByRole('dialog', { name: 'Reference another project' });
   await expect(referenceDialog.getByRole('option', { name: /Reference Project Payload/i })).toHaveAttribute('aria-selected', 'true');
@@ -994,6 +992,7 @@ test('[P1] project detail composer sends referenced workspace contexts into the 
   await expect(input).toContainText('Reference Project Payload');
 
   await composer.getByTestId('chat-plus-trigger').click();
+  await page.getByTestId('composer-plus-working-dir').click();
   await page.getByTestId('composer-plus-local-code').click();
   await expect(input).toContainText('local-code-project-payload');
 
@@ -1061,6 +1060,7 @@ test('[P1] project detail composer removing local-code context updates metadata 
   const input = page.getByTestId('chat-composer-input');
 
   await composer.getByTestId('chat-plus-trigger').click();
+  await page.getByTestId('composer-plus-working-dir').click();
   await page.getByTestId('composer-plus-local-code').click();
   await expect(input).toContainText('local-code-remove');
 
@@ -1230,6 +1230,7 @@ test('[P1] project detail composer context actions emit analytics event fields',
   const composer = page.getByTestId('chat-composer');
 
   await composer.getByTestId('chat-plus-trigger').click();
+  await page.getByTestId('composer-plus-working-dir').click();
   await page.getByTestId('composer-plus-local-code').click();
   const chip = composer.locator('.staged-context--workspace', { hasText: 'local-code-analytics' });
   await expect(chip).toBeVisible();

@@ -2,7 +2,7 @@ import { expect, test } from '@/playwright/suite';
 import { ensureRailOpen, openNewProjectModal } from '@/playwright/rail';
 import { settingsSurface } from '@/playwright/amr';
 import { expectStableCount } from '@/playwright/assertions';
-import { openHomeTemplateMenu } from '@/playwright/home-hero';
+import { homeTypeRow, pickHomeTemplate } from '@/playwright/home-hero';
 import type {
   WorkspaceCollabContext,
   WorkspaceDirectoryItem,
@@ -98,18 +98,24 @@ test('[P0] @critical entry chrome exposes the primary home creation surface and 
   await expect(page.getByTestId('home-hero-plus-trigger')).toBeVisible();
   // Empty input can still run the active placeholder-carousel suggestion.
   await expect(page.getByTestId('home-hero-submit')).toBeEnabled();
-  await expect(page.getByTestId('home-hero-template-picker')).toBeVisible();
+  await expect(page.getByTestId('home-hero-type-pills')).toBeVisible();
   await expect(page.getByTestId('home-hero-design-system-picker')).toBeVisible();
   await expect(page.getByTestId('working-dir-picker')).toBeVisible();
-  // #5517 deleted the inline scenario rail (the "Start from a template… / …or
-  // create a blank project" row and its cards); the composer footer's Template
-  // picker owns every project type now.
-  const templateMenu = await openHomeTemplateMenu(page);
+  // The whole creation catalog sits on one row under the composer; anything
+  // past its fit budget folds into the 全部 popover rather than a dropdown.
+  const typeRow = homeTypeRow(page);
+  await expect(typeRow).toBeVisible();
+  await page.getByTestId('home-hero-type-pills-more').click();
+  const overflow = page.getByTestId('home-hero-type-pills-popover');
   for (const id of ['prototype', 'live-artifact', 'deck', 'image', 'video', 'hyperframes', 'audio']) {
-    await expect(templateMenu.getByTestId(`home-hero-template-wedge-${id}`)).toBeVisible();
+    await expect(
+      typeRow.getByTestId(`home-hero-type-pill-${id}`)
+        .or(overflow.getByTestId(`home-hero-type-pill-${id}-more`))
+        .first(),
+    ).toBeVisible();
   }
   await page.keyboard.press('Escape');
-  await expect(templateMenu).toHaveCount(0);
+  await expect(overflow).toHaveCount(0);
 
   // The pet picker rail was removed; pet adoption now lives in
   // Settings → Pet exclusively. Make sure no rail leaks back into the
@@ -448,7 +454,7 @@ test('[P1] entry top navigation matches the current home tab structure', async (
   await expect(page.locator('.entry-nav-rail__footer').getByTestId('entry-settings-button')).toHaveCount(0);
   await expect(page.locator('.entry-nav-rail__footer').getByTestId('entry-nav-plugins')).toHaveCount(0);
 
-  await expect(page.getByTestId('home-hero-template-picker')).toBeVisible();
+  await expect(page.getByTestId('home-hero-type-pills')).toBeVisible();
   // Nothing is applied on a fresh Home: no plugin chip, no template-driven
   // footer options or presets.
   await expect(page.getByTestId('home-hero-active-plugin')).toHaveCount(0);
@@ -456,30 +462,37 @@ test('[P1] entry top navigation matches the current home tab structure', async (
   await expect(page.getByTestId('home-hero-plugin-presets')).toHaveCount(0);
 });
 
-test('[P1] home view exposes the redesigned hero, recent projects, and starters', async ({ page }) => {
+test('[P1] home view exposes the redesigned hero and starters without a project grid', async ({ page }) => {
   await createProject(page, 'Home structure recent project');
   await gotoEntryHome(page);
 
   const home = page.getByTestId('entry-view-home');
-  await expect(page.getByTestId('recent-projects-strip')).toBeVisible();
-  await expect(home.getByTestId('home-hero-template-picker')).toBeVisible();
+  // Home intentionally keeps the creation surface focused; projects remain
+  // reachable from 个人项目 in the rail.
+  await expect(page.getByTestId('recent-projects-strip')).toHaveCount(0);
+  await expect(home.getByTestId('home-hero-type-pills')).toBeVisible();
   await expect(page.getByTestId('home-hero')).toBeVisible();
   await expect(page.getByTestId('entry-nav-home')).toHaveAttribute('aria-current', 'page');
 
-  // NOTE: /projects currently has no UI entry. #5517 dropped the rail's
-  // Projects destination, and Home passes `heading` to RecentProjectsStrip,
-  // which flips it into the full-page-grid header that omits the
-  // `recent-projects-view-all` button — so `HomeView.onViewAllProjects` is
-  // wired but unreachable. Drive the route directly until an entry returns.
+  // NOTE: /projects currently has no direct UI entry. Drive the route directly
+  // as a separate regression check for the shared project grid.
   await page.goto('/projects', { waitUntil: 'domcontentloaded' });
   await page.getByText('Loading OpenDesign…').waitFor({ state: 'hidden', timeout: T.long });
   await expect(page).toHaveURL(/\/projects$/);
   await expect(page.getByTestId('entry-view-projects')).toBeVisible();
 });
 
-test('[P0] @critical recent projects strip opens a project card from Home', async ({ page }) => {
+test('[P0] @critical recent projects strip opens a project card from 个人项目', async ({ page }) => {
+  await routeTabWorkspaceApi(
+    page,
+    { activeWorkspaceId: TAB_PERSONAL_WORKSPACE.workspaceId },
+    [],
+  );
   const created = await createProject(page, 'Recent project entry point');
   await gotoEntryHome(page);
+  await page.getByTestId('entry-rail-collapse').click();
+  await expect(page.locator('.entry')).toHaveClass(/entry--rail-open/);
+  await page.getByTestId('entry-nav-drafts').click();
 
   const recentStrip = page.getByTestId('recent-projects-strip');
   await expect(recentStrip).toBeVisible();
@@ -585,6 +598,9 @@ test('[P1] disabled design systems are filtered from entry creation surfaces', a
   });
 
   await gotoEntryHome(page);
+  // The design-system control is permanent at the head of the foot row; a type
+  // is picked here only so the composer is in its normal working state.
+  await pickHomeTemplate(page, 'prototype');
   await page.getByTestId('home-hero-design-system-trigger').click();
   const homePicker = page.getByTestId('project-ds-picker-popover');
   await expect(homePicker.getByTestId('project-ds-picker-option-agentic')).toBeVisible();
@@ -1142,7 +1158,9 @@ test('[P0] signed-out Local setup can navigate the surviving rail destinations',
 test('[P0] @critical home composer delegates the default prototype scenario to daemon authority', async ({ page }) => {
   await gotoEntryHome(page);
 
-  await expect(page.getByTestId('composer-mode-trigger')).toHaveAttribute('aria-label', 'Mode: Design');
+  // The Home composer has no mode picker any more — every Home create runs in
+  // the default design mode (asserted on the request body below).
+  await expect(page.getByTestId('composer-mode-trigger')).toHaveCount(0);
 
   const input = page.getByTestId('home-hero-input');
   const prompt =

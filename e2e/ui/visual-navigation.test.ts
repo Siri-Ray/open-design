@@ -26,6 +26,7 @@ test('[P2] captures the projects page surface', async ({ page }) => {
       await teamProjectsNav.click();
       await expect(page.getByRole('heading', { name: /all projects|全部项目/i })).toBeVisible();
     } else {
+      await page.getByTestId('entry-nav-drafts').click();
       await expect(page.getByTestId('recent-projects-strip')).toBeVisible();
       await expect(page.getByText('Launchpad dashboard').first()).toBeVisible();
     }
@@ -53,6 +54,7 @@ test('[P2] captures the projects kanban surface', async ({ page }) => {
       await teamProjectsNav.click();
       await expect(page.getByRole('heading', { name: /all projects|全部项目/i })).toBeVisible();
     } else {
+      await page.getByTestId('entry-nav-drafts').click();
       await expect(page.getByTestId('recent-projects-strip')).toBeVisible();
       await expect(page.getByText('Launchpad dashboard').first()).toBeVisible();
     }
@@ -120,9 +122,9 @@ test('[P2] captures the integrations page surface', async ({ page }) => {
   await configureVisualPage(page);
   await gotoVisualHome(page);
 
-  await page.getByTestId('home-hero-plus-trigger').click();
-  await page.getByTestId('composer-plus-connectors').click();
-  await page.getByRole('menuitem', { name: 'Add connectors' }).click();
+  // Navigated directly: the composer "+" menu no longer carries a connectors
+  // row to reach this page through.
+  await page.goto('/integrations', { waitUntil: 'domcontentloaded' });
   await expect(page).toHaveURL(/\/integrations$/);
   await expect(page.getByTestId('integrations-tab-connectors')).toHaveAttribute(
     'aria-selected',
@@ -149,9 +151,10 @@ test('[P2] captures the integrations MCP surface', async ({ page }) => {
   await configureVisualPage(page);
   await gotoVisualHome(page);
 
-  await page.getByTestId('home-hero-plus-trigger').click();
-  await page.getByTestId('composer-plus-mcp').click();
-  await page.getByRole('menuitem', { name: 'Add MCP server' }).click();
+  // Navigated directly: the composer "+" menu no longer carries an MCP row to
+  // reach this page through.
+  await page.goto('/integrations', { waitUntil: 'domcontentloaded' });
+  await page.getByTestId('integrations-tab-mcp').click();
   await expect(page).toHaveURL(/\/integrations$/);
   await expect(page.getByTestId('integrations-tab-mcp')).toHaveAttribute(
     'aria-selected',
@@ -165,9 +168,9 @@ test('[P2] captures the integrations MCP surface', async ({ page }) => {
 
 async function openSettingsSection(page: import('@playwright/test').Page, testId: string) {
   // #5971 deleted the rail-footer settings chip (`entry-settings-button`).
-  // `openSettingsDialog` owns every remaining entry point — the rail's
-  // `entry-nav-settings` item when signed out, the account menu when signed in
-  // — including the rail-open handling this used to do by hand.
+  // `openSettingsDialog` owns every remaining entry point — chiefly the rail's
+  // own item under 插件, which now renders in both identity states — including
+  // the rail-open handling this used to do by hand.
   const dialog = await openSettingsDialog(page);
   await dialog.getByTestId(testId).click();
   return dialog;
