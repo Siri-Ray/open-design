@@ -33,14 +33,17 @@ function project(id: string, updatedAt: number, name = `Project ${id}`): Project
   } as Project;
 }
 
-type RunFixture = { status: string; awaiting?: boolean };
+type RunFixture = { status: string; awaiting?: boolean; runId?: string };
 
-const RUNS: Record<string, RunFixture> = {
+const DEFAULT_RUNS: Record<string, RunFixture> = {
   p1: { status: 'running' },
   p2: { status: 'succeeded', awaiting: true },
   p3: { status: 'failed' },
   p4: { status: 'succeeded' },
 };
+
+/** What the runs feed answers per project; tests mutate it between polls. */
+let RUNS: Record<string, RunFixture> = { ...DEFAULT_RUNS };
 
 const originalFetch = globalThis.fetch;
 
@@ -53,7 +56,7 @@ function stubFetch() {
       const fixture = RUNS[id];
       const runs = fixture
         ? [{
-            id: `run-${id}`,
+            id: fixture.runId ?? `run-${id}`,
             projectId: id,
             conversationId: null,
             assistantMessageId: null,
@@ -98,6 +101,7 @@ function renderRail(overrides: Partial<Parameters<typeof EntryNavRail>[0]> = {})
 
 beforeEach(() => {
   window.localStorage.clear();
+  RUNS = { ...DEFAULT_RUNS };
   stubFetch();
 });
 
@@ -151,7 +155,49 @@ describe('EntryNavRail 最近浏览过 section', () => {
     await waitFor(() => {
       expect(within(screen.getAllByTestId('entry-nav-recent-item')[3]!).queryByRole('img')).toBeNull();
     });
-    expect(JSON.parse(window.localStorage.getItem('od.entry.railRecentSeenDone') ?? '[]')).toEqual(['p4']);
+    expect(JSON.parse(window.localStorage.getItem('od.entry.railRecentSeenDone') ?? '{}')).toEqual({
+      p4: 'run-p4',
+    });
+  });
+
+  it('re-raises the ✓ for a newer finished run even when its running phase was never seen', async () => {
+    // r1 finished; the user looks at it, which spends its ✓.
+    RUNS = { ...DEFAULT_RUNS, p4: { status: 'succeeded', runId: 'r1' } };
+    const { onOpen } = renderRail();
+    const rowFor = (id: string) =>
+      screen.getAllByTestId('entry-nav-recent-item').find((row) => row.textContent === `Project ${id}`)!;
+    await waitFor(() => {
+      expect(within(rowFor('p4')).getByRole('img', { name: 'Completed' })).toBeTruthy();
+    });
+    fireEvent.click(rowFor('p4'));
+    expect(onOpen).toHaveBeenCalledWith('p4');
+    await waitFor(() => {
+      expect(within(rowFor('p4')).queryByRole('img')).toBeNull();
+    });
+
+    // Collapse: the section stops polling, so the next run's queued/running
+    // phase is never observed. By the time it is expanded again, a NEW run r2
+    // has finished.
+    fireEvent.click(screen.getByTestId('entry-nav-recent-toggle'));
+    RUNS = { ...DEFAULT_RUNS, p4: { status: 'succeeded', runId: 'r2' } };
+    fireEvent.click(screen.getByTestId('entry-nav-recent-toggle'));
+
+    // r2 is a new notice: its ✓ must show even though r1's was acknowledged.
+    await waitFor(() => {
+      expect(within(rowFor('p4')).getByRole('img', { name: 'Completed' })).toBeTruthy();
+    });
+  });
+
+  it('ignores the legacy array shape of the acknowledgement store', async () => {
+    // Older builds stored a bare list of project ids. That shape cannot say
+    // WHICH run was acknowledged, so it must read as "nothing acknowledged":
+    // the ✓ shows once more rather than a fresh completion being swallowed.
+    window.localStorage.setItem('od.entry.railRecentSeenDone', JSON.stringify(['p4']));
+    renderRail();
+    const rows = screen.getAllByTestId('entry-nav-recent-item');
+    await waitFor(() => {
+      expect(within(rows[3]!).getByRole('img', { name: 'Completed' })).toBeTruthy();
+    });
   });
 
   it('collapses on the head row and remembers the choice', () => {

@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { ChatRunStatusResponse } from '@open-design/contracts';
 
-import { foldRunsToProjectStatuses } from '../../src/state/projectRunStatus';
+import {
+  foldRunsToProjectRunSummaries,
+  foldRunsToProjectStatuses,
+} from '../../src/state/projectRunStatus';
 
 function run(over: Partial<ChatRunStatusResponse> & { status: ChatRunStatusResponse['status'] }) {
   return {
@@ -103,5 +106,59 @@ describe('foldRunsToProjectStatuses', () => {
 
   it('ignores runs with no project', () => {
     expect(foldRunsToProjectStatuses([run({ projectId: null, status: 'running' })]).size).toBe(0);
+  });
+});
+
+describe('foldRunsToProjectRunSummaries', () => {
+  it('names the newest finished run behind the status', () => {
+    const summaries = foldRunsToProjectRunSummaries([
+      run({ id: 'r1', status: 'succeeded', updatedAt: 1 }),
+      run({ id: 'r2', status: 'succeeded', updatedAt: 2 }),
+    ]);
+
+    expect(summaries.get('p1')).toEqual({
+      status: 'succeeded',
+      latestTerminalRunId: 'r2',
+      latestTerminalUpdatedAt: 2,
+    });
+  });
+
+  it('keeps the finished run while a newer run is in flight', () => {
+    // The status follows the live run; the acknowledgement still names the
+    // run that last finished, which is the notice the user may have seen.
+    const summaries = foldRunsToProjectRunSummaries([
+      run({ id: 'r1', status: 'succeeded', updatedAt: 1 }),
+      run({ id: 'r2', status: 'running', updatedAt: 2 }),
+    ]);
+
+    expect(summaries.get('p1')).toEqual({
+      status: 'running',
+      latestTerminalRunId: 'r1',
+      latestTerminalUpdatedAt: 1,
+    });
+  });
+
+  it('carries no run identity for a project that never finished a run', () => {
+    expect(foldRunsToProjectRunSummaries([run({ id: 'r1', status: 'queued' })]).get('p1')).toEqual({
+      status: 'queued',
+    });
+  });
+
+  it('composes awaiting_input the same way the status fold does', () => {
+    const runs = [run({ id: 'r1', status: 'succeeded' })];
+    expect(foldRunsToProjectRunSummaries(runs, ['p1']).get('p1')?.status).toBe('awaiting_input');
+    expect(foldRunsToProjectStatuses(runs, ['p1']).get('p1')).toBe('awaiting_input');
+  });
+
+  it('agrees with foldRunsToProjectStatuses on every project', () => {
+    const runs = [
+      run({ id: 'a', projectId: 'ok', status: 'succeeded' }),
+      run({ id: 'b', projectId: 'bad', status: 'failed' }),
+      run({ id: 'c', projectId: 'busy', status: 'running' }),
+      run({ id: 'd', projectId: 'part', status: 'succeeded', endedWithUnfinishedWork: true }),
+    ];
+    const statuses = foldRunsToProjectStatuses(runs, ['ok']);
+    const summaries = foldRunsToProjectRunSummaries(runs, ['ok']);
+    expect([...summaries].map(([id, summary]) => [id, summary.status])).toEqual([...statuses]);
   });
 });

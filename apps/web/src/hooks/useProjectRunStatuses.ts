@@ -13,20 +13,32 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ProjectDisplayStatus, WorkspaceCollabContext } from '@open-design/contracts';
 import { listRunsForProject, RUNS_CHANGED_EVENT } from '../providers/daemon';
-import { foldRunsToProjectStatuses } from '../state/projectRunStatus';
+import {
+  foldRunsToProjectRunSummaries,
+  type ProjectRunSummary,
+} from '../state/projectRunStatus';
 
 /** Backstop only — `RUNS_CHANGED_EVENT` is what makes this feel immediate. */
 const POLL_MS = 4000;
 
-const EMPTY: ReadonlyMap<string, ProjectDisplayStatus> = new Map();
+const EMPTY: ReadonlyMap<string, ProjectRunSummary> = new Map();
 
-export function useProjectRunStatuses(
+export interface UseProjectRunStatusesOptions {
+  enabled?: boolean;
+  workspaceContext?: WorkspaceCollabContext | null;
+}
+
+/**
+ * Live `Map<projectId, ProjectRunSummary>`: the status plus the newest
+ * finished run's identity, for a consumer that acknowledges notices per run.
+ */
+export function useProjectRunSummaries(
   projectIds: readonly string[],
-  options?: { enabled?: boolean; workspaceContext?: WorkspaceCollabContext | null },
-): ReadonlyMap<string, ProjectDisplayStatus> {
+  options?: UseProjectRunStatusesOptions,
+): ReadonlyMap<string, ProjectRunSummary> {
   const enabled = options?.enabled ?? true;
   const workspaceContext = options?.workspaceContext ?? null;
-  const [statuses, setStatuses] = useState<ReadonlyMap<string, ProjectDisplayStatus>>(EMPTY);
+  const [summaries, setSummaries] = useState<ReadonlyMap<string, ProjectRunSummary>>(EMPTY);
 
   // One request per id, so the effect must not re-run just because the caller
   // rebuilt the array. Sorted + joined is the identity that actually matters.
@@ -39,7 +51,7 @@ export function useProjectRunStatuses(
   useEffect(() => {
     const ids = idsKey ? idsKey.split('\u0000') : [];
     if (!enabled || ids.length === 0) {
-      setStatuses(EMPTY);
+      setSummaries(EMPTY);
       return undefined;
     }
     let cancelled = false;
@@ -53,7 +65,7 @@ export function useProjectRunStatuses(
       // rather than asserting a status nobody verified.
       const runs = results.flatMap((result) => result?.runs ?? []);
       const awaiting = results.flatMap((result) => result?.awaitingInputProjectIds ?? []);
-      setStatuses(foldRunsToProjectStatuses(runs, awaiting));
+      setSummaries(foldRunsToProjectRunSummaries(runs, awaiting));
     };
 
     void refresh();
@@ -67,5 +79,18 @@ export function useProjectRunStatuses(
     };
   }, [idsKey, enabled]);
 
-  return statuses;
+  return summaries;
+}
+
+/** The status half of {@link useProjectRunSummaries}, for glyph-only consumers. */
+export function useProjectRunStatuses(
+  projectIds: readonly string[],
+  options?: UseProjectRunStatusesOptions,
+): ReadonlyMap<string, ProjectDisplayStatus> {
+  const summaries = useProjectRunSummaries(projectIds, options);
+  return useMemo(() => {
+    const statuses = new Map<string, ProjectDisplayStatus>();
+    for (const [projectId, summary] of summaries) statuses.set(projectId, summary.status);
+    return statuses;
+  }, [summaries]);
 }

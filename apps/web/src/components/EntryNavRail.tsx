@@ -59,7 +59,7 @@ import { PlanWordmark, planBadgeTierForWorkspace } from './PlanWordmark';
 import { RemixIcon } from './RemixIcon';
 import { InviteDialog } from './InviteDialog';
 import { RailRecentRow } from './entry-nav-rail/RailRecentRow';
-import { useProjectRunStatuses } from '../hooks/useProjectRunStatuses';
+import { useProjectRunSummaries } from '../hooks/useProjectRunStatuses';
 import { MessageCenter } from './MessageCenter';
 import type { EntrySettingsSection } from './EntrySettingsMenu';
 import type { Project } from '../types';
@@ -339,14 +339,15 @@ function readStoredRecentOpen(): boolean {
 }
 
 /**
- * Projects whose finished run the user has already gone in and looked at (per
- * product: 点进去之后对号换回默认 icon).
+ * Which finished run the user has already looked at, per project (per product:
+ * 点进去之后对号换回默认 icon).
  *
- * The ✓ is a NOTICE — "a run finished here since you last looked" — not a
- * permanent property of the project, so opening the project spends it and the
- * row falls back to its default chat mark. The acknowledgement is dropped again
- * the moment that project starts working (`queued` / `running`), so the NEXT
- * completion is announced like the first.
+ * Invariant: a ✓ is acknowledged for ONE specific finished run — the value is
+ * that run's id — and a newer finished run is a new notice. Keyed on the run
+ * rather than the project so the acknowledgement stays correct even when the
+ * section was collapsed (and not polling) for the whole of the next run: on
+ * re-expanding, the newest terminal run's id no longer matches and the ✓ shows
+ * again. Only a project whose live status is `succeeded` consults this at all.
  *
  * Persisted next to the section's own open/closed flag: a reload re-reads the
  * same runs feed and would otherwise re-raise every ✓ the user has already
@@ -354,23 +355,31 @@ function readStoredRecentOpen(): boolean {
  */
 const RECENT_SEEN_DONE_STORAGE_KEY = 'od.entry.railRecentSeenDone';
 
-function readStoredSeenDone(): ReadonlySet<string> {
-  if (typeof window === 'undefined') return new Set();
+type AcknowledgedRuns = Readonly<Record<string, string>>;
+
+function readStoredSeenDone(): AcknowledgedRuns {
+  if (typeof window === 'undefined') return {};
   try {
     const raw = window.localStorage.getItem(RECENT_SEEN_DONE_STORAGE_KEY);
     const parsed: unknown = raw ? JSON.parse(raw) : null;
-    if (!Array.isArray(parsed)) return new Set();
-    return new Set(parsed.filter((id): id is string => typeof id === 'string'));
+    // Anything but a plain object of run ids — including a bare list of
+    // project ids, which cannot say which run it meant — reads as "nothing
+    // acknowledged". The worst case is one ✓ the user has already seen, never a
+    // missing one.
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    const acknowledged: Record<string, string> = {};
+    for (const [projectId, runId] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof runId === 'string' && runId) acknowledged[projectId] = runId;
+    }
+    return acknowledged;
   } catch {
-    // Corrupt or unavailable storage: start from "nothing acknowledged". The
-    // worst case is one ✓ the user has already seen, never a missing one.
-    return new Set();
+    return {};
   }
 }
 
-function writeStoredSeenDone(ids: ReadonlySet<string>): void {
+function writeStoredSeenDone(acknowledged: AcknowledgedRuns): void {
   try {
-    window.localStorage.setItem(RECENT_SEEN_DONE_STORAGE_KEY, JSON.stringify([...ids]));
+    window.localStorage.setItem(RECENT_SEEN_DONE_STORAGE_KEY, JSON.stringify(acknowledged));
   } catch {
     // Private mode / storage disabled: the ✓ still clears for this session.
   }
@@ -413,44 +422,31 @@ function RailRecentSection({
   // Only polled while the disclosure is open: it costs one request per listed
   // project (≤ RAIL_RECENT_LIMIT), and a collapsed section shows no glyphs.
   const runStatusProjectIds = useMemo(() => items.map((item) => item.id), [items]);
-  const runStatusByProjectId = useProjectRunStatuses(runStatusProjectIds, {
+  const runSummaryByProjectId = useProjectRunSummaries(runStatusProjectIds, {
     enabled: open,
     workspaceContext,
   });
-  const [seenDone, setSeenDone] = useState<ReadonlySet<string>>(readStoredSeenDone);
-  // A project that is working again has something new to announce when it
-  // finishes, so its old acknowledgement is spent. Only a LIVE status clears it
-  // — never a missing one, or the first render (statuses arrive one fetch
-  // later) would wipe every ✓ the user had already cleared.
-  useEffect(() => {
-    setSeenDone((prev) => {
-      const next = new Set(prev);
-      for (const id of prev) {
-        const status = runStatusByProjectId.get(id);
-        if (status === 'queued' || status === 'running') next.delete(id);
-      }
-      if (next.size === prev.size) return prev;
-      writeStoredSeenDone(next);
-      return next;
-    });
-  }, [runStatusByProjectId]);
+  const [seenDone, setSeenDone] = useState<AcknowledgedRuns>(readStoredSeenDone);
 
-  // Opening a project is what spends its ✓ (per product). Recorded only when
-  // there is actually one on screen, so the stored set stays the list of
-  // notices the user has dismissed rather than of every project ever opened.
+  // Opening a project is what spends its ✓ (per product): the finished run on
+  // screen is recorded as seen. Recorded only when there is actually one, so
+  // the store stays the list of notices the user has dismissed rather than of
+  // every project ever opened.
   const openProject = useCallback(
     (id: string) => {
-      if (runStatusByProjectId.get(id) === 'succeeded') {
+      const summary = runSummaryByProjectId.get(id);
+      if (summary?.status === 'succeeded' && summary.latestTerminalRunId) {
+        const runId = summary.latestTerminalRunId;
         setSeenDone((prev) => {
-          if (prev.has(id)) return prev;
-          const next = new Set(prev).add(id);
+          if (prev[id] === runId) return prev;
+          const next = { ...prev, [id]: runId };
           writeStoredSeenDone(next);
           return next;
         });
       }
       return onOpen?.(id);
     },
-    [onOpen, runStatusByProjectId],
+    [onOpen, runSummaryByProjectId],
   );
 
   function toggle() {
@@ -494,11 +490,16 @@ function RailRecentSection({
         <div className="accordion-collapsible-inner">
           <ul className="entry-nav-rail__recent-list">
             {items.map((project) => {
-              const status = runStatusByProjectId.get(project.id);
+              const summary = runSummaryByProjectId.get(project.id);
+              const status = summary?.status;
               // An acknowledged ✓ is DROPPED, not drawn quieter: the row goes
               // back to its default chat mark (per product). Every other status
-              // is live and stays.
-              const acknowledged = status === 'succeeded' && seenDone.has(project.id);
+              // is live and stays. Acknowledged means THIS finished run was
+              // seen; a newer one is a new notice.
+              const acknowledged =
+                status === 'succeeded'
+                && summary?.latestTerminalRunId !== undefined
+                && seenDone[project.id] === summary.latestTerminalRunId;
               return (
                 <li key={project.id}>
                   <RailRecentRow

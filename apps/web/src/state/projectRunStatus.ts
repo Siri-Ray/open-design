@@ -42,7 +42,7 @@ interface RunFold {
   /** Newest non-terminal run — an in-flight run outranks any history. */
   active?: { status: 'queued' | 'running'; updatedAt: number };
   /** Newest terminal run, already resolved to its display status. */
-  terminal?: { status: ProjectDisplayStatus; updatedAt: number };
+  terminal?: { status: ProjectDisplayStatus; updatedAt: number; runId: string };
 }
 
 /**
@@ -62,7 +62,22 @@ export function terminalRunDisplayStatus(
 }
 
 /**
- * `Map<projectId, ProjectDisplayStatus>` for every project the runs cover.
+ * A project's folded status plus the identity of the finished run behind it.
+ *
+ * The run id is what lets a consumer acknowledge a notice PER RUN rather than
+ * per project: "the user has seen that r1 finished" stays true after r2
+ * finishes, and r2 is a new notice. A project-keyed acknowledgement cannot tell
+ * the two apart once the running phase in between goes unobserved.
+ */
+export interface ProjectRunSummary {
+  status: ProjectDisplayStatus;
+  /** The newest terminal run, when the project has one. */
+  latestTerminalRunId?: string;
+  latestTerminalUpdatedAt?: number;
+}
+
+/**
+ * `Map<projectId, ProjectRunSummary>` for every project the runs cover.
  *
  * `awaitingInputProjectIds` comes from the same `/api/runs` response and is
  * what lets a blocked project be told apart from a finished one; the run that
@@ -70,10 +85,10 @@ export function terminalRunDisplayStatus(
  * daemon is too old to send it — the result then simply never says
  * `awaiting_input`, which is the pre-existing behaviour, not a regression.
  */
-export function foldRunsToProjectStatuses(
+export function foldRunsToProjectRunSummaries(
   runs: ChatRunStatusResponse[],
   awaitingInputProjectIds: readonly string[] = [],
-): Map<string, ProjectDisplayStatus> {
+): Map<string, ProjectRunSummary> {
   const folds = new Map<string, RunFold>();
 
   for (const run of runs) {
@@ -81,7 +96,11 @@ export function foldRunsToProjectStatuses(
     const fold = folds.get(run.projectId) ?? {};
     if (TERMINAL_RUN_STATUSES.has(run.status)) {
       if (!fold.terminal || run.updatedAt > fold.terminal.updatedAt) {
-        fold.terminal = { status: terminalRunDisplayStatus(run), updatedAt: run.updatedAt };
+        fold.terminal = {
+          status: terminalRunDisplayStatus(run),
+          updatedAt: run.updatedAt,
+          runId: run.id,
+        };
       }
       // Deliberate divergence from the daemon: `normalizeProjectDisplayStatus`
       // folds `queued` into `running`, because its consumers only ever needed
@@ -98,7 +117,7 @@ export function foldRunsToProjectStatuses(
   }
 
   const awaitingInput = new Set(awaitingInputProjectIds);
-  const statuses = new Map<string, ProjectDisplayStatus>();
+  const summaries = new Map<string, ProjectRunSummary>();
   for (const [projectId, fold] of folds) {
     // An in-flight run outranks history, matching the daemon's
     // `activeRunStatuses ?? latestRunStatuses` precedence.
@@ -106,10 +125,34 @@ export function foldRunsToProjectStatuses(
     // Only `succeeded` is superseded by a pending question — a failed or
     // canceled run leaves nothing to answer. Same narrow rule as
     // `composeProjectDisplayStatus`.
-    statuses.set(
-      projectId,
-      base === 'succeeded' && awaitingInput.has(projectId) ? 'awaiting_input' : base,
-    );
+    const status = base === 'succeeded' && awaitingInput.has(projectId) ? 'awaiting_input' : base;
+    // The terminal run is reported even while a newer run is in flight: it is
+    // still the newest FINISHED run, which is what an acknowledgement names.
+    summaries.set(projectId, {
+      status,
+      ...(fold.terminal
+        ? {
+            latestTerminalRunId: fold.terminal.runId,
+            latestTerminalUpdatedAt: fold.terminal.updatedAt,
+          }
+        : {}),
+    });
+  }
+  return summaries;
+}
+
+/**
+ * `Map<projectId, ProjectDisplayStatus>` for every project the runs cover —
+ * the status half of {@link foldRunsToProjectRunSummaries}, for consumers that
+ * only draw a glyph and never acknowledge anything.
+ */
+export function foldRunsToProjectStatuses(
+  runs: ChatRunStatusResponse[],
+  awaitingInputProjectIds: readonly string[] = [],
+): Map<string, ProjectDisplayStatus> {
+  const statuses = new Map<string, ProjectDisplayStatus>();
+  for (const [projectId, summary] of foldRunsToProjectRunSummaries(runs, awaitingInputProjectIds)) {
+    statuses.set(projectId, summary.status);
   }
   return statuses;
 }
