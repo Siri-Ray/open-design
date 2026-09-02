@@ -25,8 +25,10 @@
 // personal_byok workspace still has full team features.
 
 import {
+  useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -56,8 +58,11 @@ import { GITHUB_STARS_FALLBACK_LABEL, formatStars, useGithubStars } from './useG
 import { PlanWordmark, planBadgeTierForWorkspace } from './PlanWordmark';
 import { RemixIcon } from './RemixIcon';
 import { InviteDialog } from './InviteDialog';
+import { RailRecentRow } from './entry-nav-rail/RailRecentRow';
+import { useProjectRunStatuses } from '../hooks/useProjectRunStatuses';
 import { MessageCenter } from './MessageCenter';
 import type { EntrySettingsSection } from './EntrySettingsMenu';
+import type { Project } from '../types';
 import { isRtlLocale, useI18n } from '../i18n';
 import { useDismissOnOutsideInteraction } from '../hooks/useDismissOnOutsideInteraction';
 import { ENTRY_RAIL_TOGGLE_EVENT } from './entryRailBridge';
@@ -241,6 +246,18 @@ interface Props {
   updaterSlot?: ReactNode;
   /** Optional notice shown above the footer controls. */
   footerNotice?: ReactNode;
+  /** Projects for the rail's 最近浏览过 section (per product: 在插件下边新增一个
+   *  类型). The SAME catalog and the SAME order 全部项目's 最近浏览过 tab shows —
+   *  EntryShell hands over the one it already feeds that grid, so the two can
+   *  never drift; this list only takes the head of it. Empty (or absent) hides
+   *  the section entirely. */
+  recentProjects?: Project[];
+  /** Row actions for the 最近浏览过 list's ⋮ menu. Omit either to drop its item. */
+  onRenameRecentProject?: (id: string, name: string) => void;
+  onDeleteRecentProject?: (id: string) => Promise<boolean | void> | boolean | void;
+  /** Opens one of those projects — the pull-first opener, so a shared project
+   *  that is not local yet still lands. */
+  onOpenRecentProject?: (id: string) => void | Promise<unknown>;
   /** One-off targeted announcement coordination owned by the Home shell. */
   priorityAnnouncementActive?: boolean;
   onPriorityAnnouncementPendingChange?: (pending: boolean) => void;
@@ -295,6 +312,210 @@ function NavButton({
       <span className="entry-nav-rail__btn-icon" aria-hidden>{children}</span>
       <span className="entry-nav-rail__btn-label">{label}</span>
     </button>
+  );
+}
+
+/** How many of the recent projects the rail lists. The rail is navigation, not
+ *  a grid: past ~8 rows the section outgrows the destinations above it and the
+ *  whole rail starts to scroll. 全部项目 is one click away for the rest, and the
+ *  section's own footer row goes there. */
+const RAIL_RECENT_LIMIT = 8;
+
+/** Remembers the section's open/closed state across launches, next to the
+ *  rail's own `od.entry.railOpen`. A disclosure the user closed should stay
+ *  closed — re-opening it on every boot is the whole reason to have the
+ *  control. */
+const RECENT_SECTION_STORAGE_KEY = 'od.entry.railRecentOpen';
+
+function readStoredRecentOpen(): boolean {
+  if (typeof window === 'undefined') return true;
+  try {
+    // Default OPEN: the section is new and a collapsed-by-default disclosure
+    // reads as a missing feature.
+    return window.localStorage.getItem(RECENT_SECTION_STORAGE_KEY) !== 'false';
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * Projects whose finished run the user has already gone in and looked at (per
+ * product: 点进去之后对号换回默认 icon).
+ *
+ * The ✓ is a NOTICE — "a run finished here since you last looked" — not a
+ * permanent property of the project, so opening the project spends it and the
+ * row falls back to its default chat mark. The acknowledgement is dropped again
+ * the moment that project starts working (`queued` / `running`), so the NEXT
+ * completion is announced like the first.
+ *
+ * Persisted next to the section's own open/closed flag: a reload re-reads the
+ * same runs feed and would otherwise re-raise every ✓ the user has already
+ * cleared.
+ */
+const RECENT_SEEN_DONE_STORAGE_KEY = 'od.entry.railRecentSeenDone';
+
+function readStoredSeenDone(): ReadonlySet<string> {
+  if (typeof window === 'undefined') return new Set();
+  try {
+    const raw = window.localStorage.getItem(RECENT_SEEN_DONE_STORAGE_KEY);
+    const parsed: unknown = raw ? JSON.parse(raw) : null;
+    if (!Array.isArray(parsed)) return new Set();
+    return new Set(parsed.filter((id): id is string => typeof id === 'string'));
+  } catch {
+    // Corrupt or unavailable storage: start from "nothing acknowledged". The
+    // worst case is one ✓ the user has already seen, never a missing one.
+    return new Set();
+  }
+}
+
+function writeStoredSeenDone(ids: ReadonlySet<string>): void {
+  try {
+    window.localStorage.setItem(RECENT_SEEN_DONE_STORAGE_KEY, JSON.stringify([...ids]));
+  } catch {
+    // Private mode / storage disabled: the ✓ still clears for this session.
+  }
+}
+
+/**
+ * 最近浏览过 — a collapsible list of the projects the 全部项目 view's own
+ * 最近浏览过 tab would show, sitting under 插件 in the rail (per product).
+ *
+ * It takes the catalog EntryShell already feeds that grid and shows the head of
+ * it in the same order (most recently touched first), so the rail and the grid
+ * can never disagree about what "recent" means. Rows open the project through
+ * the same pull-first opener the grid uses.
+ */
+function RailRecentSection({
+  projects,
+  onOpen,
+  onRename,
+  onDelete,
+  workspaceContext,
+  label,
+}: {
+  projects: Project[];
+  onOpen?: (id: string) => void | Promise<unknown>;
+  onRename?: (id: string, name: string) => void;
+  onDelete?: (id: string) => Promise<boolean | void> | boolean | void;
+  workspaceContext?: WorkspaceCollabContext | null;
+  label: string;
+}) {
+  const [open, setOpen] = useState(readStoredRecentOpen);
+  const items = useMemo(
+    () => [...projects].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, RAIL_RECENT_LIMIT),
+    [projects],
+  );
+  // Run status for the rows' leading glyph. `Project.status` cannot serve it —
+  // it only arrives on the UNSCOPED project list, so it is absent for every
+  // workspace-bound project (see the hook's own note) — and this is the same
+  // feed the workspace tab dropdown reads, which is what keeps the two glyph
+  // columns telling one story.
+  // Only polled while the disclosure is open: it costs one request per listed
+  // project (≤ RAIL_RECENT_LIMIT), and a collapsed section shows no glyphs.
+  const runStatusProjectIds = useMemo(() => items.map((item) => item.id), [items]);
+  const runStatusByProjectId = useProjectRunStatuses(runStatusProjectIds, {
+    enabled: open,
+    workspaceContext,
+  });
+  const [seenDone, setSeenDone] = useState<ReadonlySet<string>>(readStoredSeenDone);
+  // A project that is working again has something new to announce when it
+  // finishes, so its old acknowledgement is spent. Only a LIVE status clears it
+  // — never a missing one, or the first render (statuses arrive one fetch
+  // later) would wipe every ✓ the user had already cleared.
+  useEffect(() => {
+    setSeenDone((prev) => {
+      const next = new Set(prev);
+      for (const id of prev) {
+        const status = runStatusByProjectId.get(id);
+        if (status === 'queued' || status === 'running') next.delete(id);
+      }
+      if (next.size === prev.size) return prev;
+      writeStoredSeenDone(next);
+      return next;
+    });
+  }, [runStatusByProjectId]);
+
+  // Opening a project is what spends its ✓ (per product). Recorded only when
+  // there is actually one on screen, so the stored set stays the list of
+  // notices the user has dismissed rather than of every project ever opened.
+  const openProject = useCallback(
+    (id: string) => {
+      if (runStatusByProjectId.get(id) === 'succeeded') {
+        setSeenDone((prev) => {
+          if (prev.has(id)) return prev;
+          const next = new Set(prev).add(id);
+          writeStoredSeenDone(next);
+          return next;
+        });
+      }
+      return onOpen?.(id);
+    },
+    [onOpen, runStatusByProjectId],
+  );
+
+  function toggle() {
+    setOpen((wasOpen) => {
+      const next = !wasOpen;
+      try {
+        window.localStorage.setItem(RECENT_SECTION_STORAGE_KEY, String(next));
+      } catch {
+        // Private mode / storage disabled: the section still toggles, it just
+        // forgets. Never let a storage failure swallow the interaction.
+      }
+      return next;
+    });
+  }
+
+  // Nothing to list is not an empty state worth a row: a workspace with no
+  // projects yet should see the rail it had before this section existed.
+  if (items.length === 0) return null;
+
+  return (
+    <div className="entry-nav-rail__recent">
+      <button
+        type="button"
+        className="entry-nav-rail__recent-head"
+        onClick={toggle}
+        aria-expanded={open}
+        data-testid="entry-nav-recent-toggle"
+      >
+        {/* Title first, chevron trailing (per product: 展开和收起的按钮在最右侧).
+            DOM order follows the visual one rather than an `order` swap, so the
+            reading order matches too. */}
+        <span className="entry-nav-rail__recent-title">{label}</span>
+        <span className="entry-nav-rail__recent-chevron" aria-hidden>
+          <Icon name={open ? 'chevron-down' : 'chevron-right'} size={14} />
+        </span>
+      </button>
+      {/* The canonical disclosure pair (index.css / composio.css): the outer
+          grid animates 0fr → 1fr, the inner box carries the clip. `hidden` on
+          the wrapper would skip the transition entirely. */}
+      <div className={`accordion-collapsible${open ? ' open' : ''}`}>
+        <div className="accordion-collapsible-inner">
+          <ul className="entry-nav-rail__recent-list">
+            {items.map((project) => {
+              const status = runStatusByProjectId.get(project.id);
+              // An acknowledged ✓ is DROPPED, not drawn quieter: the row goes
+              // back to its default chat mark (per product). Every other status
+              // is live and stays.
+              const acknowledged = status === 'succeeded' && seenDone.has(project.id);
+              return (
+                <li key={project.id}>
+                  <RailRecentRow
+                    project={project}
+                    workspaceContext={workspaceContext}
+                    runStatus={acknowledged ? undefined : status}
+                    onOpen={openProject}
+                    onRename={onRename}
+                    onDelete={onDelete}
+                  />
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -1276,6 +1497,10 @@ export function EntryNavRail({
   onSignedOut,
   updaterSlot,
   footerNotice,
+  recentProjects,
+  onOpenRecentProject,
+  onRenameRecentProject,
+  onDeleteRecentProject,
   priorityAnnouncementActive,
   onPriorityAnnouncementPendingChange,
   priorityAnnouncementCurrentPlanId,
@@ -1804,6 +2029,17 @@ export function EntryNavRail({
             >
               <Icon name="puzzle" size={16} />
             </NavButton>
+            {/* 最近浏览过 sits under 插件 (per product) — the last thing in the
+                destination list, because it is a list of CONTENT rather than a
+                place to go. */}
+            <RailRecentSection
+              projects={recentProjects ?? []}
+              onOpen={onOpenRecentProject}
+              onRename={onRenameRecentProject}
+              onDelete={onDeleteRecentProject}
+              workspaceContext={context}
+              label={t('recentProjects.collectionRecent')}
+            />
             {/* Product decision (2026-07-20): 成员 and 数据大盘 leave the rail
                 entirely — both surfaces live in B's console and the rail should
                 not advertise them. Workspace 设置 stays, and still links OUT to

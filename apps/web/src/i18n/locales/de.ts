@@ -1090,6 +1090,7 @@ export const de: Dict = {
   'recentProjects.sortNewest': 'Newest first',
   'recentProjects.sortOldest': 'Oldest first',
   'recentProjects.sortName': 'Name',
+  'recentProjects.collectionRecent': 'Recently viewed',
   'recentProjects.viewList': 'List view',
   'recentProjects.sharedBadge': 'Shared',
   'recentProjects.sharedProjectFallbackName': 'Shared project',

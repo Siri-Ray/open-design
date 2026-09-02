@@ -1105,6 +1105,7 @@ export const zhCN: Dict = {
   "recentProjects.sortNewest": "最近更新",
   "recentProjects.sortOldest": "最早更新",
   "recentProjects.sortName": "名称",
+  "recentProjects.collectionRecent": "最近浏览过",
   "recentProjects.viewList": "列表视图",
   "recentProjects.sharedBadge": "共享",
   "recentProjects.sharedProjectFallbackName": "共享项目",
