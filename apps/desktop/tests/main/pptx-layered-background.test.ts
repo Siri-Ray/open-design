@@ -280,9 +280,28 @@ app.whenReady().then(() => {
       const electronPath = join(desktopRoot, 'node_modules', 'electron', 'dist', electronRelativePath);
       const env: NodeJS.ProcessEnv = { ...process.env };
       delete env.ELECTRON_RUN_AS_NODE;
+      // Same flags as every other probe in this file: the CI runner has no
+      // usable Chromium sandbox or GPU, and a probe that asks for either can
+      // exit before `app.whenReady()` with nothing on stdout.
+      const electronArgs = [probeDir, '--no-sandbox', '--disable-gpu'];
       const command = process.platform === 'linux' ? 'xvfb-run' : electronPath;
-      const args = process.platform === 'linux' ? ['-a', electronPath, probeDir] : [probeDir];
-      const { stdout, stderr } = await execFileP(command, args, { env, timeout: ELECTRON_PROBE_TIMEOUT_MS });
+      const args = process.platform === 'linux' ? ['-a', electronPath, ...electronArgs] : electronArgs;
+      let stderr: string;
+      let stdout: string;
+      try {
+        ({ stderr, stdout } = await execFileP(command, args, { env, timeout: ELECTRON_PROBE_TIMEOUT_MS }));
+      } catch (error) {
+        // `execFile` reports a non-zero exit as a bare "Command failed"; the
+        // child's own output is what says why.
+        const failure = error as Error & { stderr?: string; stdout?: string };
+        throw new Error(
+          [
+            failure.message,
+            failure.stdout ? `stdout:\n${failure.stdout}` : '',
+            failure.stderr ? `stderr:\n${failure.stderr}` : '',
+          ].filter(Boolean).join('\n'),
+        );
+      }
       const marker = stdout.split(/\r?\n/).find((line) => line.startsWith('OD_PNG_PAINT:'));
       if (!marker) throw new Error(`Electron paint probe returned no result: ${stdout || stderr}`);
       expect(JSON.parse(marker.slice('OD_PNG_PAINT:'.length))).toEqual({
