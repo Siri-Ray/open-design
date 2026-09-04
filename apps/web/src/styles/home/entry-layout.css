@@ -1685,6 +1685,15 @@
   flex: 0 0 20px;
   object-fit: contain;
 }
+/* The model brand mark sits in the same 20px slot the agent logo uses, so the
+   chip keeps its width whichever of the two it happens to be showing. */
+.inline-switcher__chip-model-logo {
+  display: block;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  object-fit: contain;
+}
 .inline-switcher__chip-icon .agent-icon-mono,
 .inline-switcher__agent .agent-icon-mono {
   display: inline-block;
@@ -1718,17 +1727,6 @@
 }
 .inline-switcher__chip-sep {
   color: var(--text-faint);
-}
-/* Hairline splitting the agent (logo + status dot) from the model name, so the
-   compact chip reads as two groups rather than one run. Same treatment as
-   `.home-hero__workdir-divider` in the composer row beside it; the chip's own
-   gap does the spacing. */
-.inline-switcher__chip-divider {
-  flex: 0 0 auto;
-  width: 1px;
-  height: 16px;
-  background: var(--border);
-  opacity: 0.7;
 }
 .inline-switcher__chip-primary {
   min-width: 0;
@@ -1764,11 +1762,6 @@
     0 0 0 4px color-mix(in srgb, var(--danger, #dc2626) 12%, transparent);
   pointer-events: none;
 }
-.inline-switcher__amr-reminder-dot--chip {
-  top: -2px;
-  right: -2px;
-}
-
 /* Popover */
 .inline-switcher__popover {
   position: absolute;
@@ -1933,6 +1926,20 @@
   height: 16px;
   object-fit: contain;
   display: block;
+}
+/* A row with no model-specific brand mark falls back to `<AgentIcon>`, which
+   carries `.agent-icon` — and the chip's own rule above
+   (`.inline-switcher__agent .agent-icon`) pins that class to 20px. Two class
+   selectors beat the one-class-plus-element pair above, so those rows rendered
+   a 20px mark beside the 16px provider marks and the column looked ragged.
+   AgentIcon's `width`/`height` are HTML attributes (presentational hints), so
+   they lose to any rule at all and cannot settle this either.
+   Named explicitly at three classes so this wins on specificity rather than on
+   source order. */
+.inline-switcher__agent .inline-switcher__agent-logo .agent-icon {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
 }
 .inline-switcher--compact .inline-switcher__agent:hover:not(:disabled) {
   border: none;
@@ -2371,7 +2378,6 @@
   bottom: -12px;
   z-index: 1;
   background: var(--bg-elevated);
-  border-top: 1px solid var(--border-soft);
   margin-top: 2px;
   padding: 8px 4px;
   display: inline-flex;
@@ -2383,6 +2389,24 @@
   color: var(--text-muted);
   font-size: 12px;
   cursor: pointer;
+}
+/* The divider above this row is a pseudo-element, NOT the button's own
+   `border-top` (per product: 分割线不要用按钮的描边). A border belongs to the
+   control's box, so it read as the button being outlined rather than as the
+   popover being divided.
+   It is inset rather than full-bleed (per product: 不要贯穿): the line sits
+   4px inside the button's own edges, so it reads as a rule between two groups
+   of rows and never touches the popover's wall. Because it rides the sticky
+   button, it stays pinned to the bottom while the model list scrolls under. */
+.inline-switcher__more::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 4px;
+  right: 4px;
+  height: 1px;
+  background: var(--border-soft);
+  pointer-events: none;
 }
 .inline-switcher__more:hover {
   color: var(--text-strong);
