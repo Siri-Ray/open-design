@@ -69,9 +69,10 @@ interface Props {
   // True while the host is reindexing a freshly replaced working dir. Drives
   // a loading overlay so the panel doesn't sit silently on the stale tree.
   reloading?: boolean;
-  // True while the chat agent is generating. The footer swaps its idle
-  // drop/upload hint for the typewriter "tip" line while a run is in flight,
-  // and a run that has already written a page is shown taking shape.
+  // True while a run of this conversation is genuinely in flight (streaming,
+  // or attached and about to). Not the composer's disabled state: a read-only
+  // viewer has that with nothing running. A run that has already written a
+  // page is shown taking shape.
   running?: boolean;
   /** The running turn's tool calls, newest first. The building preview names
    *  the first one as the current step and logs the rest beneath it. */

@@ -226,6 +226,18 @@ interface Props {
   ) => Promise<FileRefreshResult | void> | FileRefreshResult | void;
   isDeck: boolean;
   streaming?: boolean;
+  /**
+   * True while a run of the current conversation is actually in flight: its
+   * events are streaming, or an active run is attached and waiting to.
+   *
+   * Deliberately separate from `streaming`, which is the composer's
+   * "actions disabled" state and is also true for a read-only viewer of a
+   * shared project, a conversation still loading, or a run with no billable
+   * principal. The Design Files building preview keys off THIS flag: a page
+   * only "takes shape" while something is writing it, and a viewer with no run
+   * in flight must see the file grid, not a live preview captioned "thinking".
+   */
+  runInFlight?: boolean;
   commentQueueOnSend?: boolean;
   commentSendDisabled?: boolean;
   openRequest?: { name: string; nonce: number } | null;
@@ -1303,6 +1315,7 @@ export function FileWorkspace({
   onRefreshFiles,
   isDeck,
   streaming,
+  runInFlight = false,
   commentQueueOnSend = false,
   commentSendDisabled = false,
   openRequest,
@@ -4291,7 +4304,7 @@ export function FileWorkspace({
             downloadPending={fileSyncBadge === 'downloading'}
             rootDirName={rootDirName}
             reloading={reloading}
-            running={Boolean(streaming)}
+            running={runInFlight}
             runSteps={runSteps}
             files={visibleFiles}
             folders={projectFolders}
