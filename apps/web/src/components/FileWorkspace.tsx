@@ -169,6 +169,7 @@ import {
 } from './sketch-model';
 import { AnimatePresence } from 'motion/react';
 import type { ChatMessage } from '../types';
+import { runProgressSteps } from '../runtime/run-progress';
 import type { CommentSendResult } from './comment-send-result';
 
 type TranslateFn = (key: keyof Dict, vars?: Record<string, string | number>) => string;
@@ -1643,6 +1644,12 @@ export function FileWorkspace({
     () => files.filter((file) => !isLiveArtifactImplementationPath(file.name)),
     [files],
   );
+
+  // What the Design Files building preview shows while a run is in flight:
+  // what the run is doing right now, and the steps behind it. Recomputed per
+  // streamed event by design — a tool call landing IS the update the pane is
+  // there to show.
+  const runSteps = useMemo(() => runProgressSteps(messages), [messages]);
 
   // Known-file set for the side chat's file-link routing — same shape
   // ProjectView feeds its primary ChatPane.
@@ -4285,6 +4292,7 @@ export function FileWorkspace({
             rootDirName={rootDirName}
             reloading={reloading}
             running={Boolean(streaming)}
+            runSteps={runSteps}
             files={visibleFiles}
             folders={projectFolders}
             liveArtifacts={liveArtifactEntries}
