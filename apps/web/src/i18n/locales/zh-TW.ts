@@ -1111,6 +1111,7 @@ export const zhTW: Dict = {
   "recentProjects.sortNewest": "最近更新",
   "recentProjects.sortOldest": "最早更新",
   "recentProjects.sortName": "名稱",
+  "recentProjects.collectionRecent": "最近瀏覽過",
   "recentProjects.viewList": "列表檢視",
   "recentProjects.sharedBadge": "共享",
   "recentProjects.sharedProjectFallbackName": "共享專案",
