@@ -711,9 +711,14 @@ export async function waitForVisualProjects(page: Page, projects: readonly Visua
     return;
   }
 
-  await expect(
-    page.getByTestId('recent-projects-strip').getByText(projects[0]?.name ?? '', { exact: true }),
-  ).toBeVisible();
+  // Where the catalog shows depends on identity: the signed-out shell keeps
+  // Home's recent-projects grid, while a workspace-bound Home carries the list
+  // in the rail's 最近项目 section instead (#7635 / OPEND-2683). The rail is
+  // collapsed by default, so its rows are attached rather than visible.
+  const name = projects[0]?.name ?? '';
+  const stripRow = page.getByTestId('recent-projects-strip').getByText(name, { exact: true });
+  const railRow = page.getByTestId('entry-nav-recent-item').filter({ hasText: name }).first();
+  await expect(stripRow.or(railRow).first()).toBeAttached();
 }
 
 export async function gotoVisualHome(page: Page): Promise<void> {
