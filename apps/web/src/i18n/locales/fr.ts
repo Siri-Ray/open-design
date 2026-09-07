@@ -1094,7 +1094,6 @@ export const fr: Dict = {
   'recentProjects.sortNewest': 'Plus récents d’abord',
   'recentProjects.sortOldest': 'Plus anciens d’abord',
   'recentProjects.sortName': 'Nom',
-  'recentProjects.collectionRecent': 'Consultés récemment',
   'recentProjects.viewList': 'Vue liste',
   'recentProjects.sharedBadge': 'Partagé',
   'recentProjects.sharedProjectFallbackName': 'Projet partagé',
