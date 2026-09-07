@@ -1663,6 +1663,16 @@ export function FileWorkspace({
   // streamed event by design — a tool call landing IS the update the pane is
   // there to show.
   const runSteps = useMemo(() => runProgressSteps(messages), [messages]);
+  const runStartedAt = useMemo(() => {
+    if (!runInFlight) return null;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const message = messages[i]!;
+      if (message.role === 'user') return null;
+      if (message.role !== 'assistant') continue;
+      return message.endedAt ? null : message.startedAt ?? null;
+    }
+    return null;
+  }, [messages, runInFlight]);
 
   // Known-file set for the side chat's file-link routing — same shape
   // ProjectView feeds its primary ChatPane.
@@ -4305,6 +4315,7 @@ export function FileWorkspace({
             rootDirName={rootDirName}
             reloading={reloading}
             running={runInFlight}
+            runStartedAt={runStartedAt}
             runSteps={runSteps}
             files={visibleFiles}
             folders={projectFolders}

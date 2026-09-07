@@ -74,6 +74,8 @@ interface Props {
   // viewer has that with nothing running. A run that has already written a
   // page is shown taking shape.
   running?: boolean;
+  /** Active turn start, used to exclude pages left over from earlier runs. */
+  runStartedAt?: number | null;
   /** The running turn's tool calls, newest first. The building preview names
    *  the first one as the current step and logs the rest beneath it. */
   runSteps?: RunProgressStep[];
@@ -461,6 +463,7 @@ export function DesignFilesPanel({
   rootDirName,
   reloading,
   running = false,
+  runStartedAt,
   runSteps,
   files,
   folders,
@@ -497,8 +500,11 @@ export function DesignFilesPanel({
   // qualifies: there is nothing to watch take shape in a markdown file or an
   // image, and swapping the preview for one mid-run would be a downgrade.
   const buildPreviewName = useMemo(
-    () => (running ? selectBuildPreviewHtmlEntry(files) : null),
-    [running, files],
+    () => {
+      if (!running || !runStartedAt || !Number.isFinite(runStartedAt)) return null;
+      return selectBuildPreviewHtmlEntry(files.filter((file) => file.mtime >= runStartedAt));
+    },
+    [running, runStartedAt, files],
   );
   const buildPreviewFile = useMemo(
     () => (buildPreviewName ? files.find((file) => file.name === buildPreviewName) ?? null : null),

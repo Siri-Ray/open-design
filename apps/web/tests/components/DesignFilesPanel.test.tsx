@@ -1134,15 +1134,26 @@ describe("building preview", () => {
   const page = () => file({ name: "index.html", kind: "html" });
 
   it("watches the page while the run is still writing it", () => {
-    renderPanel([page()], { running: true });
+    renderPanel([page()], { running: true, runStartedAt: Date.now() - 1000 });
 
     expect(screen.getByTestId("design-files-building")).toBeTruthy();
     // The grid is what it replaces, not something it sits on top of.
     expect(screen.queryByTestId("design-file-row-index.html")).toBeNull();
   });
 
+  it('selects only HTML written since the active turn started', () => {
+    const runStartedAt = 1_800_000_000_000;
+    renderPanel([
+      file({ name: 'index.html', mtime: runStartedAt - 1 }),
+      file({ name: 'about.html', mtime: runStartedAt + 1 }),
+    ], { running: true, runStartedAt });
+
+    const preview = screen.getByTestId('design-files-building');
+    expect(preview.querySelector('iframe')?.getAttribute('src')).toContain('/about.html');
+  });
+
   it("hands the pane back to the file grid when the run ends", () => {
-    const { rerender } = renderPanel([page()], { running: true });
+    const { rerender } = renderPanel([page()], { running: true, runStartedAt: Date.now() - 1000 });
     expect(screen.getByTestId("design-files-building")).toBeTruthy();
 
     rerender(
@@ -1192,7 +1203,7 @@ describe("building preview", () => {
   // One switch, both directions. A one-way "show files" button would leave the
   // run no route back to the preview once dismissed.
   it("lets the user leave the preview for the files, and come back", () => {
-    renderPanel([page()], { running: true });
+    renderPanel([page()], { running: true, runStartedAt: Date.now() - 1000 });
 
     const toggle = screen.getByTestId("design-files-preview-toggle");
     expect(toggle.getAttribute("aria-checked")).toBe("true");
