@@ -142,6 +142,14 @@
      the panel's border box IS the rows' box, so a row sits at this margin's
      12px from the window edge — the same gutter the content card keeps on the
      other side. */
+  /* Still a containing block for `position: fixed` descendants. The frost's
+     backdrop-filter used to make it one as a side effect, which is what kept
+     the workspace-switcher / account-menu click-catchers
+     (`.entry-nav-rail__menu-backdrop`, fixed + inset 0) scoped to THIS column.
+     Without it they spread over the viewport and swallowed every click on the
+     content beside the rail while a menu was open. A no-op transform restores
+     that scope without painting anything. */
+  transform: translateZ(0);
 }
 .entry-nav-rail.is-open {
   pointer-events: auto;

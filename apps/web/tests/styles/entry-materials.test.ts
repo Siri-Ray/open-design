@@ -137,6 +137,10 @@ describe('entry layout materials (styles/home/entry-layout.css)', () => {
     expect(panel).not.toMatch(/box-shadow/);
     expect(entryLayoutCss).not.toContain('.entry-nav-rail__panel::after');
     expect(declarations(entryLayoutCss, '.entry-nav-rail__group')).toMatch(/padding:\s*0;/);
+    // …but it stays a containing block for the fixed menu click-catchers, so
+    // an open workspace switcher never swallows clicks on the content column.
+    expect(panel).toMatch(/transform:\s*translateZ\(0\)/);
+    expect(declarations(entryLayoutCss, '.entry-nav-rail__menu-backdrop')).toMatch(/position:\s*fixed/);
   });
 
   it('makes the content column the one base card: 85% white frost, 16px corner, inset ring, 12px inset', () => {

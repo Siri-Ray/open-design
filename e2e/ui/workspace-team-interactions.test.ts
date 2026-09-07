@@ -213,10 +213,7 @@ test('[P1] New team deep-links Vela creation and exposes the created workspace o
   expect(href.searchParams.get('workspace')).toBe('create');
   await expect(createTeam).toHaveAttribute('target', '_blank');
 
-  // The backdrop spans the viewport now that the rail column paints nothing of
-  // its own (#7635) — (2, 2) lands under the tabs chrome, so click into the
-  // content column instead.
-  await page.locator('.entry-nav-rail__menu-backdrop').click({ position: { x: 640, y: 400 } });
+  await page.locator('.entry-nav-rail__menu-backdrop').click({ position: { x: 2, y: 2 } });
   directory.push(TEAM_SECOND);
   // Directory reads are deliberately coalesced for one second. A real console
   // roundtrip exceeds that window; jump past it so this assertion exercises
@@ -896,10 +893,7 @@ test('[P0] an already-open locked workspace restores invite and sharing actions 
   await expect(
     page.getByRole('menu').getByRole('menuitem', { name: 'Invite colleague' }),
   ).toHaveCount(0);
-  // The backdrop spans the viewport now that the rail column paints nothing of
-  // its own (#7635) — (2, 2) lands under the tabs chrome, so click into the
-  // content column instead.
-  await page.locator('.entry-nav-rail__menu-backdrop').click({ position: { x: 640, y: 400 } });
+  await page.locator('.entry-nav-rail__menu-backdrop').click({ position: { x: 2, y: 2 } });
   await page.getByTestId('entry-nav-drafts').click();
   const card = projectCard(page);
   await openProjectMenu(card);
@@ -922,10 +916,7 @@ test('[P0] an already-open locked workspace restores invite and sharing actions 
   await expect(
     page.getByRole('menu').getByRole('menuitem', { name: 'Invite colleague' }),
   ).toBeVisible({ timeout: T.long });
-  // The backdrop spans the viewport now that the rail column paints nothing of
-  // its own (#7635) — (2, 2) lands under the tabs chrome, so click into the
-  // content column instead.
-  await page.locator('.entry-nav-rail__menu-backdrop').click({ position: { x: 640, y: 400 } });
+  await page.locator('.entry-nav-rail__menu-backdrop').click({ position: { x: 2, y: 2 } });
   await page.getByTestId('entry-nav-drafts').click();
   await expect(card).toBeVisible({ timeout: T.long });
   await expect(card.getByRole('button', { name: 'More actions' })).toBeVisible({
