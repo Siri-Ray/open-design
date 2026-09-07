@@ -1265,8 +1265,6 @@ export interface Dict {
 
   // Entry home
   'homeHero.title': string;
-  'homeHero.titleWords': string;
-  'homeHero.subtitle': string;
   'homeHero.startWithTemplate': string;
   'homeHero.startBlankProject': string;
   'homeHero.templatePicker.label': string;
@@ -1307,8 +1305,6 @@ export interface Dict {
   'homeHero.clearActivePlugin': string;
   'homeHero.clearActiveSkill': string;
   'homeHero.contextItemsResolved': string;
-  'homeHero.attachmentsScrollPrev': string;
-  'homeHero.attachmentsScrollNext': string;
   'homeHero.removeFile': string;
   'homeHero.contextSearchResults': string;
   'homeHero.contextSurfaces': string;

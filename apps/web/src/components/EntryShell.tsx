@@ -1765,6 +1765,7 @@ export function EntryShell({
                 onDeleteProject={onDeleteProject}
                 onDuplicateProject={onDuplicateProject}
                 onRenameProject={onRenameProject}
+                onBrowseRegistry={() => changeView('plugins')}
                 onOpenIntegrations={() => openIntegrationTab('connectors')}
                 onOpenMcp={() => openIntegrationTab('mcp')}
                 onOpenNewProject={(tab) => {
