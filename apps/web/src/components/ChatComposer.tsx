@@ -62,6 +62,12 @@ import type {
 } from '@open-design/contracts';
 import { buildVisualAnnotationAttachment, commentTargetDisplayName } from '../comments';
 import { Icon, type IconName } from "./Icon";
+import {
+  FileTypeIcon,
+  fileTypePreviewKind,
+  previewFallbackIcon,
+  resolveFileTypeIcon,
+} from "./FileTypeIcon";
 import { ComposerPlusMenu, PLUS_SUBMENU_RESOURCE_KIND, type PlusMenuSubmenu } from './ComposerPlusMenu';
 import { LibraryPicker } from './LibraryPicker';
 import { FigmaImportModal } from './FigmaImportModal';
@@ -3732,6 +3738,13 @@ function workspaceContextKindLabel(kind: WorkspaceContextItem['kind']): string {
   }
 }
 
+/** Human labels may omit the filename; retain image-only staging metadata as a fallback. */
+function attachmentPreviewKind(attachment: ChatAttachment) {
+  return fileTypePreviewKind(attachment.name)
+    ?? fileTypePreviewKind(attachment.path)
+    ?? (attachment.kind === 'image' ? 'image' : null);
+}
+
 function StagedRunContexts({
   designSystemPicker,
   workspaceItems,
@@ -3935,7 +3948,11 @@ function StagedRunContexts({
         </div>
       ))}
       {attachments.map((a, index) => {
-        const canPreview = a.kind === 'image' && Boolean(projectId);
+        // Rasters, vectors and videos lead with a thumbnail; every other type
+        // leads with its own mark (per product). The daemon's image/file
+        // kind is a fallback: videos arrive as 'file'.
+        const previewKind = attachmentPreviewKind(a);
+        const canPreview = previewKind !== null && Boolean(projectId);
         const imageUrl = canPreview
           ? projectRawUrl(projectId!, a.path, workspaceContext)
           : null;
@@ -3957,12 +3974,26 @@ function StagedRunContexts({
                 title={a.name}
                 aria-label={`Preview ${a.name}`}
               >
-                <img src={imageUrl} alt="" aria-hidden />
+                {previewKind === 'video' ? (
+                  <video src={imageUrl} muted playsInline preload="metadata" aria-hidden />
+                ) : (
+                  <img src={imageUrl} alt="" aria-hidden />
+                )}
               </button>
             ) : (
               <>
                 <span className="staged-icon" aria-hidden>
-                  <Icon name="file" size={13} />
+                  {/* The type's own mark, from the same table the home
+                      composer's chips read — one answer per file type across
+                      both composers. */}
+                  <FileTypeIcon
+                    name={
+                      previewKind
+                        ? previewFallbackIcon(previewKind, a.name || a.path)
+                        : resolveFileTypeIcon(a.name || a.path)
+                    }
+                    size={16}
+                  />
                 </span>
                 <span className="staged-name" title={a.path}>
                   {a.name}
@@ -4007,7 +4038,11 @@ function StagedRunContexts({
               <Icon name="close" size={14} />
             </button>
           </div>
-          <img src={previewUrl} alt={preview.name} />
+          {attachmentPreviewKind(preview) === 'video' ? (
+            <video src={previewUrl} controls playsInline />
+          ) : (
+            <img src={previewUrl} alt={preview.name} />
+          )}
         </div>
       </div>,
       document.body
