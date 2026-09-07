@@ -20,23 +20,17 @@ function cssDeclarations(selector: string): string {
 }
 
 /**
- * The entry surfaces were designed on an app-wide 600 text weight that has
- * not shipped yet; until it does, `.home-hero` and `.composer` each carry the
- * ladder locally. The "+" menu popup renders through a portal on
- * document.body, outside both of those scopes, so it needs the same stand-in
- * or its rows read lighter than the trigger that opened them.
+ * The "+" menu popup renders through a portal on document.body, outside the
+ * hero and the composer. It reads at the app-wide 600 default from base.css /
+ * primitives.css (see font-weight-normalization.test.ts); the popup must not
+ * re-declare that ladder locally, nor name a lighter weight on its rows.
  */
 describe('ComposerPlusMenu popup typography', () => {
-  it('carries the 600 ladder on the portaled popup', () => {
-    expect(cssDeclarations('.plus-menu__popup')).toMatch(
-      /(?:^|[;\n])\s*font-weight:\s*600\s*;/,
+  it('inherits the app-wide ladder instead of carrying its own', () => {
+    expect(() => cssDeclarations(':where(.plus-menu__popup) button')).toThrow(
+      /Missing CSS block/,
     );
-  });
-
-  it('keeps the button rule at element specificity so named weights still win', () => {
-    expect(cssDeclarations(':where(.plus-menu__popup) button')).toMatch(
-      /(?:^|[;\n])\s*font-weight:\s*600\s*;/,
-    );
+    expect(plusMenuCss).not.toMatch(/Typography ladder stand-in/);
   });
 
   it('lets the rows inherit that weight instead of naming a lighter one', () => {

@@ -406,7 +406,7 @@
   color: var(--text-strong);
   content: attr(data-tooltip);
   font-size: 12px;
-  font-weight: 500;
+  font-weight: 600;
   line-height: 1.2;
   opacity: 0;
   pointer-events: none;
@@ -1170,7 +1170,7 @@
 }
 .speaker-notes-panel-meta {
   color: var(--text-muted);
-  font-weight: 400;
+  font-weight: 600;
   text-transform: none;
   letter-spacing: 0;
 }

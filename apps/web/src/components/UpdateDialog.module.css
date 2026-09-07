@@ -85,7 +85,7 @@
   margin: 0;
   color: var(--text-strong);
   font-size: 18px;
-  font-weight: 650;
+  font-weight: 600;
   letter-spacing: -0.015em;
 }
 
@@ -161,7 +161,7 @@
   border-radius: 9px;
   font: inherit;
   font-size: 13px;
-  font-weight: 550;
+  font-weight: 600;
   cursor: pointer;
 }
 

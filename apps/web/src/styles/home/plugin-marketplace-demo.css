@@ -528,7 +528,7 @@
   background: color-mix(in srgb, var(--accent) 12%, transparent);
   color: var(--accent);
   font-size: 12px;
-  font-weight: 550;
+  font-weight: 600;
   line-height: 1.5;
 }
 
@@ -564,7 +564,7 @@
   color: var(--text-muted);
   font-size: 12px;
   font-style: normal;
-  font-weight: 500;
+  font-weight: 600;
 }
 
 .plugin-marketplace__row-action {
@@ -581,7 +581,7 @@
   color: var(--accent);
   font: inherit;
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 600;
   cursor: pointer;
 }
 
@@ -864,7 +864,7 @@
   background: color-mix(in srgb, var(--text) 5%, transparent);
   color: var(--text-muted);
   font-size: 12px;
-  font-weight: 500;
+  font-weight: 600;
 }
 
 .plugin-marketplace__empty {
@@ -1420,7 +1420,7 @@
   color: var(--text-muted);
   font: inherit;
   font-size: 14px;
-  font-weight: 500;
+  font-weight: 600;
   cursor: pointer;
   box-shadow: none;
 }

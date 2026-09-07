@@ -876,7 +876,7 @@
 
 .automation-modal__title-input::placeholder {
   color: var(--text-faint);
-  font-weight: 500;
+  font-weight: 600;
 }
 
 .automation-modal__title-input:focus {
@@ -959,7 +959,7 @@
   background: color-mix(in srgb, var(--bg-panel) 72%, transparent);
   resize: none;
   color: var(--text);
-  font: 13.5px/1.55 var(--font, system-ui);
+  font: 500 13.5px/1.55 var(--font, system-ui);
 }
 
 .automation-modal__prompt::placeholder {
@@ -1248,7 +1248,7 @@
 
 .automation-pill__tz {
   color: var(--text-muted);
-  font-weight: 500;
+  font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

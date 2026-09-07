@@ -88,7 +88,7 @@
   padding: 6px 9px;
   color: #78ea57;
   font-size: 8px;
-  font-weight: 750;
+  font-weight: 700;
   line-height: 1;
   letter-spacing: .06em;
   background: #11120f;
@@ -106,7 +106,7 @@
   color: #15220f;
   font-family: Inter, Arial, sans-serif;
   font-size: 78px;
-  font-weight: 650;
+  font-weight: 600;
   line-height: .82;
   letter-spacing: -.07em;
 }
@@ -126,7 +126,7 @@
   margin-top: 22px;
   color: #42533d;
   font-size: 13px;
-  font-weight: 400;
+  font-weight: 500;
   line-height: 1.55;
   letter-spacing: -.012em;
 }
@@ -142,7 +142,7 @@
   margin: 0 0 9px;
   color: #11120f;
   font-size: 30px;
-  font-weight: 680;
+  font-weight: 600;
   line-height: 1.08;
   letter-spacing: -.04em;
 }
@@ -186,7 +186,7 @@
   height: 26px;
   color: #fff;
   font-size: 8px;
-  font-weight: 800;
+  font-weight: 700;
   letter-spacing: -.02em;
   background: #20231f;
   border-radius: 6px;
@@ -264,7 +264,7 @@
   color: #fff;
   font-size: 7px;
   font-style: normal;
-  font-weight: 800;
+  font-weight: 700;
   letter-spacing: -.03em;
 }
 
@@ -312,7 +312,7 @@
   padding: 0 18px;
   color: #14210f;
   font-size: 13px;
-  font-weight: 750;
+  font-weight: 700;
   cursor: pointer;
   background: #78ea57;
   border: 0;
@@ -382,7 +382,7 @@
   margin: 3px 44px 8px 0;
   color: var(--brand-text);
   font-size: 12px;
-  font-weight: 750;
+  font-weight: 700;
   letter-spacing: 0.04em;
 }
 
@@ -391,7 +391,7 @@
   margin: 0;
   color: var(--text-strong);
   font-size: 29px;
-  font-weight: 680;
+  font-weight: 600;
   line-height: 1.14;
   letter-spacing: -0.035em;
   text-wrap: balance;
@@ -461,7 +461,7 @@
   padding: 4px 8px;
   border-radius: var(--radius-pill);
   font-size: 11px;
-  font-weight: 750;
+  font-weight: 700;
   white-space: nowrap;
 }
 
@@ -490,7 +490,7 @@
   color: var(--brand-text);
   background: var(--brand);
   font-size: 10px;
-  font-weight: 800;
+  font-weight: 700;
   white-space: nowrap;
 }
 
@@ -523,7 +523,7 @@
   border-color: var(--accent);
   color: var(--brand);
   background: var(--accent);
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .panel .primaryAction:hover {
@@ -537,7 +537,7 @@
   border-color: transparent;
   color: var(--text-muted);
   background: transparent;
-  font-weight: 650;
+  font-weight: 600;
 }
 
 .panel .laterAction:hover {
