@@ -3206,7 +3206,7 @@ export function HomeView({
           would leave existing projects with no entry at all. It keeps the grid
           until the rail is extended (tracked in the PR body), which is also
           why the strip props below stay on this component. */}
-      {recentProjectsEmpty || workspaceContext ? null : (
+      {variant !== 'page' || recentProjectsEmpty || workspaceContext ? null : (
       <RecentProjectsStrip
         isActive={isActive}
         projects={projects}

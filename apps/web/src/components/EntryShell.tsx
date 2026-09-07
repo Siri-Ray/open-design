@@ -1811,6 +1811,10 @@ export function EntryShell({
               <HomeView
                 {...homeViewProps}
                 isActive={view === 'home'}
+                onViewAllProjects={() => changeView('projects')}
+                onDeleteProject={onDeleteProject}
+                onDuplicateProject={onDuplicateProject}
+                onRenameProject={onRenameProject}
                 /* Home alone consumes the page handoff. A docked instance
                    (community) has its own — see `dockPromptHandoff`. */
                 promptHandoff={homePromptHandoff}

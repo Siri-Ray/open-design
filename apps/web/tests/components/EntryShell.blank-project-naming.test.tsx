@@ -32,6 +32,18 @@ import {
   invalidateProjectFilesCache,
 } from '../../src/providers/registry';
 
+const homeStrip = vi.hoisted(() => ({ onViewAll: undefined as (() => void) | undefined }));
+vi.mock('../../src/components/RecentProjectsStrip', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/components/RecentProjectsStrip')>();
+  return {
+    ...actual,
+    RecentProjectsStrip: (props: React.ComponentProps<typeof actual.RecentProjectsStrip>) => {
+      if (props.onViewAll) homeStrip.onViewAll = props.onViewAll;
+      return <actual.RecentProjectsStrip {...props} />;
+    },
+  };
+});
+
 const originalFetch = globalThis.fetch;
 const originalResizeObserver = globalThis.ResizeObserver;
 
@@ -208,6 +220,41 @@ afterEach(() => {
   resetWorkspaceContextCache();
   resetTeamProjectsCache();
   vi.unstubAllGlobals();
+});
+
+describe('EntryShell signed-out recent projects', () => {
+  const localProject = {
+    id: 'local-project', name: 'Local project', skillId: null,
+    designSystemId: null, createdAt: 1, updatedAt: 1,
+  };
+  beforeEach(() => {
+    homeStrip.onViewAll = undefined;
+    globalThis.fetch = vi.fn(async () => jsonResponse({ context: null, projects: [], plugins: [] }));
+  });
+
+  it('keeps Home card actions and the View all callback', async () => {
+    const props = renderAt('/', { projects: [localProject] });
+    const home = screen.getByTestId('entry-view-home');
+    await waitFor(() => expect(home.querySelector('.recent-projects')).not.toBeNull());
+    fireEvent.click(within(home.querySelector('.recent-projects') as HTMLElement).getByRole('button', { name: /more/i }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }));
+    const input = within(screen.getByRole('dialog')).getByRole('textbox');
+    fireEvent.change(input, { target: { value: 'Renamed local project' } });
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'OK' }));
+    expect(props.onRenameProject).toHaveBeenCalledWith('local-project', 'Renamed local project');
+    // The full-grid header currently hides View all; exercise its supplied
+    // callback at the strip boundary without changing that existing layout.
+    expect(homeStrip.onViewAll).toBeTypeOf('function');
+    act(() => homeStrip.onViewAll!());
+    expect(window.location.pathname).toBe('/projects');
+  });
+
+  it('keeps the Community dock to the composer with local projects present', async () => {
+    renderAt('/community', { projects: [localProject] });
+    const dock = await screen.findByTestId('community-composer-dock');
+    expect(within(dock).getByTestId('home-hero-composer-card')).toBeTruthy();
+    expect(dock.querySelector('.recent-projects')).toBeNull();
+  });
 });
 
 describe('EntryShell team project content readiness', () => {

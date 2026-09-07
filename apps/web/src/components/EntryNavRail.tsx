@@ -418,9 +418,27 @@ function RailRecentSection({
   // workspace-bound project (see the hook's own note) — and this is the same
   // feed the workspace tab dropdown reads, which is what keeps the two glyph
   // columns telling one story.
-  // Only polled while the disclosure is open: it costs one request per listed
-  // project, and a collapsed section shows no glyphs.
-  const runStatusProjectIds = useMemo(() => items.map((item) => item.id), [items]);
+  const recentListRef = useRef<HTMLUListElement>(null);
+  const [runStatusProjectIds, setRunStatusProjectIds] = useState<string[]>([]);
+  // Keep the full catalog navigable, but poll only rows intersecting its
+  // scrollport. The list's existing height cap bounds the status request set.
+  useEffect(() => {
+    setRunStatusProjectIds([]);
+    const list = recentListRef.current;
+    if (!open || !list || typeof IntersectionObserver === 'undefined') return;
+    const visible = new Set<string>();
+    const observer = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        const id = (entry.target as HTMLElement).dataset.projectId;
+        if (!id) continue;
+        if (entry.isIntersecting) visible.add(id);
+        else visible.delete(id);
+      }
+      setRunStatusProjectIds([...visible]);
+    }, { root: list });
+    for (const row of list.children) observer.observe(row);
+    return () => observer.disconnect();
+  }, [items, open]);
   const runSummaryByProjectId = useProjectRunSummaries(runStatusProjectIds, {
     enabled: open,
     workspaceContext,
@@ -487,7 +505,7 @@ function RailRecentSection({
           the wrapper would skip the transition entirely. */}
       <div className={`accordion-collapsible${open ? ' open' : ''}`}>
         <div className="accordion-collapsible-inner">
-          <ul className="entry-nav-rail__recent-list">
+          <ul ref={recentListRef} className="entry-nav-rail__recent-list">
             {items.map((project) => {
               const summary = runSummaryByProjectId.get(project.id);
               const status = summary?.status;
@@ -500,7 +518,7 @@ function RailRecentSection({
                 && summary?.latestTerminalRunId !== undefined
                 && seenDone[project.id] === summary.latestTerminalRunId;
               return (
-                <li key={project.id}>
+                <li key={project.id} data-project-id={project.id}>
                   <RailRecentRow
                     project={project}
                     workspaceContext={workspaceContext}
