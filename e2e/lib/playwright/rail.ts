@@ -17,7 +17,25 @@ import { T } from '@/timeouts';
  * does not exist — call it after returning to the entry shell, not from a
  * project workspace.
  */
+/**
+ * Close the release announcement if it is up. `WhatsNewPopup` is a shared
+ * `<Dialog>`, which mounts its scrim on <body> above every piece of chrome
+ * (#7635) — while it is open nothing behind it, the rail toggle included, can
+ * be clicked. Specs that apply the standard mocks never see it
+ * (`suppressWhatsNew`); the ones that drive a real daemon do, whenever the
+ * running build ships highlights. Idempotent — no-ops when there is none.
+ */
+export async function dismissWhatsNewPopup(page: Page): Promise<void> {
+  const popup = page.getByTestId('whats-new-popup');
+  await popup.waitFor({ state: 'visible', timeout: 1_000 }).catch(() => {});
+  if (await popup.isVisible().catch(() => false)) {
+    await popup.getByTestId('whats-new-dismiss').click();
+    await expect(popup).toBeHidden();
+  }
+}
+
 export async function ensureRailOpen(page: Page): Promise<void> {
+  await dismissWhatsNewPopup(page);
   const shell = page.locator('.entry');
   const alreadyOpen = await shell
     .evaluate((el) => el.classList.contains('entry--rail-open'))
@@ -71,6 +89,7 @@ export async function openNewProjectModal(page: Page): Promise<void> {
     await ensureRailOpen(page).catch(() => {});
   }
   await openProjectsEntryView(page);
+  await dismissWhatsNewPopup(page);
   const projectsView = page.getByTestId('entry-view-projects');
   await expect(projectsView).toBeVisible({ timeout: T.long });
   const createButton = projectsView
