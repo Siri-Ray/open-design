@@ -1104,6 +1104,67 @@ describe('FileWorkspace upload input', () => {
     expect(screen.getByTestId('design-file-row-home.html')).toBeTruthy();
   });
 
+  // The workspace's `streaming` prop is the composer's "actions disabled"
+  // state: it is also true for a read-only viewer of a shared project with
+  // nothing running. The building preview must key off a real run, or that
+  // viewer sees their page under a cursor captioned "thinking".
+  it('keys the building preview off a run in flight, not the disabled-actions state', () => {
+    const baseProps: React.ComponentProps<typeof FileWorkspace> = {
+      projectId: 'project-a',
+      projectKind: 'prototype',
+      files: [workspaceFile('index.html')],
+      messages: [{ id: 'active-run', role: 'assistant', content: '', startedAt: 1699999999 }],
+      liveArtifacts: [],
+      onRefreshFiles: vi.fn(),
+      isDeck: false,
+      tabsState: { tabs: [], active: null },
+      onTabsStateChange: vi.fn(),
+    };
+
+    const { rerender } = render(<FileWorkspace {...baseProps} streaming />);
+    expect(screen.queryByTestId('design-files-building')).toBeNull();
+    expect(screen.getByTestId('design-file-row-index.html')).toBeTruthy();
+
+    rerender(<FileWorkspace {...baseProps} streaming runInFlight />);
+    expect(screen.getByTestId('design-files-building')).toBeTruthy();
+    expect(screen.queryByTestId('design-file-row-index.html')).toBeNull();
+  });
+
+  it('keeps an existing page in the grid until the current run writes HTML', () => {
+    const startedAt = 1_800_000_000_000;
+    const oldPage = { ...workspaceFile('index.html'), mtime: startedAt - 10_000 };
+    const props: React.ComponentProps<typeof FileWorkspace> = {
+      projectId: 'project-a', projectKind: 'prototype',
+      files: [oldPage], liveArtifacts: [], onRefreshFiles: vi.fn(), isDeck: false,
+      tabsState: { tabs: [], active: null }, onTabsStateChange: vi.fn(),
+      runInFlight: true,
+      messages: [{ id: 'run-1', role: 'assistant', content: '', startedAt, runStatus: 'running' }],
+    };
+    const { rerender } = render(<FileWorkspace {...props} />);
+    expect(screen.queryByTestId('design-files-building')).toBeNull();
+    expect(screen.queryByTestId('design-files-preview-toggle')).toBeNull();
+    expect(screen.getByTestId('design-file-row-index.html')).toBeTruthy();
+
+    rerender(<FileWorkspace {...props} files={[oldPage, {
+      ...workspaceFile('notes.md'), kind: 'text', mtime: startedAt + 100,
+    }]} />);
+    expect(screen.queryByTestId('design-files-building')).toBeNull();
+
+    const writtenPage = { ...oldPage, mtime: startedAt + 200 };
+    rerender(<FileWorkspace {...props} files={[writtenPage]} />);
+    expect(screen.getByTestId('design-files-building')).toBeTruthy();
+
+    rerender(<FileWorkspace {...props} files={[writtenPage]} messages={[
+      ...props.messages!, { id: 'next-user', role: 'user', content: 'Write notes' },
+    ]} />);
+    expect(screen.queryByTestId('design-files-building')).toBeNull();
+
+    rerender(<FileWorkspace {...props} files={[writtenPage]} messages={[
+      { id: 'run-2', role: 'assistant', content: '', startedAt: startedAt + 300, runStatus: 'running' },
+    ]} />);
+    expect(screen.queryByTestId('design-files-building')).toBeNull();
+  });
+
   it('drops the previous project folders when switching, before the new fetch resolves', async () => {
     const folder = (path: string): ProjectFolder => ({
       name: path.split('/').pop() ?? path,
