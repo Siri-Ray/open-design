@@ -111,14 +111,17 @@ afterEach(() => {
 });
 
 describe('EntryNavRail 最近浏览过 section', () => {
-  it('lists the eight most recent projects, newest first, under a disclosure that starts open', () => {
+  it('lists every recent project, newest first, under a disclosure that starts open', () => {
     renderRail();
     const toggle = screen.getByTestId('entry-nav-recent-toggle');
     expect(toggle.getAttribute('aria-expanded')).toBe('true');
-    expect(toggle.textContent).toContain('Recently viewed');
+    // 最近项目 (OPEND-2703), not 最近浏览过.
+    expect(toggle.textContent).toContain('Recent projects');
     const rows = screen.getAllByTestId('entry-nav-recent-item');
+    // OPEND-2757: no 8-row cap — the ninth (and every later) project is a row
+    // too; the list scrolls past ~11 rows instead of dropping them.
     expect(rows.map((row) => row.textContent)).toEqual(
-      ['p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p7', 'p8'].map((id) => `Project ${id}`),
+      ['p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p7', 'p8', 'p9', 'p10'].map((id) => `Project ${id}`),
     );
   });
 

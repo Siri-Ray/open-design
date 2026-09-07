@@ -235,6 +235,7 @@ import {
 import {
   ENTRY_RAIL_STATE_EVENT,
   ENTRY_RAIL_TOGGLE_EVENT,
+  ENTRY_SEARCH_OPEN_EVENT,
   RAIL_OPEN_STORAGE_KEY,
   readStoredRailOpen,
 } from './entryRailBridge';
@@ -1180,6 +1181,14 @@ export function EntryShell({
     window.addEventListener(ENTRY_RAIL_TOGGLE_EVENT, onToggle);
     return () => window.removeEventListener(ENTRY_RAIL_TOGGLE_EVENT, onToggle);
   }, []);
+  // Same story for the search button, which sits in that chrome row beside the
+  // rail toggle (per product: 搜索和收起跟 home icon 一起放在顶部) while the
+  // palette it opens is owned here.
+  useEffect(() => {
+    const onOpen = () => setProjectSearchOpen(true);
+    window.addEventListener(ENTRY_SEARCH_OPEN_EVENT, onOpen);
+    return () => window.removeEventListener(ENTRY_SEARCH_OPEN_EVENT, onOpen);
+  }, []);
   const [localProviderModelsCache, setLocalProviderModelsCache] =
     useState<ProviderModelsCache>({});
   const hasSharedProviderModelsCache =
@@ -1201,6 +1210,13 @@ export function EntryShell({
   // the same commit as the mount. The read is destructive, so it applies once.
   const [homePromptHandoff, setHomePromptHandoff] = useState<HomePromptHandoff | null>(
     () => takeHomePromptHandoff(),
+  );
+  // The same one-shot binding, addressed at the community view's docked
+  // composer instead. Kept separate rather than shared: `promptHandoff` is
+  // consumed by id, so one piece of state fed to both instances would have
+  // whichever consumed it first mark it spent for the other.
+  const [dockPromptHandoff, setDockPromptHandoff] = useState<HomePromptHandoff | null>(
+    null,
   );
   const entryMainScrollRef = useRef<HTMLElement | null>(null);
   // Entry views share this element, so route changes must not inherit the previous view's offset.
@@ -1650,6 +1666,37 @@ export function EntryShell({
     />
   );
 
+  // Everything a HomeView needs except which surface it is on. Home renders
+  // one as the page; the community view docks a second at its bottom, and both
+  // must submit through the SAME handlers — a docked composer that created
+  // projects down a second path would drift from Home's the first time either
+  // changed.
+  const homeViewProps = {
+    projects: homeProjectsList,
+    projectsLoading,
+    designSystems,
+    designSystemsLoading,
+    defaultDesignSystemId,
+    onSubmit: handlePluginLoopSubmit,
+    onOpenProject,
+    onOpenIntegrations: () => openIntegrationTab('connectors'),
+    onOpenMcp: () => openIntegrationTab('mcp'),
+    onOpenNewProject: (tab: 'template') => {
+      openNewProject(tab);
+    },
+    onStartBlankProject: startBlankProjectFromRail,
+    projectOwnerMemberIds: teamProjectOwnerMemberIds,
+    skills,
+    skillsLoading,
+    connectors,
+    promptTemplates,
+    artifactUpgradeSlot,
+    deepSeekV4FlashCampaignAudience,
+    onDeepSeekV4FlashCampaignUseNow: applyDeepSeekCampaignModel,
+    deepSeekV4FlashCampaignMetricsConsent: config.telemetry?.metrics === true,
+    deepSeekV4FlashCampaignInstallationId: config.installationId ?? null,
+  };
+
   return (
     <div className="entry-shell entry-shell--no-header">
       <div
@@ -1762,40 +1809,12 @@ export function EntryShell({
           >
             <div className="entry-main__view-home" data-testid="entry-view-home" data-active={view === 'home' ? 'true' : 'false'} {...inactiveViewProps(view === 'home')}>
               <HomeView
+                {...homeViewProps}
                 isActive={view === 'home'}
-                projects={homeProjectsList}
-                projectsLoading={projectsLoading}
-                designSystems={designSystems}
-                designSystemsLoading={designSystemsLoading}
-                defaultDesignSystemId={defaultDesignSystemId}
-                onSubmit={handlePluginLoopSubmit}
-                onOpenProject={onOpenProject}
-                onViewAllProjects={() => changeView('projects')}
-                onDeleteProject={onDeleteProject}
-                onDuplicateProject={onDuplicateProject}
-                onRenameProject={onRenameProject}
-                onOpenIntegrations={() => openIntegrationTab('connectors')}
-                onOpenMcp={() => openIntegrationTab('mcp')}
-                onOpenNewProject={(tab) => {
-                  openNewProject(tab);
-                }}
-                onStartBlankProject={startBlankProjectFromRail}
+                /* Home alone consumes the page handoff. A docked instance
+                   (community) has its own — see `dockPromptHandoff`. */
                 promptHandoff={homePromptHandoff}
-                isSharedProject={isSharedProject}
-                onProjectShared={markProjectShared}
-                onProjectShareFailed={markProjectShareFailed}
-                onProjectUnshared={markProjectUnshared}
-                projectOwnerMemberIds={teamProjectOwnerMemberIds}
-                skills={skills}
-                skillsLoading={skillsLoading}
-                connectors={connectors}
-                promptTemplates={promptTemplates}
                 executionSwitcher={view === 'home' ? homeExecutionSwitcher : undefined}
-                artifactUpgradeSlot={artifactUpgradeSlot}
-                deepSeekV4FlashCampaignAudience={deepSeekV4FlashCampaignAudience}
-                onDeepSeekV4FlashCampaignUseNow={applyDeepSeekCampaignModel}
-                deepSeekV4FlashCampaignMetricsConsent={config.telemetry?.metrics === true}
-                deepSeekV4FlashCampaignInstallationId={config.installationId ?? null}
               />
             </div>
             <div data-testid="entry-view-projects" data-active={view === 'projects' ? 'true' : 'false'} {...inactiveViewProps(view === 'projects')}>
@@ -1954,16 +1973,19 @@ export function EntryShell({
                   })();
                 }}
                 onUsePrompt={(target) => {
-                  // Seed the Home composer with the template's starting prompt,
-                  // then switch to Home to review + send it (keep in sync with
-                  // the standalone /community branch in App.tsx).
-                  seedHomeComposerPrompt(target.prompt);
-                  setHomePromptHandoff(createPluginUseHandoff(Date.now(), target.templateId, {
+                  // Stays put (per product): the prompt lands in the docked
+                  // composer at the foot of THIS page and unfolds it, instead
+                  // of throwing the user back to 首页 and making them find
+                  // their place in the gallery again. Same seed + binding pair
+                  // Home used, only addressed at the dock.
+                  // (App.tsx's standalone /community route has no dock and
+                  // still hands off to Home — see the branch there.)
+                  seedHomeComposerPrompt(target.prompt, 'dock');
+                  setDockPromptHandoff(createPluginUseHandoff(Date.now(), target.templateId, {
                     action: 'use',
                     chipId: target.chipId,
                     projectKind: target.projectKind,
                   }));
-                  changeView('home');
                 }}
                 // The gallery card's full details modal routes Use through the
                 // same Home hand-off the plugin library uses, so the plugin
@@ -1976,6 +1998,31 @@ export function EntryShell({
                   });
                 }}
               />
+            ) : null}
+            {/* Home's composer, docked to the bottom of the community view: you
+                can browse templates and still start from your own sentence
+                without going back to 首页. Collapsed it is the input line and
+                the send button; typing unfolds the rest (HomeHero's `dock`
+                variant owns both states). Mounted only while the view is up so
+                it does not hold a second composer's worth of pickers alive
+                behind every other destination. */}
+            {view === 'community' ? (
+              <div
+                className="community-composer-dock"
+                data-testid="community-composer-dock"
+              >
+                <HomeView
+                  {...homeViewProps}
+                  variant="dock"
+                  isActive
+                  /* The agent/model chip too, so the docked row is the same
+                     control set as Home's. Only ever one of the two instances
+                     renders it — each is gated on a different view — so the
+                     switcher is never mounted twice. */
+                  executionSwitcher={homeExecutionSwitcher}
+                  promptHandoff={dockPromptHandoff}
+                />
+              </div>
             ) : null}
             {/* Team destinations — the entry shell owns the nav frame only; each
                 view is provided by another lane (B = members/board, D = team

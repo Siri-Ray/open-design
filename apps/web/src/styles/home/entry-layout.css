@@ -112,82 +112,36 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  /* Top margin 0: the tab bar already contributes a 10px gap below the tabs
-     (its bottom padding), so the single visible gap between the tabs and this
-     rail card stays 10px instead of doubling to 20 (tab 10 + rail 10). */
-  margin: 0 10px 10px;
-  /* Bottom padding trimmed 12 → 5 so the account row's gap to the panel's
-     bottom edge (trigger padding 4 + footer padding 6 + 5 + 1px stroke = 16px)
-     matches its 16px left/right inset. */
-  padding: 10px 0 5px;
+  /* 12px gutters (per product): to the window's left edge, to the bottom, and
+     — through the right margin — to the content card beside it, so every
+     outer gap on this screen is the same number. Top margin 0: the tab bar
+     already contributes a 10px gap below the tabs (its bottom padding), so
+     the single visible gap between the tabs and this column stays 10px
+     instead of adding the rail's own inset on top of it. */
+  margin: 0 12px 12px;
+  /* No padding at all. Bottom: the account row has to land on the same
+     baseline as the content card's bottom edge beside it (per product:
+     账号行要和下边的边框对齐) — both boxes carry the same 12px bottom margin, so
+     the row's own bottom edge is flush with the card's only when nothing pads
+     it further up. Top: the workspace switcher leads the column flush with the
+     panel's top edge (per product) — the 10px that used to sit here was the
+     tab bar's own 10px bottom gap added a second time, exactly what the margin
+     note above says this box does not do. */
+  padding: 0;
   position: relative;
-  /* Craft-style milky frost (material.css thin tier): soft white surface over
-     the wash/wallpaper with a saturated blur, instead of fully clear glass. */
-  /* White frost: pure-white base at 65% alpha, so the card reads white but
-     keeps the frosted-glass translucency (the panel's material-thin backdrop
-     blur below does the frosting). */
-  --rail-surface: rgba(255, 255, 255, 0.65);
-  background: var(--rail-surface);
-  -webkit-backdrop-filter: var(--material-thin-backdrop);
-  backdrop-filter: var(--material-thin-backdrop);
-  /* The stroke is the gradient ring painted by ::after below — the real
-     border stays transparent so the box metrics don't change. */
-  border: 1px solid transparent;
-  border-radius: var(--radius-lg);
-  /* Whisper elevation: the floating panel only needs a hairline lift — the
-     md shadow read as a wide gray halo on the light ground. */
-  box-shadow: var(--shadow-sm);
-}
-/* Gradient rim, Craft-style: a light edge that is brightest along the top
-   and fades down the sides (glass-refract ring tokens, so dark mode halves
-   it automatically). Painted as a masked overlay so only the 1px ring shows
-   and the frosted surface underneath stays untouched. */
-.entry-nav-rail__panel::after {
-  content: '';
-  position: absolute;
-  inset: -1px;
-  border-radius: inherit;
-  padding: 1px;
-  pointer-events: none;
-  background: linear-gradient(
-    180deg,
-    var(--glass-refract-ring-top) 0%,
-    var(--glass-refract-ring-edge) 42%,
-    var(--glass-refract-ring-edge) 68%,
-    var(--glass-refract-ring-bottom) 100%
-  );
-  -webkit-mask:
-    linear-gradient(#000 0 0) content-box,
-    linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask:
-    linear-gradient(#000 0 0) content-box,
-    linear-gradient(#000 0 0);
-  mask-composite: exclude;
-}
-/* Material spec fallbacks: drop the translucency to a solid per-theme surface
-   when the user reduces transparency or the browser lacks backdrop-filter. */
-@media (prefers-reduced-transparency: reduce) {
-  .entry-nav-rail__panel {
-    --rail-surface: var(--bg);
-    background: var(--rail-surface);
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
-    border-color: color-mix(in srgb, var(--border) 66%, transparent);
-  }
-  .entry-nav-rail__panel::after {
-    display: none;
-  }
-}
-@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  .entry-nav-rail__panel {
-    --rail-surface: var(--bg);
-    background: var(--rail-surface);
-    border-color: color-mix(in srgb, var(--border) 66%, transparent);
-  }
-  .entry-nav-rail__panel::after {
-    display: none;
-  }
+  /* No card of its own (per product): the rail sits flat on the entry ground,
+     and the single base card on this screen is the content column's
+     (`.entry-main--scroll` below). The milky-frost surface, the masked
+     gradient rim, the whisper shadow and the 1px transparent stroke this
+     panel used to carry are all gone with it, along with the
+     reduced-transparency / no-backdrop-filter fallbacks — nothing is painted
+     here any more.
+
+     Nothing being painted is also why this box is now exactly the row column:
+     with no stroke of its own and no padding on the group inside it (below),
+     the panel's border box IS the rows' box, so a row sits at this margin's
+     12px from the window edge — the same gutter the content card keeps on the
+     other side. */
 }
 .entry-nav-rail.is-open {
   pointer-events: auto;
@@ -285,6 +239,15 @@
     overflow: hidden;
     pointer-events: none;
   }
+  /* …and the content card takes over the left gutter, exactly as it does when
+     the user collapses the rail themselves. It cannot inherit that rule: the
+     auto-collapse deliberately KEEPS `.entry--rail-open` on the element so
+     widening restores the rail as it was, so `.entry:not(.entry--rail-open)
+     .entry-main--scroll` never matches at this width — and the card sat flush
+     against the window edge while the right side kept its 12. */
+  .entry-shell--no-header .entry.entry--rail-open .entry-main--scroll {
+    margin-left: 12px;
+  }
 }
 /* Topbar panel toggle — the single affordance left visible when the rail
    is collapsed. Sits at the left edge of the sticky topbar and is hidden
@@ -335,7 +298,11 @@
   flex: 1 1 auto;
   min-height: 0;
   width: 100%;
-  padding: 0 10px;
+  /* No horizontal inset: the rows measure their 12px to the window edge (and
+     to the content card on the other side) off the panel's margin alone —
+     see the note on `.entry-nav-rail__panel`. Rows carry their own 10px text
+     padding, so labels still breathe inside their hover fill. */
+  padding: 0;
 }
 .entry-nav-rail__footer {
   position: relative;
@@ -738,19 +705,37 @@
 .entry-nav-rail__btn {
   appearance: none;
   width: 100%;
-  height: 33px;
-  padding: 0 10px;
-  border: 1px solid transparent;
-  border-radius: 8px;
+  /* 10px of inset, except the LEADING edge, which carries 16 (per product):
+     the icon reads as indented from the row's fill rather than hugging it, and
+     the row's height is its content plus the vertical 10 (18px icon + 20 = 38)
+     rather than a pinned box. The old 33px height is what made the vertical
+     inset 8 — half the slack left over after the icon — while the sides
+     carried 10. `height: auto` is required, not incidental: primitives.css
+     sets a blanket `button { height: 36px }`, which took over the moment the
+     explicit 33 went away and squeezed the padded box back to 36 (the icon
+     then centred on it and overflowed its own content box). */
+  height: auto;
+  padding: 10px 10px 10px 16px;
+  /* No border: it was a 1px transparent ring no state ever paints (both the
+     hover and active rules below only re-assert `transparent`), and on a
+     border-box element it stole a pixel from every side — the inset measured
+     17, not the 16 the padding asks for. */
+  border: 0;
+  /* 12 (per product, read off the selected row). It lives on the base rule,
+     not on `.is-active`: this radius is the shape of the ROW'S FILL, and hover
+     paints that same fill — scoping it to the selected state alone would make
+     a row change shape as the pointer crosses it. */
+  border-radius: 12px;
   background: transparent;
   /* The workspace console entries (成员/数据大盘/Workspace 设置) render as
      anchors; the UA underline breaks the uniform nav-item look (#5517 rail
      items are plain). */
   text-decoration: none;
-  /* Unselected: label matches the icon's muted tone (one uniform color); hover
-     steps up to --text-strong, selection goes near-black on light gray.
-     68% lands the blend on the --text-soft step (52% read too faint). */
-  color: color-mix(in srgb, var(--text) 68%, transparent);
+  /* Unselected ink (per product: 选中和未选中要做出区分) — the rail's shared
+     quiet tone, the one the 最近浏览过 heading and its project rows carry, well
+     clear of the selected row's #121212. See `--rail-ink-quiet` on
+     `.entry-nav-rail`. */
+  color: var(--rail-ink-quiet);
   display: flex;
   align-items: center;
   justify-content: flex-start;
@@ -767,8 +752,8 @@
   align-items: center;
   justify-content: center;
   flex: 0 0 18px;
-  /* Tracks the unselected label tone above. */
-  color: color-mix(in srgb, var(--text) 68%, transparent);
+  /* Tracks the label tone above — one ink for the whole row. */
+  color: inherit;
 }
 /* Unread marker on a rail item's icon — same 6px red dot as the account
    menu's `__menu-item-dot`, pinned to the glyph's top-right corner. */
@@ -793,7 +778,7 @@
 }
 .entry-nav-rail__btn-label {
   font-size: 13px;
-  font-weight: 400;
+  font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -872,6 +857,39 @@
   /* 2px between the rows (per product) — the same rhythm the destinations
      above keep. */
   gap: 2px;
+  /* Every recent project is listed (OPEND-2757: no more 8-row cap), so the
+     LIST scrolls rather than the rail. The cap is ~11 rows on a desktop
+     window — 11 × 38px rows + 10 × 2px gaps + the 2px top padding — and a
+     shorter window pulls it down further through the flex chain above
+     (`min-height: 0` on every ancestor up to the group), so the fixed rows
+     below the list (workspace settings, the footer) never get pushed out or
+     covered. Under the cap the box is content-sized: no scrollbar, no slack. */
+  min-height: 0;
+  max-height: calc(11 * 38px + 10 * 2px + 2px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+/* The flex chain that lets the list above shrink with the window: each box
+   between the group and the list opts out of the `min-height: auto` floor and
+   passes the constraint down. The section and the disclosure never GROW —
+   `flex: 0 1 auto` — so a short list still leaves the rail exactly as it was. */
+.entry-nav-rail__team-section {
+  flex: 0 1 auto;
+  min-height: 0;
+}
+.entry-nav-rail__recent {
+  flex: 0 1 auto;
+  min-height: 0;
+}
+.entry-nav-rail__recent > .accordion-collapsible {
+  flex: 0 1 auto;
+  min-height: 0;
+}
+.entry-nav-rail__recent > .accordion-collapsible > .accordion-collapsible-inner {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 /* One recent row: the name button, the ⋮ trigger that overlays its trailing
    edge, and the hover preview that escapes the rail. `position: relative` is
@@ -1160,11 +1178,34 @@
   background: color-mix(in srgb, var(--text-strong) 10%, transparent);
   color: var(--text-strong);
 }
-.entry-nav-rail__btn.is-active .entry-nav-rail__btn-icon {
-  color: var(--selected);
+/* Selected ink is #121212 (per product), darker than `--selected`'s #353535.
+   A literal rather than a token change: `--selected` is the app-wide selected
+   ink and other surfaces read it — only the rail's own selected row moves.
+   The label is set explicitly too: it inherits from `.entry-nav-rail__btn`,
+   which the `.is-active` rule further down paints `var(--selected)`, so
+   leaving it out would have darkened the icon and left the text behind.
+   Dark mode keeps the token; #121212 is invisible on the dark ground. */
+.entry-nav-rail__btn.is-active .entry-nav-rail__btn-icon,
+.entry-nav-rail__btn.is-active .entry-nav-rail__btn-label {
+  color: #121212;
 }
 .entry-nav-rail__btn.is-active .entry-nav-rail__btn-label {
-  font-weight: 400;
+  font-weight: 600;
+}
+/* Dark mode only has to move the SELECTED row: every unselected row carries
+   `--rail-ink-quiet`, which the rail redefines for dark up top.
+   #121212 is invisible on the dark ground, so the selected row takes
+   --text-strong (#fafafa) — the same "one step brighter than its neighbours"
+   relationship the light theme draws. */
+[data-theme="dark"] .entry-nav-rail__btn.is-active .entry-nav-rail__btn-icon,
+[data-theme="dark"] .entry-nav-rail__btn.is-active .entry-nav-rail__btn-label {
+  color: var(--text-strong);
+}
+@media (prefers-color-scheme: dark) {
+  html:not([data-theme]) .entry-nav-rail__btn.is-active .entry-nav-rail__btn-icon,
+  html:not([data-theme]) .entry-nav-rail__btn.is-active .entry-nav-rail__btn-label {
+    color: var(--text-strong);
+  }
 }
 
 /* Search box */
@@ -1172,15 +1213,16 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  /* No top margin: the search box's gap to the rail's top edge (panel
-     padding-top 10px + 1px stroke = 11px) then matches its 11px left/right
-     inset, instead of the extra 4px pushing it to 15px. */
   margin: 0 0 10px;
 }
 .entry-nav-rail__search-row .entry-nav-rail__search {
-  flex: 1;
+  /* Icon-sized at rest, matching the collapse control's 34px square. */
+  flex: 0 0 auto;
+  width: 34px;
   min-width: 0;
   margin: 0;
+  padding: 0;
+  justify-content: center;
 }
 .entry-nav-rail__search {
   display: flex;
@@ -1189,11 +1231,12 @@
   height: 34px;
   margin: 4px 0 10px;
   padding: 0 10px;
-  /* White to match the rail surface; a border keeps the input visible on it. */
-  border: 1px solid var(--border);
+  /* No stroke or fill: at rest this is just the magnifier sitting on the rail,
+     matching the collapse control beside it. */
+  border: 0;
   border-radius: var(--radius-large, 8px);
-  background: var(--rail-surface, #fff);
-  color: var(--text-soft);
+  background: transparent;
+  color: var(--text-muted);
   transition:
     background-color var(--duration-ultra-fast) var(--curve-easy-ease),
     border-color var(--duration-ultra-fast) var(--curve-easy-ease),
@@ -1207,10 +1250,9 @@
   cursor: pointer;
   text-align: left;
 }
-/* Search + rail-collapse in one row: the input keeps its own bordered look
-   and flexes; the collapse control sits after it (per product: 收起按钮放在
-   输入框后边) as a ghost icon button matching the input's height. The row
-   owns the vertical margins the lone search box used to carry. */
+/* Search + rail-collapse in one row, icon-only: the search is a magnifier the
+   size of the collapse control beside it. The row owns the vertical margins
+   the lone search box used to carry. */
 .entry-nav-rail__search-row {
   display: flex;
   align-items: center;
@@ -1218,9 +1260,14 @@
   margin: 4px 0 10px;
 }
 .entry-nav-rail__search-row .entry-nav-rail__search {
-  flex: 1;
+  /* Icon-sized at rest (see the sizing rule above); this later duplicate must
+     not put `flex: 1` back or the control stretches across the row again. */
+  flex: 0 0 auto;
+  width: 34px;
   min-width: 0;
   margin: 0;
+  padding: 0;
+  justify-content: center;
 }
 .entry-nav-rail__collapse {
   appearance: none;
@@ -1228,6 +1275,9 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  /* Holds the row's trailing edge now that the search no longer flexes into
+     it. */
+  margin-left: auto;
   flex: 0 0 auto;
   width: 34px;
   height: 34px;
@@ -1237,31 +1287,58 @@
   background: transparent;
   color: var(--text-muted);
 }
-.entry-nav-rail__collapse:hover {
-  background: var(--bg-fill-secondary);
+/* Search + collapse take the SAME fill as the rail's selected nav row —
+   `--text-strong` at 10% (per product: 这几个 icon 的选中和 hover 都和首页的
+   选中底色一致). They used to take `--bg-fill-secondary` (black at 6%), a
+   near-miss that read as a slightly different gray next to it.
+   These two rules also dress the pair once they are relocated into the top
+   chrome row (see the note below), so this covers both placements. Keep in
+   step with `.entry-nav-rail__btn.is-active`. */
+/* `:not(:disabled)` is NOT decoration — it is what makes this rule land.
+   primitives.css carries `button:hover:not(:disabled) { background:
+   var(--bg-subtle) }` at specificity (0,2,1); a plain `.class:hover` is
+   (0,2,0) and quietly loses to it, so every one of these controls was showing
+   the primitive's #ededed no matter what was written here. Matching its
+   `:not(:disabled)` takes these to (0,3,0) and they win. */
+.entry-nav-rail__collapse:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--text-strong) 10%, transparent);
   color: var(--text);
 }
-.entry-nav-rail__search:hover {
-  border-color: var(--border-strong);
-}
-.entry-nav-rail__search:focus-visible {
+.entry-nav-rail__search:hover:not(:disabled),
+.entry-nav-rail__search:focus-visible:not(:disabled) {
   outline: none;
-  border-color: var(--border-strong);
+  background: color-mix(in srgb, var(--text-strong) 10%, transparent);
+  color: var(--text);
 }
-.entry-nav-rail__search-placeholder {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--text-faint);
-  font-size: 13px;
+/* Same two controls, relocated into the chrome row where the pinned Home tab
+   used to sit (per product: 搜索和收起跟 home icon 一起放在顶部). The row rules
+   above still dress them; this only re-parks the cluster — no vertical margins
+   (the chrome row centres it) and a tight gap so the icons read as one group.
+   Must stay after the rules it narrows — equal specificity, so source order
+   decides. */
+.workspace-tabs-rail-actions {
+  flex: 0 0 auto;
+  gap: 4px;
+  /* The search glyph sits on the same vertical axis as the rail's 首页 icon
+     below it (per product). The strip already insets this cluster 10px, and
+     the search's own 34px hit box centres its glyph 17px in, so the remainder
+     lives here. */
+  margin: 0 0 0 14.8px;
 }
-/* ⌘K shortcut hint pinned to the right of the search box. Taller (24px in the
-   34px box) so it hugs closer to the top/bottom edges instead of floating. */
+.workspace-tabs-rail-actions .entry-nav-rail__collapse {
+  margin-left: 0;
+}
+.workspace-tabs-rail-actions .entry-nav-rail__search:hover,
+.workspace-tabs-rail-actions .entry-nav-rail__search:focus-visible {
+  width: 34px;
+  padding: 0;
+}
+/* ⌘K is a reminder, not a label: it stays out of the resting control and
+   appears once the pointer (or keyboard focus) is already on it. Taller (24px
+   in the 34px box) so it hugs the top/bottom edges instead of floating. */
 .entry-nav-rail__search-kbd {
   flex: 0 0 auto;
-  display: inline-flex;
+  display: none;
   align-items: center;
   justify-content: center;
   min-width: 30px;
@@ -1272,9 +1349,13 @@
   background: var(--bg-subtle);
   color: var(--text-muted);
   font-size: 11px;
-  font-weight: 500;
+  font-weight: 600;
   line-height: 1;
   letter-spacing: 0.02em;
+}
+.entry-nav-rail__search:hover .entry-nav-rail__search-kbd,
+.entry-nav-rail__search:focus-visible .entry-nav-rail__search-kbd {
+  display: inline-flex;
 }
 .entry-nav-rail__search input {
   appearance: none;
@@ -1319,14 +1400,20 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  height: 34px;
+  /* Same box as the nav rows below (per product: 和社区一样的高度和圆角).
+     Pinned rather than derived: those rows are `height: auto` around an 18px
+     icon plus 10px of vertical padding, and this one carries a 24px avatar —
+     the same recipe would make it 44. 38 is their resolved height, and the
+     hover/selected fill both wear is the same, so the two now read as one
+     stack instead of a shorter, squarer control sitting above it. */
+  height: 38px;
   margin: 2px 0 4px;
   padding: 0 10px;
   color: var(--text-strong);
 }
 .entry-nav-rail__team-avatar {
-  width: 19px;
-  height: 19px;
+  width: 24px;
+  height: 24px;
   border-radius: var(--radius-pill);
   background: var(--bg-panel);
   color: var(--text);
@@ -1334,7 +1421,7 @@
   place-items: center;
   font-size: 12px;
   font-weight: 700;
-  flex: 0 0 19px;
+  flex: 0 0 24px;
   overflow: hidden;
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--border) 78%, transparent);
 }
@@ -1346,13 +1433,23 @@
 }
 .entry-nav-rail__team-name {
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 600;
   flex: 1;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .entry-nav-rail__team svg { color: var(--text-soft); }
+/* The caret's slot, copied from `.entry-nav-rail__recent-chevron` so the two
+   disclosures in this rail hold their glyph the same way: a fixed 14px box that
+   never shrinks, which is what keeps › and ⌄ — different advance widths — from
+   nudging the workspace name as the menu opens and closes. */
+.entry-nav-rail__team-chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 14px;
+}
 
 /* Section label (e.g. 更多) */
 .entry-nav-rail__section {
@@ -1371,20 +1468,29 @@
   background: var(--border-soft, rgba(0, 0, 0, 0.08));
 }
 .entry-nav-rail__btn:not(.is-active):hover {
-  /* Only the fill changes on hover — the label keeps its resting color so
-     text doesn't shift tone under the pointer. */
-  background: color-mix(in srgb, var(--text) 5%, transparent);
+  /* ONE hover for the whole rail (OPEND-2700): the same fill and the same
+     ink step the 最近浏览过 heading and its project rows take under the
+     pointer (`.entry-nav-rail__recent-head:hover`), so 个人项目 and the
+     section below it light up identically. The Demo left this row at
+     `--text` 5% with no ink change while the rows under it took 10% + a
+     darker ink — the two read as two different controls in one column. The
+     selected row still stands apart through its ink (#121212) and weight. */
+  background: color-mix(in srgb, var(--text-strong) 10%, transparent);
+  color: var(--text-strong);
   border-color: transparent;
 }
 .entry-nav-rail__btn.is-active {
-  /* Selected = one step above the lightest surface gray (--bg-subtle #ededed)
-     under the spec's selection color (--selected #353535) for label + icon. */
-  background: var(--bg-subtle);
+  /* Selected = the ink at 10% (per product: #202020 @ 10%), which is exactly
+     what --text-strong resolves to in light. Written as the token rather than
+     the literal so dark inverts with the rest of the theme (#fafafa there) —
+     a 10% veil of near-black would be invisible on the dark ground. Label +
+     icon keep the spec's --selected. */
+  background: color-mix(in srgb, var(--text-strong) 10%, transparent);
   color: var(--selected);
   border-color: transparent;
 }
 .entry-nav-rail__btn.is-active:hover {
-  background: var(--bg-subtle);
+  background: color-mix(in srgb, var(--text-strong) 10%, transparent);
   border-color: transparent;
 }
 .entry-nav-rail__btn:focus-visible {
@@ -1545,25 +1651,74 @@
   backdrop-filter: var(--material-ultrathin-backdrop, none);
 }
 .entry-main--scroll {
-  /* Transparent: the UltraThin ground now lives on .workspace-shell
-     (shell.css) so the strip / rail gutter / content read as one continuous
-     surface with no gray frame around the scroll area. */
-  background: transparent;
+  /* Content card — the main column's own base card (per product: the rail
+     sits flat, and this is the one card on the screen): a milky-frost
+     surface, a 16px corner, a whisper elevation, and a vertical box (flush
+     top, 12px bottom) that ends on the same line as the rail column beside
+     it. Right inset 12px mirrors the rail's left one; the left stays 0
+     because the 12px gutter to the rail is the rail's own right margin (it
+     grows to 12px here when the rail collapses, below).
+
+     This replaces the earlier "no frame around the scroll area, one
+     continuous surface" treatment.
+
+     The 1px rim is an inset box-shadow rather than a masked pseudo-element:
+     this element is the scroll container, where an absolutely positioned
+     pseudo scrolls away with the content, and `::before` is already taken by
+     the top scroll-fade band above. */
+  margin: 0 12px 12px 0;
+  --entry-content-surface: rgba(255, 255, 255, 0.85);
+  --entry-content-ring: var(--glass-refract-ring-edge);
+  background: var(--entry-content-surface);
+  -webkit-backdrop-filter: var(--material-thin-backdrop);
+  backdrop-filter: var(--material-thin-backdrop);
+  border-radius: 16px;
+  box-shadow:
+    var(--shadow-sm),
+    inset 0 0 0 1px var(--entry-content-ring);
   padding: 0;
   /* Used by descendants (e.g. the plugins-home Scenario row) to
      pin themselves directly below the sticky topbar. Mirrors the
      topbar's vertical footprint (12px top + 32px chip). */
   --entry-topbar-h: 44px;
 }
+/* Rail collapsed: its track is 0-wide and its column is clipped away, so the
+   left gutter has to come from this card instead. */
+.entry:not(.entry--rail-open) .entry-main--scroll {
+  margin-left: 12px;
+}
+/* Material spec fallbacks: drop the translucency to a solid surface and take
+   the rim down to the neutral border ladder. */
+@media (prefers-reduced-transparency: reduce) {
+  .entry-main--scroll {
+    --entry-content-surface: var(--bg);
+    --entry-content-ring: color-mix(in srgb, var(--border) 66%, transparent);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .entry-main--scroll {
+    --entry-content-surface: var(--bg);
+    --entry-content-ring: color-mix(in srgb, var(--border) 66%, transparent);
+  }
+}
 .entry-main__inner {
   width: 100%;
-  /* Wider cap + tighter side padding so the content hugs closer to the rail
-     instead of leaving a large centered left margin on wide screens. */
-  max-width: 1600px;
+  /* The cap is on the CONTENT column, so it carries the gutters with it:
+     1600 + 24 + 24. Written as 1600px flat it silently capped content at
+     1552 (border-box eats the padding) AND, once it bound, its own `auto`
+     margins added to the gutter. With the gutters inside the cap, the inner
+     fills the card at any width up to 1648 and the gutter is exactly what
+     `padding` says. */
+  max-width: calc(1600px + 48px);
   margin: 0 auto;
-  /* Compact rhythm: tighter side inset toward the rail and smaller section
-     gaps so list views read denser. */
-  padding: 12px 16px 48px;
+  /* One number for all four sides of the entry gutter (per product 2026-08-25:
+     社区 / 全部项目 / 设计体系 / 插件 all sit 24px off the card): 24 to the
+     card's top edge and 24 to its left/right. The titles sit flush at this
+     container's top-left, so the number lives here rather than on each page.
+     The bottom stays deeper — it is scroll runout, not a gutter. */
+  padding: 24px 24px 48px;
   display: flex;
   flex-direction: column;
   gap: 20px;
@@ -1579,22 +1734,12 @@
    gallery can fit 4-5 preview tiles per row on desktop displays
    while the hero card self-constrains to a readable column. */
 .entry-main__inner--wide {
-  max-width: 1600px;
-}
-/* Uniform left/right gutters across the home view AND the wide sub-views
-   (全部项目 / 草稿 / design-systems / …): the recent-projects grid and the
-   project lists all breathe away from the window edges by the same 35px, so
-   switching between 最近 and 全部项目 keeps the same side inset. Trimmed from
-   48px so the content sits ~13px closer to the rail (measured left spacing
-   ~73px → ~60px). */
-.entry-main__inner {
-  padding-left: 35px;
-  padding-right: 35px;
+  max-width: calc(1600px + 48px);
 }
 @media (max-width: 900px) {
   .entry-main__inner {
-    padding-left: 20px;
-    padding-right: 20px;
+    padding-left: 16px;
+    padding-right: 16px;
   }
 }
 
@@ -7393,7 +7538,7 @@ button.entry-nav-rail__menu-credits-row:active:not(:disabled) {
 .entry-invite__backdrop {
   position: absolute;
   inset: 0;
-  background: color-mix(in srgb, var(--text-strong) 34%, transparent);
+  background: var(--scrim-tint);
   -webkit-backdrop-filter: var(--scrim-backdrop);
   backdrop-filter: var(--scrim-backdrop);
 }
@@ -8631,12 +8776,15 @@ button.entry-nav-rail__menu-credits-row:active:not(:disabled) {
   inset: 0;
   z-index: 400;
   display: flex;
-  /* Centered card (no blur) — a light dim keeps the palette legible over the
-     page without hazing it. */
   align-items: center;
   justify-content: center;
   padding: 16px;
-  background: color-mix(in srgb, #000 12%, transparent);
+  /* Same scrim treatment every other modal backdrop uses (per product: 所有弹窗
+     统一): the page's own blur under a dim, not a dim alone — this was the one
+     dialog scrim in the app that dimmed without blurring. */
+  background: var(--scrim-tint);
+  -webkit-backdrop-filter: var(--scrim-backdrop);
+  backdrop-filter: var(--scrim-backdrop);
   animation: project-search-fade 140ms cubic-bezier(0.23, 1, 0.32, 1);
 }
 @keyframes project-search-fade {

@@ -17,6 +17,19 @@ describe('desktop app wash platform contract', () => {
     expect(appWashCss).not.toMatch(/--app-wash:\s*\n?\s*radial-gradient\(/);
   });
 
+  it('keeps the macOS scrim at a thin 20% with no focus-dependent fade (per product, #7635)', () => {
+    const darwinBlock = appWashCss.replace(/\/\*[\s\S]*?\*\//g, '').match(
+      /html:has\(\.workspace-shell--desktop\[data-host-platform='darwin'\]\)\s*{([^}]*)}/,
+    );
+    expect(darwinBlock).not.toBeNull();
+    expect(darwinBlock?.[1]).toMatch(/color-mix\(in srgb, var\(--wash-base\) 20%, transparent\)/);
+    expect(darwinBlock?.[1]).not.toMatch(/62%/);
+    // The unfocused window used to thin the scrim to 34% opacity; the scrim now
+    // holds steady, so no rule keys off `.is-window-blurred` any more.
+    expect(appWashCss).not.toMatch(/html\.is-window-blurred/);
+    expect(appWashCss).not.toMatch(/body::before\s*{\s*transition:\s*opacity/);
+  });
+
   it('limits window-vibrancy material rules to macOS desktop hosts', () => {
     const macDesktopSelector =
       ":has(.workspace-shell--desktop[data-host-platform='darwin'])";

@@ -31,13 +31,19 @@
   --material-regular-backdrop: blur(var(--material-regular-blur)) saturate(1.6);
   --material-thick-backdrop: blur(var(--material-thick-blur)) saturate(1.6);
   --glass-backdrop: blur(var(--glass-regular-blur, 28px)) saturate(1.8);
-  /* Unified scrim blur behind modals/drawers — the scrim's own tint color
-     stays with each component; only the blur amount is standardized. */
-  --scrim-backdrop: blur(4px);
-  /* Shared scrim tint for overlays that opt into one material (the Use
-     Everywhere modal today). Deliberate exceptions keep painting their own
-     tint at their own rule. */
+  /* The scrim behind modals / dialogs / drawers / previews — BOTH halves of
+     it. The blur was standardized here before; the tint was deliberately left
+     to each component, and that is exactly how ~30 overlays ended up with ~30
+     different colours (near-black, blue-black, warm brown, `--text 38%`, …).
+     Now the whole material lives on these two lines, so the app has one scrim
+     and it is tuned in one place.
+
+     Deliberate exceptions do NOT read these tokens, and each says why at its
+     own rule: image lightboxes and presentation mode keep a near-opaque dark
+     ground (a light scrim would wash the media out), and the transparent
+     click-catchers that only close menus paint nothing at all. */
   --scrim-tint: rgba(255, 255, 255, 0.6);
+  --scrim-backdrop: blur(50px);
 
   /* Standard material surfaces (content-layer separation) */
   --material-ultrathin: rgba(250, 250, 250, 0.45);
@@ -48,6 +54,14 @@
   /* Liquid glass surfaces (--glass-regular itself lives in tokens.css) */
   --glass-clear: rgba(250, 250, 250, 0.18);
   --glass-clear-dim: rgba(0, 0, 0, 0.35);
+  /* Dark glass for controls that float over MEDIA rather than over the app's
+     own ground — a template thumbnail can be any colour, so these cannot use
+     the neutral materials above (which follow the theme and would vanish on
+     half the images). One value for both appearances for the same reason:
+     what is behind it is the picture, not the page. 0.55 is the floor that
+     keeps `--vibrancy-label-on-dim` readable over a white thumbnail. */
+  --material-dim: rgba(0, 0, 0, 0.55);
+  --vibrancy-label-on-dim: #fff;
 
   /* Vibrancy — foreground on top of any material; never hardcode neutral
      text colors on a material surface. */
@@ -182,6 +196,9 @@
     --material-thick: var(--bg-elevated);
     --glass-regular: var(--bg-elevated);
     --glass-clear: var(--bg-elevated);
+    /* Stays dark — it is read against a photo, not against the page — but
+       goes opaque so the label keeps its contrast with the blur gone. */
+    --material-dim: rgba(0, 0, 0, 0.88);
     --material-ultrathin-backdrop: none;
     --material-thin-backdrop: none;
     --material-regular-backdrop: none;

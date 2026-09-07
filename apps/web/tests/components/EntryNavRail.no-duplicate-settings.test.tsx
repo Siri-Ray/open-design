@@ -1,14 +1,15 @@
 // @vitest-environment jsdom
 //
-// Settings-entry invariant: exactly one settings entry per identity state.
+// Settings-entry invariant: exactly one RAIL settings entry per identity state.
 //
 // History: 飞书 recvq4hGF7BJkI ("Personal 用户，左侧栏有 2 个设置入口") removed
 // the rail's own signed-out settings item because EntryShell's footer carried
 // an `entry-settings-chip` for the same falsy-context condition. #5517 then
 // dropped that footer chip (the footer only hosts the updater popup now) — and
 // a signed-out rail has no account menu either, so the rail item is back as
-// the ONLY signed-out settings entry. Signed-in keeps settings inside the
-// account menu, so the rail item must not render on that branch.
+// the ONLY signed-out settings entry. #7635 (OPEND-2553) then put 设置 under
+// 插件 on the signed-in branch too (per product: 设置的按钮在插件下边), so both
+// branches render the item ONCE, in the same slot, and never together.
 // (Upstream #5971 restored the same entry as `entry-nav-settings`; this repo
 // keeps the `entry-settings-button` testId the e2e suite contracts on.)
 
@@ -59,8 +60,15 @@ describe('EntryNavRail settings entry', () => {
     expect(onOpenSettings).toHaveBeenCalledTimes(1);
   });
 
-  it('does not render the rail settings item when signed in (account menu owns it)', () => {
-    renderRail(signedInContext);
-    expect(screen.queryByTestId('entry-settings-button')).toBeNull();
+  it('renders exactly one rail settings item when signed in, under the destinations', () => {
+    const onOpenSettings = renderRail(signedInContext);
+    const settings = screen.getAllByTestId('entry-settings-button');
+    expect(settings).toHaveLength(1);
+    // Under 插件, above 最近项目: a destination, not an account-menu row.
+    const group = settings[0]!.closest('.entry-nav-rail__team-section');
+    expect(group).not.toBeNull();
+    expect(group?.querySelector('[data-testid="entry-nav-plugins"]')).not.toBeNull();
+    fireEvent.click(settings[0]!);
+    expect(onOpenSettings).toHaveBeenCalledTimes(1);
   });
 });

@@ -20,7 +20,6 @@ import type {
   LocalCatalogScope,
   ProjectKind,
   WorkspaceCollabContext,
-  WorkspaceProjectSummary,
   AudioVoiceOption,
   WorkspaceContextItem,
 } from '@open-design/contracts';
@@ -96,6 +95,7 @@ import {
   pluginInputsAreValid,
   requiredInputsAreUserFillable,
 } from '../utils/pluginRequiredInputs';
+import { RecentProjectsStrip } from './RecentProjectsStrip';
 import { HomeHero, type ExamplePromptInfo, type HomeHeroHandle } from './HomeHero';
 import { findChip, HOME_HERO_CHIPS, type HomeHeroChip } from './home-hero/chips';
 import {
@@ -112,7 +112,6 @@ import { setPendingDesignSystemCreateEntry } from '../analytics/ds-create-entry'
 import { workspaceContextLinkedDirs } from './workspace-context';
 import {
   currentWorkspaceAccountGeneration,
-  useTeamProjects,
   useWorkspaceContext,
   workspaceResourceReadContext,
 } from '../collab/useWorkspaceContext';
@@ -145,8 +144,6 @@ import { localizePluginTitle } from './plugins-home/localization';
 import type { PluginUseAction } from './plugins-home/useActions';
 import { examplePresetSeedPrompt } from './plugins-home/presetSeedPrompt';
 import { localizePluginDescription } from './plugins-home/localization';
-import type { SharedProjectPredicate } from '../collab/all-projects-list';
-import { RecentProjectsStrip } from './RecentProjectsStrip';
 import type { Recommendation } from '../onboarding/recommendation';
 import type { OnboardingEntry } from '../onboarding/onboarding-entry';
 import { AnimatePresence } from 'motion/react';
@@ -279,7 +276,9 @@ interface Props {
     payload: PluginLoopSubmit,
   ) => Promise<boolean | 'blocked' | void> | boolean | 'blocked' | void;
   onOpenProject: (id: string, fileName?: string) => void;
-  onViewAllProjects: () => void;
+  /** Signed-out shell only — the home grid's own handlers (see the grid's
+   *  mount note in the render tree). A workspace-bound Home never reads them. */
+  onViewAllProjects?: () => void;
   onDeleteProject?: (id: string) => Promise<boolean | void> | boolean | void;
   onDuplicateProject?: (id: string) => Promise<void> | void;
   onRenameProject?: (id: string, name: string) => void;
@@ -295,15 +294,6 @@ interface Props {
    *  back to its collapsed default (the community view raises it on every tab
    *  change). */
   collapseSignal?: number;
-  /** The one shared-state answer for the home strip's cards. Owned by EntryShell
-   *  because the SAME answer partitions its 全部项目 / 草稿 grids — a home share
-   *  must move the project between those grids too, without a refetch. */
-  isSharedProject?: SharedProjectPredicate;
-  onProjectShared?: (project: WorkspaceProjectSummary) => void;
-  onProjectShareFailed?: (projectId: string) => void;
-  onProjectUnshared?: (projectId: string) => void;
-  /** Authoritative catalog owners plus any exact successful-move witness. */
-  projectOwnerMemberIds?: ReadonlyMap<string, string>;
   skills?: SkillSummary[];
   skillsLoading?: boolean;
   connectors?: ConnectorDetail[];
@@ -525,11 +515,6 @@ export function HomeView({
   onStartBlankProject,
   promptHandoff,
   collapseSignal,
-  isSharedProject,
-  onProjectShared,
-  onProjectShareFailed,
-  onProjectUnshared,
-  projectOwnerMemberIds,
   skills = EMPTY_SKILLS,
   skillsLoading = false,
   connectors = EMPTY_CONNECTORS,
@@ -576,23 +561,6 @@ export function HomeView({
   const desiredPluginCatalogKey = workspaceContextState.identityChangePending
     ? null
     : pluginCatalogCacheKey(pluginCatalogOptions);
-  // Team-wide catalog from the resource hub via the daemon; empty off-team / when
-  // the hub is unconfigured. Only the creator attribution is derived here — the
-  // shared/not-shared answer arrives as `isSharedProject` from EntryShell, which
-  // owns the optimistic layer the 全部项目 / 草稿 grids read from too.
-  const homeTeamProjects = useTeamProjects();
-  // projectId → sharing member id, so the strip can resolve "{creator}创建" for a
-  // teammate's shared project (a project absent here is the member's own local
-  // project → "我创建").
-  const homeProjectOwnerMemberIds = useMemo(
-    () => projectOwnerMemberIds ?? new Map(
-      homeTeamProjects.projects.map((teamProject) => [
-        teamProject.projectId,
-        teamProject.ownerMemberId,
-      ]),
-    ),
-    [homeTeamProjects.projects, projectOwnerMemberIds],
-  );
   // P0 page_view page_name=home — fire once on mount. ref-keyed to survive
   // re-renders that flip parent state without remounting HomeView.
   const homePageViewFiredRef = useRef(false);
@@ -3079,8 +3047,8 @@ export function HomeView({
     }
   }
 
-  // #5517: with no recent projects the home (logo + heading + composer)
-  // centers vertically instead of hugging the top, and the strip is skipped.
+  // #5517: with no projects yet the home (logo + heading + composer) centers
+  // vertically instead of hugging the top.
   const recentProjectsEmpty = !projectsLoading && projects.length === 0;
 
   return (
@@ -3226,17 +3194,24 @@ export function HomeView({
         recommendationSlot={artifactUpgradeSlot}
       />
 
-      {recentProjectsEmpty ? null : (
+      {/* No 最近项目 grid under the hero once the rail carries the list
+          (OPEND-2683, per product: 最近项目统一在左侧栏展示): with a cloud
+          identity the rail's 最近项目 section (EntryNavRail → RailRecentSection)
+          is the one recent-projects entry, with the status glyphs and hover
+          preview the grid used to carry, and 全部项目 / 草稿 keep
+          RecentProjectsStrip for the browsable catalogue.
+
+          The signed-out (local) shell is the migration constraint's other
+          half: its rail has no 最近项目 section yet, so pulling the grid there
+          would leave existing projects with no entry at all. It keeps the grid
+          until the rail is extended (tracked in the PR body), which is also
+          why the strip props below stay on this component. */}
+      {recentProjectsEmpty || workspaceContext ? null : (
       <RecentProjectsStrip
         isActive={isActive}
         projects={projects}
         designSystems={designSystems}
         heading={t('recentProjects.title')}
-        {...(isSharedProject ? { isSharedProject } : {})}
-        {...(onProjectShared ? { onProjectShared } : {})}
-        {...(onProjectShareFailed ? { onProjectShareFailed } : {})}
-        {...(onProjectUnshared ? { onProjectUnshared } : {})}
-        projectOwnerMemberIds={homeProjectOwnerMemberIds}
         limit={1000}
         {...(projectsLoading !== undefined ? { loading: projectsLoading } : {})}
         onOpen={(id) => {
@@ -3260,7 +3235,7 @@ export function HomeView({
             area: 'recent_projects',
             element: 'view_all',
           });
-          onViewAllProjects();
+          onViewAllProjects?.();
         }}
         {...(onDeleteProject ? { onDelete: onDeleteProject } : {})}
         {...(onDuplicateProject ? { onDuplicate: onDuplicateProject } : {})}

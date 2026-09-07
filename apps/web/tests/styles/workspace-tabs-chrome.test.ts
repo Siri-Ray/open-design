@@ -345,8 +345,9 @@ describe('workspace tabs chrome styles', () => {
 
     // Home never shrinks (flex-shrink 0) in either chrome…
     expect(ruleValue(pinnedShared, 'flex')).toBe('0 0 52px');
-    // Round-4 skin: the pinned tab is a single-icon pill (~half a project tab).
-    expect(ruleValue(pinnedProject, 'flex')).toBe('0 0 78px');
+    // Round-4 skin: the pinned tab is a single-icon pill. 64px (per product,
+    // #7635) puts its glyph on the rail's 首页 icon axis.
+    expect(ruleValue(pinnedProject, 'flex')).toBe('0 0 64px');
     // …and stays stuck to the left edge with an opaque background so scrolled
     // project tabs pass behind it instead of squeezing it.
     expect(ruleValue(pinnedShared, 'position')).toBe('sticky');
@@ -413,6 +414,20 @@ describe('workspace tabs chrome styles', () => {
     expect(ruleValue(projectDragging, 'box-shadow')).toContain('0 14px 30px');
     expect(shellCss).not.toContain('.workspace-tab.is-drag-over-before::after');
     expect(shellCss).not.toContain('.workspace-tab.is-drag-over-after::after');
+  });
+
+  it('hides the pinned Home pill in the entry chrome — the search/toggle cluster owns that corner', () => {
+    // #7635: 顶部去掉 home icon，只有 chat 里才显示. The pill stays in the DOM
+    // as the tab machinery's anchor; the chrome-scoped rule hides it, and
+    // must out-rank the `:has(.workspace-tab__rail-toggle)` display rule.
+    const hidden = cssDeclarations(
+      routinesCss,
+      '.workspace-shell .workspace-tabs-chrome .workspace-tab.is-pinned:has(.workspace-tab__rail-toggle)',
+    );
+    expect(ruleValue(hidden, 'display')).toBe('none');
+    const cluster = cssDeclarations(entryLayoutCss, '.workspace-tabs-rail-actions');
+    expect(ruleValue(cluster, 'gap')).toBe('4px');
+    expect(ruleValue(cluster, 'margin')).toBe('0 0 0 14.8px');
   });
 
   it('caps the docked tab dropdown at six rows and scrolls the rest', () => {

@@ -13,7 +13,10 @@
 //     workspace tabs bar's pinned Home toggle.
 //   • Billing chip — real plan tier + explicitly scoped USD balance when Vela
 //     billing is available, with upgrade linking out to Vela Web.
-//   • Search box (opens the ⌘K project search palette via `onOpenSearch`).
+//   • No search box: the ⌘K search button and the rail toggle live in the
+//     chrome row (WorkspaceTabsBar) and reach EntryShell through
+//     entryRailBridge events. `onOpenSearch` stays on the props as the
+//     shell-owned opener for callers that still hand it down.
 //   • 最近 (Recents) → home, Community → community.
 //   • Team block (only when `context.workspaceType === 'team'`): an inline team
 //     switcher + the team destinations. In-client views: drafts / all projects /
@@ -65,7 +68,6 @@ import type { EntrySettingsSection } from './EntrySettingsMenu';
 import type { Project } from '../types';
 import { isRtlLocale, useI18n } from '../i18n';
 import { useDismissOnOutsideInteraction } from '../hooks/useDismissOnOutsideInteraction';
-import { ENTRY_RAIL_TOGGLE_EVENT } from './entryRailBridge';
 import {
   beginWorkspaceScopedRead,
   notifyTeamProjectsChanged,
@@ -315,12 +317,6 @@ function NavButton({
   );
 }
 
-/** How many of the recent projects the rail lists. The rail is navigation, not
- *  a grid: past ~8 rows the section outgrows the destinations above it and the
- *  whole rail starts to scroll. 全部项目 is one click away for the rest, and the
- *  section's own footer row goes there. */
-const RAIL_RECENT_LIMIT = 8;
-
 /** Remembers the section's open/closed state across launches, next to the
  *  rail's own `od.entry.railOpen`. A disclosure the user closed should stay
  *  closed — re-opening it on every boot is the whole reason to have the
@@ -410,8 +406,11 @@ function RailRecentSection({
   label: string;
 }) {
   const [open, setOpen] = useState(readStoredRecentOpen);
+  // Every recent project, newest first (OPEND-2757: the old 8-row cap hid the
+  // rest from the rail entirely). The LIST scrolls past ~11 rows, not the rail
+  // — see `.entry-nav-rail__recent-list` in entry-layout.css.
   const items = useMemo(
-    () => [...projects].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, RAIL_RECENT_LIMIT),
+    () => [...projects].sort((a, b) => b.updatedAt - a.updatedAt),
     [projects],
   );
   // Run status for the rows' leading glyph. `Project.status` cannot serve it —
@@ -420,7 +419,7 @@ function RailRecentSection({
   // feed the workspace tab dropdown reads, which is what keeps the two glyph
   // columns telling one story.
   // Only polled while the disclosure is open: it costs one request per listed
-  // project (≤ RAIL_RECENT_LIMIT), and a collapsed section shows no glyphs.
+  // project, and a collapsed section shows no glyphs.
   const runStatusProjectIds = useMemo(() => items.map((item) => item.id), [items]);
   const runSummaryByProjectId = useProjectRunSummaries(runStatusProjectIds, {
     enabled: open,
@@ -1811,7 +1810,13 @@ export function EntryNavRail({
             >
               <span className="entry-nav-rail__team-avatar" aria-hidden>{workspaceInitial}</span>
               <span className="entry-nav-rail__team-name">{workspaceName}</span>
-              <Icon name="chevron-down" size={14} />
+              {/* The 最近浏览过 head's disclosure, exactly (per product: 展开和
+                  收起和最近浏览过的一样): the glyph SWAPS rather than rotating —
+                  › closed, ⌄ open — at the same 14px, in a fixed 14px slot so a
+                  narrower caret cannot pull the workspace name along with it. */}
+              <span className="entry-nav-rail__team-chevron" aria-hidden>
+                <Icon name={teamOpen ? 'chevron-down' : 'chevron-right'} size={14} />
+              </span>
             </button>
             {teamOpen ? (
               <>
@@ -1923,48 +1928,11 @@ export function EntryNavRail({
           </div>
         ) : null}
 
-        {/* Search + the rail-collapse control in one row. The collapse button
-            moved here from the chrome corner (per product: 收起按钮放在输入框
-            后边) — the corner slot is the brand logo now, and re-opening a
-            collapsed rail is what the logo does there. */}
-        <div className="entry-nav-rail__search-row">
-          <button
-            type="button"
-            className="entry-nav-rail__search"
-            onClick={() => {
-              trackEntryNavigationClick(analytics.track, {
-                page_name: analyticsPage,
-                area: 'entry_nav',
-                element: 'search',
-                target: 'search',
-                entry_from: 'sidebar',
-                ...workspaceDimensions,
-              });
-              onOpenSearch?.();
-            }}
-            aria-label={t('common.search')}
-            data-testid="entry-nav-search"
-          >
-            <Icon name="search" size={14} />
-            <span className="entry-nav-rail__search-placeholder">{t('common.search')}</span>
-            <span className="entry-nav-rail__search-kbd" aria-hidden>⌘K</span>
-          </button>
-          <button
-            type="button"
-            className="entry-nav-rail__collapse od-tooltip"
-            aria-label={t('entry.navCollapse')}
-            title={t('entry.navCollapse')}
-            data-tooltip={t('entry.navCollapse')}
-            data-tooltip-placement="bottom"
-            data-testid="entry-rail-collapse"
-            onClick={() => {
-              window.dispatchEvent(new CustomEvent(ENTRY_RAIL_TOGGLE_EVENT));
-            }}
-          >
-            <Icon name="panel-left" size={15} />
-          </button>
-        </div>
-
+        {/* No search row here any more (per product: 搜索和收起跟 home icon 一起
+            放在顶部): the search button and the rail toggle sit in the chrome
+            row above (WorkspaceTabsBar's `.workspace-tabs-rail-actions`), and
+            reach EntryShell through window events (entryRailBridge). The rail
+            column starts at the workspace switcher. */}
         <NavButton
           active={isHome}
           ariaLabel={homeLabel}
@@ -2030,7 +1998,29 @@ export function EntryNavRail({
             >
               <Icon name="puzzle" size={16} />
             </NavButton>
-            {/* 最近浏览过 sits under 插件 (per product) — the last thing in the
+            {/* 设置 is a rail destination on BOTH branches (product: 设置的按钮
+                在插件下边). Signed-in used to keep it only in the account hover
+                menu — two interactions deep, and invisible until you found the
+                avatar. It sits directly under 插件 so the destination list ends
+                the same way in either state, above 最近项目 (content, not a
+                place to go). `entry-settings-button` stays UNIQUE: this branch
+                and the signed-out one below are mutually exclusive. */}
+            <NavButton
+              ariaLabel={t('entry.accountSettings')}
+              label={t('entry.accountSettings')}
+              onClick={() => {
+                trackAccountMenuClick(analytics.track, {
+                  page_name: analyticsPage,
+                  area: 'account_menu',
+                  element: 'settings',
+                });
+                onOpenSettings?.();
+              }}
+              testId="entry-settings-button"
+            >
+              <Icon name="settings" size={16} />
+            </NavButton>
+            {/* 最近项目 sits under 设置 (per product) — the last thing in the
                 destination list, because it is a list of CONTENT rather than a
                 place to go. */}
             <RailRecentSection
@@ -2039,7 +2029,7 @@ export function EntryNavRail({
               onRename={onRenameRecentProject}
               onDelete={onDeleteRecentProject}
               workspaceContext={context}
-              label={t('recentProjects.collectionRecent')}
+              label={t('recentProjects.title')}
             />
             {/* Product decision (2026-07-20): 成员 and 数据大盘 leave the rail
                 entirely — both surfaces live in B's console and the rail should
@@ -2097,9 +2087,9 @@ export function EntryNavRail({
                 case. #5517 then dropped that chip (the footer only hosts the
                 updater popup now), and a signed-out rail has no account menu
                 either — leaving no settings entry at all. This item is the
-                ONLY signed-out settings entry (testId `entry-settings-button`
-                is the e2e contract); signed-in keeps settings in the account
-                menu, so it must not render on that branch. */}
+                signed-out half of the pair (testId `entry-settings-button` is
+                the e2e contract); the signed-in branch above renders the same
+                item in the same slot under 插件, and the two never coexist. */}
             <NavButton
               ariaLabel={t('entry.accountSettings')}
               label={t('entry.accountSettings')}

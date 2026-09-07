@@ -1107,14 +1107,25 @@
   font-size: 13px;
   text-align: left;
 }
-.workspace-tabs-dropdown__row-main > svg:first-child {
-  flex: 0 0 auto;
+/* The leading slot. Fixed size and ALWAYS rendered, even when the row has no
+   glyph: that reserved box is what keeps every project name starting on the
+   same column once some rows carry a run-status indicator and others do not.
+   Explicit classes rather than the `svg:first-child` / `svg:last-child` pair
+   that used to paint these — the slot's content is now sometimes a nested
+   element and sometimes nothing, so position stopped identifying the glyph. */
+.workspace-tabs-dropdown__row-lead {
+  flex: 0 0 14px;
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   color: var(--text-muted);
 }
 .workspace-tabs-dropdown__row.is-active .workspace-tabs-dropdown__row-label {
   font-weight: 600;
 }
-.workspace-tabs-dropdown__row-main > svg:last-child:not(:first-child) {
+.workspace-tabs-dropdown__row-check {
   flex: 0 0 auto;
   color: var(--accent);
 }
@@ -1131,7 +1142,7 @@
      button) and undocked (the strip's pinned entry tab). Without it the icon
      jumped 10px left on every entry→project→entry trip. */
   margin-left: 10px;
-  width: 78px;
+  width: 64px;
   height: 32px;
   padding: 0;
   border: 0;
@@ -1145,9 +1156,17 @@
   flex: 0 0 auto;
   -webkit-app-region: no-drag;
 }
-.workspace-tabs-home-chrome:hover {
-  background: color-mix(in srgb, var(--bg-panel) 78%, transparent);
-  box-shadow: 0 1px 2px color-mix(in srgb, var(--text) 5%, transparent);
+/* Same fill the rail's selected nav row wears — `--text-strong` at 10% (per
+   product: 和首页的选择保持一致). It used to be a 78% wash of the opaque
+   `--bg-panel`, which on the translucent chrome row read as a pale plate
+   rather than a tint of the ink. Keep in step with
+   `.entry-nav-rail__btn.is-active` (home/entry-layout.css). The drop shadow
+   goes with it: a tint does not need a lift to read as hovered.
+   `:not(:disabled)` is load-bearing — see the note in home/entry-layout.css
+   beside the search/collapse pair: it is what lifts this past
+   primitives.css's `button:hover:not(:disabled)`. */
+.workspace-tabs-home-chrome:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--text-strong) 10%, transparent);
 }
 .app .split-chat-slot {
   /* Column: the docked strip sits above the chat card. */
@@ -1231,12 +1250,15 @@
    tabs from showing through it. Declared before .is-active so an active Home
    tab still picks up the active highlight. */
 .workspace-shell .workspace-tab.is-pinned {
-  /* Single-icon pill (~half a project tab): the Home button on a project page,
-     or the sidebar toggle on the Home page. */
-  flex: 0 0 78px;
-  width: 78px;
-  min-width: 78px;
-  max-width: 78px;
+  /* Single-icon pill: the Home button on a project page, or the sidebar
+     toggle on the Home page. Width is not free — the pill starts at the
+     strip's 10px edge inset and centers its glyph, so 64px puts that glyph
+     on the same vertical axis as the rail's 首页 icon below it. Changing this
+     width or the edge inset breaks that column. */
+  flex: 0 0 64px;
+  width: 64px;
+  min-width: 64px;
+  max-width: 64px;
   grid-template-columns: minmax(0, 1fr);
   position: sticky;
   left: 0;
@@ -1252,6 +1274,18 @@
   justify-items: center;
   padding: 0;
 }
+/* …but the entry chrome row shows no pinned Home pill at all now (per
+   product: 顶部去掉 home icon，只有 chat 里才显示): Home is the rail's own 首页
+   item, expanding a collapsed rail is the toggle beside the search in
+   `.workspace-tabs-rail-actions`, and in chat the logo still renders as
+   .workspace-tabs-home-chrome (the strip is docked there, so this selector
+   does not reach it). The row stays in the DOM — it is the tab machinery's
+   measurement/drag anchor. Both selectors are needed: the second out-ranks the
+   `:has()` display rule directly above. */
+.workspace-shell .workspace-tabs-chrome .workspace-tab.is-pinned,
+.workspace-shell .workspace-tabs-chrome .workspace-tab.is-pinned:has(.workspace-tab__rail-toggle) {
+  display: none;
+}
 .workspace-shell .workspace-tab.is-pinned .workspace-tab__rail-toggle {
   /* Fill the whole pinned tab so the hover target is a full tab-sized box
      (matching the Home button / a normal tab hover) instead of a cramped 20px
@@ -1260,6 +1294,15 @@
   width: 100%;
   height: 100%;
   border-radius: 12px;
+}
+/* primitives.css rings every button in 1px of --blue at a 2px offset on
+   focus-visible. Around this corner pill that rectangle read as permanent
+   chrome rather than a focus state, so drop it and let the same soft fill the
+   pill already uses for hover carry keyboard focus instead. */
+.workspace-shell .workspace-tab.is-pinned .workspace-tab__rail-toggle:focus-visible,
+.workspace-shell .workspace-tab.is-pinned .workspace-tab__main:focus-visible {
+  outline: none;
+  background: var(--bg-fill-secondary);
 }
 .workspace-shell .workspace-tab.is-active {
   border-radius: 12px;
@@ -3922,7 +3965,7 @@
   position: fixed;
   inset: 0;
   z-index: 1800;
-  background: color-mix(in srgb, var(--text) 38%, transparent);
+  background: var(--scrim-tint);
   -webkit-backdrop-filter: var(--scrim-backdrop);
   backdrop-filter: var(--scrim-backdrop);
   display: flex;

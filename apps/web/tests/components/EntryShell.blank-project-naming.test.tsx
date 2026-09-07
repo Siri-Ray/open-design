@@ -211,7 +211,11 @@ afterEach(() => {
 });
 
 describe('EntryShell team project content readiness', () => {
-  it('renders another member\'s catalog name and timestamp on Home instead of the fresh pulled placeholder', async () => {
+  // The grid this reads lives on 全部项目 now: with a cloud identity Home carries
+  // no recent-projects grid any more (#7635 / OPEND-2683 — the rail's 最近项目
+  // section is the entry there), so the catalog-name-over-placeholder rule is
+  // asserted on the team grid surface instead.
+  it('renders another member\'s catalog name and timestamp on 全部项目 instead of the fresh pulled placeholder', async () => {
     const catalogUpdatedAt = Date.now() - (2 * 24 * 60 * 60 * 1000);
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
       const pathname = new URL(String(input), 'http://d.local').pathname;
@@ -236,7 +240,7 @@ describe('EntryShell team project content readiness', () => {
       return jsonResponse({});
     }) as typeof fetch;
 
-    renderAt('/', {
+    renderAt('/all-projects', {
       projects: [{
         id: 'shared-pulled',
         name: '共享项目',
