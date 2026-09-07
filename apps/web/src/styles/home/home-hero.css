@@ -29,19 +29,6 @@
    viewport's true center, reading as an oversized blank band above it. Drop
    it back to match the bottom padding so the hero's own box is symmetric and
    the flex centering does all of the vertical balancing. */
-/* Typography ladder stand-in. The refreshed entry surfaces set the app's
-   default text to `body { font-weight: 600 }` and `button { font-weight: 600 }`
-   (base.css / primitives.css); that app-wide normalization lands with the
-   rest of the entry refresh, not with the hero. Until then the hero inherits
-   the same ladder locally so its staged chips, controls and rows read at the
-   weight they were designed at. `:where()` keeps the button rule at element
-   specificity, exactly where primitives.css's own sits, so a control that
-   names its weight still wins. Drop this block when the global one lands. */
-.home-hero,
-:where(.home-hero) button {
-  font-weight: 600;
-}
-
 .home-view--centered .home-hero {
   padding-top: var(--spacing-4);
 }

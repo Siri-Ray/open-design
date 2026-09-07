@@ -125,7 +125,7 @@
 }
 
 .appliedSummary {
-  font-weight: 500;
+  font-weight: 600;
 }
 
 .appliedRefs {
@@ -418,7 +418,7 @@
 .ruleFieldLabel textarea {
   width: 100%;
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 600;
   letter-spacing: normal;
   text-transform: none;
   color: var(--text);
@@ -458,5 +458,5 @@
 }
 
 .ruleSavedLabel {
-  font-weight: 500;
+  font-weight: 600;
 }

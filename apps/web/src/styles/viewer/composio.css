@@ -256,7 +256,7 @@
 }
 .deploy-result-url {
   min-width: 0;
-  font-weight: 500;
+  font-weight: 600;
   overflow-wrap: anywhere;
 }
 .deploy-result-actions {
@@ -523,7 +523,7 @@
 }
 .system-reminder-toggle:hover { background: rgba(0, 0, 0, 0.03); }
 .system-reminder-icon { color: var(--text-muted); }
-.system-reminder-label { font-weight: 500; color: var(--text); }
+.system-reminder-label { font-weight: 600; color: var(--text); }
 .system-reminder-preview {
   flex: 1;
   color: var(--text-muted);
@@ -573,7 +573,7 @@
   animation: pulse 1.4s ease-in-out infinite;
 }
 .op-waiting-label {
-  font-weight: 500;
+  font-weight: 600;
   color: var(--text);
 }
 .op-waiting-detail {
@@ -717,7 +717,7 @@
   margin: 6px 10px 6px 0;
   padding: 2px 12px;
   font-size: 12px;
-  font-weight: 500;
+  font-weight: 600;
   border: 1px solid var(--green-border);
   padding: 2px 10px;
   border: 1px solid var(--border-strong);
@@ -846,7 +846,7 @@
 }
 .qf-label {
   font-size: 12px;
-  font-weight: 500;
+  font-weight: 600;
   color: var(--text);
   display: flex;
   align-items: center;
@@ -907,7 +907,7 @@ button.qf-chip-other:disabled { cursor: default; opacity: 0.6; }
 .qf-chip-desc {
   color: var(--text-muted);
   font-size: 12px;
-  font-weight: 500;
+  font-weight: 600;
 }
 .qf-chip-on .qf-chip-desc {
   color: inherit;
@@ -923,7 +923,7 @@ button.qf-chip-other:disabled { cursor: default; opacity: 0.6; }
   border-color: var(--border-strong);
   background: color-mix(in srgb, var(--bg-subtle) 45%, var(--bg-panel));
   color: var(--accent-hover);
-  font-weight: 500;
+  font-weight: 600;
 }
 .question-form-locked .qf-chip { cursor: not-allowed; }
 .qf-input,
@@ -1363,7 +1363,7 @@ button.qf-chip-other:disabled { cursor: default; opacity: 0.6; }
 .qf-visual-custom-label {
   color: var(--text-muted);
   font-size: 11px;
-  font-weight: 550;
+  font-weight: 600;
   line-height: 1.3;
 }
 .qf-visual-dialog-foot {
@@ -1753,7 +1753,7 @@ button.qf-chip-other:disabled { cursor: default; opacity: 0.6; }
 .question-form-summary-visual-label {
   color: var(--text-muted);
   font-size: 10px;
-  font-weight: 550;
+  font-weight: 600;
 }
 .question-form-summary-visual-cards {
   display: flex;
@@ -1779,7 +1779,7 @@ button.qf-chip-other:disabled { cursor: default; opacity: 0.6; }
   padding: 4px 5px 5px;
   color: var(--text);
   font-size: 10px;
-  font-weight: 550;
+  font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1803,7 +1803,7 @@ button.qf-chip-other:disabled { cursor: default; opacity: 0.6; }
 .question-form-summary-item strong {
   overflow: hidden;
   color: var(--text);
-  font-weight: 550;
+  font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -2154,7 +2154,7 @@ button.qf-chip-other:disabled { cursor: default; opacity: 0.6; }
   border-radius: var(--radius-pill);
   padding: 6px 16px;
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 600;
   color: var(--text-muted);
   cursor: pointer;
 }
@@ -2853,7 +2853,7 @@ button.qf-chip-other:disabled { cursor: default; opacity: 0.6; }
   letter-spacing: 0.06em;
   color: var(--text-muted);
   margin-right: 6px;
-  font-weight: 500;
+  font-weight: 600;
 }
 .filter-pill {
   background: var(--bg-panel);
@@ -2938,7 +2938,7 @@ button.filter-pill:hover:not(:disabled) .filter-pill-count,
   right: 10px;
   padding: 5px 12px;
   font-size: 12px;
-  font-weight: 500;
+  font-weight: 600;
   color: white;
   background: rgba(28, 27, 26, 0.78);
   border-radius: var(--radius-pill);
@@ -3179,7 +3179,7 @@ body.entry-resizing { cursor: col-resize; user-select: none; }
 .chat-history-menu-count {
   color: var(--text-faint);
   font-size: 12px;
-  font-weight: 500;
+  font-weight: 600;
   line-height: 1;
   margin-left: 6px;
 }
@@ -3513,7 +3513,7 @@ body.entry-resizing { cursor: col-resize; user-select: none; }
   animation: pulse 1.2s ease-in-out infinite;
 }
 .assistant-footer .assistant-label {
-  font-weight: 500;
+  font-weight: 600;
   color: var(--text-faint);
   font-size: 12px;
 }

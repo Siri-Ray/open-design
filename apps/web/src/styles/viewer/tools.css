@@ -68,7 +68,7 @@
   letter-spacing: 0.06em;
   color: var(--text-soft);
   margin-bottom: 6px;
-  font-weight: 500;
+  font-weight: 600;
 }
 .produced-files-list {
   display: flex;
@@ -243,7 +243,7 @@
   background: var(--bg-panel);
   color: var(--text);
   font-size: 12px;
-  font-weight: 500;
+  font-weight: 600;
   cursor: pointer;
 }
 .plugin-action-button:hover:not(:disabled) {
@@ -687,7 +687,7 @@
 .present-menu-copy small {
   color: var(--text-muted);
   font-size: 11px;
-  font-weight: 500;
+  font-weight: 600;
   line-height: 1.2;
 }
 
@@ -1342,5 +1342,5 @@
   color: var(--text-muted);
   background: var(--bg-subtle);
   border-color: var(--border);
-  font-weight: 500;
+  font-weight: 600;
 }
