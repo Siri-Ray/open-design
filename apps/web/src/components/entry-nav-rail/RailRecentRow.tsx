@@ -1,19 +1,11 @@
-// One row of the nav rail's 最近浏览过 list: the project name, a hover preview
+// One row of the nav rail's 最近项目 list: the project name, a hover preview
 // that floats out to the right of the rail, and a ⋮ menu.
 //
-// The preview reuses the SAME cover decision the projects grid renders
-// (`lib/project-cover-cache`): the grid resolves a cover per (workspace,
-// project, version) and stores it in a process-wide LRU, so a rail row usually
-// has one already and paints instantly. When the cache misses — the user landed
-// on a surface that never rendered the grid — the row resolves it once on hover
-// with the cheap half of the grid's pipeline (files read + `selectProjectFileCover`)
-// and writes the result back through the same key, so the grid inherits it too.
-// Deliberately NOT ported: the grid's HEAD probe, deck-document preload and
-// design-system special cases. Those exist to avoid a broken <img> in a large
-// visible card; here a cover that fails to load simply falls back to the tinted
-// glyph the same component already draws.
+// The preview card and the cover decision behind it live in
+// `ProjectHoverPreview.tsx`, shared with the chat project switcher so both
+// surfaces show one and the same card for a project (OPEND-2694).
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import type { ProjectDisplayStatus, WorkspaceCollabContext } from '@open-design/contracts';
@@ -23,22 +15,8 @@ import { RemixIcon } from '../RemixIcon';
 import { hasRunStatusGlyph, ProjectRunStatusIcon } from '../ProjectRunStatusIcon';
 import { STATUS_LABEL_KEYS } from '../../state/projectRunStatus';
 import { exportProjectAsZip } from '../../runtime/exports';
-import { fetchProjectFiles } from '../../providers/registry';
-import { workspaceIdentityCacheKey } from '../../collab/workspace-identity';
-import {
-  getProjectCoverSnapshot,
-  projectCoverSnapshotKey,
-  setProjectCoverSnapshot,
-} from '../../lib/project-cover-cache';
-import {
-  projectCoverUrl,
-  selectProjectFileCover,
-  type ProjectCoverOverride,
-} from '../project-cover';
 import type { Project } from '../../types';
-
-/** `undefined` = not resolved yet; `null` = resolved, this project has none. */
-type CoverState = ProjectCoverOverride | null | undefined;
+import { ProjectHoverPreviewCard, useProjectHoverCover } from './ProjectHoverPreview';
 
 /**
  * Which row currently owns a popup, and which one (per product: 两个弹窗互斥
@@ -174,14 +152,8 @@ export function RailRecentRow({
   onDelete?: (id: string) => Promise<boolean | void> | boolean | void;
 }) {
   const t = useT();
-  const snapshotKey = projectCoverSnapshotKey(
-    workspaceIdentityCacheKey(workspaceContext),
-    project.id,
-    project.updatedAt,
-  );
-  const [cover, setCover] = useState<CoverState>(
-    () => getProjectCoverSnapshot(snapshotKey)?.cover,
-  );
+  const hoverCover = useProjectHoverCover(project, workspaceContext);
+  const { resolveCover } = hoverCover;
   // Where the portalled preview should sit, measured off the row at hover time.
   const [anchor, setAnchor] = useState<{ top: number; left: number } | null>(null);
   // This row's view of the shared claim (see `claimPopup`). Both popups render
@@ -209,41 +181,13 @@ export function RailRecentRow({
   const rootRef = useRef<HTMLDivElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const renameInputRef = useRef<HTMLInputElement | null>(null);
-  const activeRef = useRef(true);
   useEffect(() => {
-    activeRef.current = true;
     return () => {
-      activeRef.current = false;
       // A row that leaves (the list re-sorts, the rail closes) must not leave
       // its popup claimed, or nothing else could ever open one.
       if (popupClaim?.rowId === project.id) claimPopup(null);
     };
   }, [project.id]);
-
-  // A newer version of the project (rename, new content) misses the old key, so
-  // the row drops back to unresolved and re-reads on the next hover.
-  useEffect(() => {
-    setCover(getProjectCoverSnapshot(snapshotKey)?.cover);
-  }, [snapshotKey]);
-
-  const resolveCover = useCallback(async () => {
-    if (getProjectCoverSnapshot(snapshotKey) !== undefined) return;
-    // An imported-folder project has no artifact of its own to show.
-    if (project.metadata?.entryFile) {
-      setProjectCoverSnapshot(snapshotKey, null);
-      if (activeRef.current) setCover(null);
-      return;
-    }
-    try {
-      const files = await fetchProjectFiles(project.id, { workspaceContext });
-      const next = selectProjectFileCover(files);
-      setProjectCoverSnapshot(snapshotKey, next);
-      if (activeRef.current) setCover(next);
-    } catch {
-      // Leave it unresolved: a failed read is not an authoritative "no cover",
-      // and the next hover should be allowed to try again.
-    }
-  }, [project.id, project.metadata?.entryFile, snapshotKey, workspaceContext]);
 
   // Close the menu on an outside click, the way every other rail popover does.
   useEffect(() => {
@@ -287,15 +231,6 @@ export function RailRecentRow({
     if (!next || next === project.name) return;
     onRename?.(project.id, next);
   }
-
-  const coverSrc = cover
-    ? projectCoverUrl(project.id, cover.name, cover.mtime, workspaceContext)
-    : null;
-  // `html` covers are documents, not pictures: the grid mounts a sandboxed frame
-  // for those. A floating rail preview is not worth a second iframe per hover,
-  // so only real media paints here and everything else takes the glyph.
-  const showsImage = Boolean(coverSrc && (cover?.kind === 'image' || cover?.kind === 'logo'));
-  const showsVideo = Boolean(coverSrc && cover?.kind === 'video');
 
   return (
     <div
@@ -492,29 +427,11 @@ export function RailRecentRow({
           portals out). Rendered only while hovered, so a rail full of rows never
           holds a dozen idle <img> elements alive. */}
       {anchor && ownsPreview && typeof document !== 'undefined' ? createPortal(
-        <div
-          className="entry-nav-rail__recent-preview"
+        <ProjectHoverPreviewCard
+          project={project}
+          cover={hoverCover}
           style={{ top: anchor.top, left: anchor.left }}
-          aria-hidden
-        >
-          <div className="entry-nav-rail__recent-preview-plate">
-            {showsImage ? (
-              <img src={coverSrc ?? ''} alt="" draggable={false} decoding="async" />
-            ) : showsVideo ? (
-              <video src={coverSrc ?? ''} muted playsInline preload="metadata" />
-            ) : (
-              <span className="entry-nav-rail__recent-preview-glyph" aria-hidden>
-                {(Array.from(project.name.trim())[0] ?? '?').toUpperCase()}
-              </span>
-            )}
-          </div>
-          {/* The name the row had to ellipsize, given room to wrap — that is
-              the whole job of this card. The "last touched" line that used to
-              sit under it is gone (per product: 时间去掉，最多两行名称): a hover
-              preview answers "which project is this", and the timestamp was
-              answering a question nobody had asked it. */}
-          <p className="entry-nav-rail__recent-preview-name">{project.name}</p>
-        </div>,
+        />,
         document.body,
       ) : null}
     </div>

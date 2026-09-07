@@ -1,9 +1,8 @@
+/* Layout only — the scrim material comes from the shared `<Dialog>` backdrop
+   (--scrim-tint / --scrim-backdrop). See AmrArtifactUpgradeDialog. */
 .backdrop {
   z-index: 1700;
   padding: 16px;
-  background: color-mix(in srgb, var(--text-strong) 24%, transparent);
-  backdrop-filter: blur(6px) saturate(0.96);
-  -webkit-backdrop-filter: blur(6px) saturate(0.96);
 }
 
 .goWelcomeBackdrop {

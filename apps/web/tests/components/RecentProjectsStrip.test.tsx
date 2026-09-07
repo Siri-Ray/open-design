@@ -1214,7 +1214,10 @@ describe('recvqabp2Uy23r — shared badge grid overlay vs list inline', () => {
     const badge = screen.getByText('Shared').closest('.recent-projects__card-badge');
     expect(badge).not.toBeNull();
     expect(badge?.classList.contains('recent-projects__card-badge--inline')).toBe(false);
-    expect(badge?.closest('.recent-projects__card-thumb')).not.toBeNull();
+    // Anchored on the CARD (beside the ⋯ menu anchor), not inside the thumb:
+    // the thumb scales on hover (#7635) and would carry the badge with it.
+    expect(badge?.closest('.recent-projects__card-thumb')).toBeNull();
+    expect(badge?.closest('.recent-projects__card')).not.toBeNull();
   });
 
   it('renders the shared badge inline next to the name in list view', () => {

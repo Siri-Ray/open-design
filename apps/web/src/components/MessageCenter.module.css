@@ -30,7 +30,9 @@
   z-index: 2200;
   display: flex;
   justify-content: flex-end;
-  background: color-mix(in srgb, var(--text-strong, #111827) 12%, transparent);
+  background: var(--scrim-tint);
+  -webkit-backdrop-filter: var(--scrim-backdrop);
+  backdrop-filter: var(--scrim-backdrop);
 }
 
 .panel {

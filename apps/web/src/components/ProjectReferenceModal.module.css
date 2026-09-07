@@ -5,7 +5,9 @@
   display: grid;
   place-items: center;
   padding: 24px;
-  background: rgba(15, 15, 15, 0.38);
+  background: var(--scrim-tint);
+  -webkit-backdrop-filter: var(--scrim-backdrop);
+  backdrop-filter: var(--scrim-backdrop);
 }
 
 .modal {

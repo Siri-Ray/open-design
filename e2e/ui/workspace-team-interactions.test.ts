@@ -315,6 +315,9 @@ test('[P0] workspace switch clears the previous project list before the next sco
 
   await gotoHome(page);
   await ensureRailOpen(page);
+  // A workspace-bound Home carries no project grid any more (#7635 /
+  // OPEND-2683); 草稿 is the grid the switch has to clear.
+  await page.getByTestId('entry-nav-drafts').click();
   await expect(visibleProjectCard(page, PERSONAL_DRAFT.id)).toBeVisible();
 
   await page.getByTestId('workspace-switcher').click();
@@ -326,6 +329,9 @@ test('[P0] workspace switch clears the previous project list before the next sco
   await expect(visibleProjectCard(page, SWITCHED_TEAM_DRAFT.id)).toHaveCount(0);
 
   releaseTeamProjects();
+  // The switch lands on Home; the new scope's grid is on 草稿 again.
+  await ensureRailOpen(page);
+  await page.getByTestId('entry-nav-drafts').click();
   await expect(visibleProjectCard(page, SWITCHED_TEAM_DRAFT.id)).toBeVisible();
   await expect(visibleProjectCard(page, PERSONAL_DRAFT.id)).toHaveCount(0);
 });
@@ -550,6 +556,8 @@ test('[P0] account replacement never paints the previous account workspace or pr
 
   await gotoHome(page);
   await ensureRailOpen(page);
+  // Same reason as above: the grid lives on 草稿 for a workspace-bound Home.
+  await page.getByTestId('entry-nav-drafts').click();
   await expect(visibleProjectCard(page, accountA.project.id)).toBeVisible();
   await expect(page.getByTestId('workspace-switcher')).toContainText(
     accountA.workspace.workspaceName,
@@ -574,6 +582,8 @@ test('[P0] account replacement never paints the previous account workspace or pr
   await expect(page.getByTestId('workspace-switcher')).toContainText(
     accountB.workspace.workspaceName,
   );
+  // The reload lands on Home; account B's grid is on 草稿 again.
+  await page.getByTestId('entry-nav-drafts').click();
   await expect(visibleProjectCard(page, accountB.project.id)).toBeVisible();
   await expect(visibleProjectCard(page, accountA.project.id)).toHaveCount(0);
 });

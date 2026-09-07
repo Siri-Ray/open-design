@@ -99,7 +99,24 @@ function renderRail(overrides: Partial<Parameters<typeof EntryNavRail>[0]> = {})
   return { onOpen, onRename, onDelete };
 }
 
+let reportVisibleRows: (start: number, end: number) => void;
+
+class VisibleRowsObserver {
+  rows: Element[] = [];
+  constructor(private callback: IntersectionObserverCallback) {
+    reportVisibleRows = (start, end) => this.callback(this.rows.map((target, index) => ({
+      target, isIntersecting: index >= start && index < end,
+    } as IntersectionObserverEntry)), this as unknown as IntersectionObserver);
+  }
+  observe(target: Element) {
+    this.rows.push(target);
+    queueMicrotask(() => reportVisibleRows(0, 11));
+  }
+  disconnect() { this.rows = []; }
+}
+
 beforeEach(() => {
+  vi.stubGlobal('IntersectionObserver', VisibleRowsObserver);
   window.localStorage.clear();
   RUNS = { ...DEFAULT_RUNS };
   stubFetch();
@@ -108,18 +125,47 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   globalThis.fetch = originalFetch;
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 describe('EntryNavRail 最近浏览过 section', () => {
-  it('lists the eight most recent projects, newest first, under a disclosure that starts open', () => {
+  it('lists every recent project, newest first, under a disclosure that starts open', () => {
     renderRail();
     const toggle = screen.getByTestId('entry-nav-recent-toggle');
     expect(toggle.getAttribute('aria-expanded')).toBe('true');
-    expect(toggle.textContent).toContain('Recently viewed');
+    // 最近项目 (OPEND-2703), not 最近浏览过.
+    expect(toggle.textContent).toContain('Recent projects');
     const rows = screen.getAllByTestId('entry-nav-recent-item');
+    // OPEND-2757: no 8-row cap — the ninth (and every later) project is a row
+    // too; the list scrolls past ~11 rows instead of dropping them.
     expect(rows.map((row) => row.textContent)).toEqual(
-      ['p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p7', 'p8'].map((id) => `Project ${id}`),
+      ['p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p7', 'p8', 'p9', 'p10'].map((id) => `Project ${id}`),
     );
+  });
+
+  it('polls only visible rows in a 500-project catalog and follows the scroll window', async () => {
+    vi.useFakeTimers();
+    const { onOpen } = renderRail({ recentProjects: Array.from({ length: 500 }, (_, i) =>
+      project(`p${i + 1}`, 1000 - i)) });
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    const runRequests = () => vi.mocked(fetch).mock.calls.filter(([url]) =>
+      String(url).startsWith('/api/runs?projectId='));
+    expect(screen.getAllByTestId('entry-nav-recent-item')).toHaveLength(500);
+    expect(runRequests()).toHaveLength(11);
+    await act(async () => { await vi.advanceTimersByTimeAsync(4000); });
+    expect(runRequests()).toHaveLength(22);
+    await act(async () => { reportVisibleRows(489, 500); });
+    expect(runRequests().slice(-11).map(([url]) => String(url))).toEqual(
+      Array.from({ length: 11 }, (_, i) => `/api/runs?projectId=p${490 + i}`),
+    );
+    await act(async () => { await vi.advanceTimersByTimeAsync(4000); });
+    expect(runRequests()).toHaveLength(44);
+    fireEvent.click(screen.getAllByTestId('entry-nav-recent-item')[499]!);
+    expect(onOpen).toHaveBeenCalledWith('p500');
+    fireEvent.click(screen.getByTestId('entry-nav-recent-toggle'));
+    await act(async () => { await vi.advanceTimersByTimeAsync(4000); });
+    expect(runRequests()).toHaveLength(44);
   });
 
   it('renders nothing without projects or without a cloud identity', () => {

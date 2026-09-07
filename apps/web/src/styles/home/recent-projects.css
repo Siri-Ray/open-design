@@ -100,24 +100,22 @@
   gap: var(--spacing-12);
 }
 .recent-projects__row--grid {
-  /* Equal-width grid, 5-across at full width: each card is an exact fraction
-     of the module width so the row's right edge aligns with the header/
-     filters. Extra items wrap downward. Column count steps down with the
+  /* Equal-width grid, 4-across at full width (per product): each card is an
+     exact fraction of the module width so the row's right edge aligns with the
+     header/filters. Extra items wrap downward. Column count steps down with the
      strip's container width (breakpoints ≈ 180px min card width + gaps) so
      cards never get crushed when the window narrows. */
   grid-auto-flow: row;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   grid-auto-rows: auto;
   align-items: stretch;
   /* Cards have no base-card surface or padding, so the grid gap alone is the
      visible spacing between cards: fixed at 16px (compact rhythm). */
   gap: var(--spacing-16);
 }
-@container recent-projects (max-width: 947px) {
-  .recent-projects__row--grid {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
-}
+/* No 947px step any more — it dropped 5 → 4, which is now the base. The ladder
+   starts at the next one down: 4 cards + 3 gaps still clear ~176px each at
+   755px, which is where 3-across takes over. */
 @container recent-projects (max-width: 755px) {
   .recent-projects__row--grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -154,7 +152,12 @@
   /* Borderless card: the transparent 1px keeps the box size stable for the
      selection / design-system rings that do draw a border. */
   border: 1px solid transparent;
-  border-radius: var(--radius);
+  /* 16px (per product) — the card is surfaceless, so this only shapes the
+     selection ring, but a ring that rounds tighter than the thumbnail inside
+     it reads as two radii, so it tracks `.recent-projects__card-thumb`'s
+     radius below. A literal, not `--radius-lg`: that token tops out at 12px
+     and is shared with surfaces that should stay at 12. */
+  border-radius: 16px;
   /* Surfaceless: no fill, blur, or shadow — the thumbnail and meta sit
      directly on the page wash. Selection / design-system states still draw
      their rings via border/box-shadow. */
@@ -202,6 +205,54 @@
 .recent-projects__card:hover {
   border-color: transparent;
 }
+/* Hover zoom (per product 2026-08-25): the COVER grows, the caption under it
+   does not — the title and timestamp hold their size and their baseline, so
+   the row of names stays on one line and only the picture comes forward.
+
+   This is NOT the cover zoom the note further up forbids. That one scaled
+   `.recent-projects__thumb-media` — the image INSIDE a fixed thumb box — so
+   the picture was blown up past its own resolution and cropped by the box,
+   and sat visibly soft for as long as the pointer stayed. This scales the
+   thumb box itself: the framing never changes, nothing is cropped, and it
+   settles back at 1 the moment the pointer leaves.
+
+   Grid only: a list row's 128x52 thumb is too small for the gesture to read.
+   `:not(.is-menu-open)` keeps the cover still while the card's ⋮ popover is
+   open, and the `is-selecting` rule below holds it still in multi-select. */
+.recent-projects__row--grid .recent-projects__card-thumb {
+  transition: transform 220ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+.recent-projects__row--grid .recent-projects__card:hover:not(.is-menu-open) .recent-projects__card-thumb,
+.recent-projects__row--grid .recent-projects__card:focus-within:not(.is-menu-open) .recent-projects__card-thumb {
+  transform: scale(1.03);
+}
+/* The cover spans the card edge to edge, so 3% of growth lands outside both
+   boxes that wrap it — each of which clips. Open them for the hovered card
+   only (`.is-menu-open` already does the same thing for its popover), and lift
+   the card so the grown cover paints over its neighbours rather than under. */
+.recent-projects__row--grid .recent-projects__card:hover:not(.is-menu-open),
+.recent-projects__row--grid .recent-projects__card:focus-within:not(.is-menu-open) {
+  z-index: 2;
+  overflow: visible;
+}
+.recent-projects__row--grid .recent-projects__card:hover:not(.is-menu-open) .recent-projects__card-main,
+.recent-projects__row--grid .recent-projects__card:focus-within:not(.is-menu-open) .recent-projects__card-main {
+  overflow: visible;
+}
+/* Multi-select: the old guard below zeroes the CARD's transform, which no
+   longer carries one — the cover needs its own. */
+.recent-projects__row.is-selecting .recent-projects__card:hover .recent-projects__card-thumb {
+  transform: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .recent-projects__row--grid .recent-projects__card-thumb {
+    transition: none;
+  }
+  .recent-projects__row--grid .recent-projects__card:hover:not(.is-menu-open) .recent-projects__card-thumb,
+  .recent-projects__row--grid .recent-projects__card:focus-within:not(.is-menu-open) .recent-projects__card-thumb {
+    transform: none;
+  }
+}
 .recent-projects__card.is-selected {
   /* Selection ring floats 4px outside the card on all sides (outline follows
      the border-radius), instead of hugging the card edge. Hairline light
@@ -237,7 +288,10 @@
   justify-content: center;
   position: relative;
   overflow: hidden;
-  border-radius: var(--radius-medium);
+  /* The thumbnail IS the card's visible surface (the card behind it is
+     transparent), so its corners set the grid's silhouette: 16px per product.
+     Keep it in step with `.recent-projects__card`'s ring above. */
+  border-radius: 16px;
   /* Container for the HTML preview iframe's responsive scale (below): the
    * iframe renders at a fixed desktop design width and is scaled by the
    * card's own width so the page reads as a faithful thumbnail instead of
@@ -367,7 +421,7 @@
 }
 .recent-projects__card-name {
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 600;
   line-height: 1.25;
   color: var(--text);
   overflow: hidden;
@@ -375,21 +429,47 @@
   white-space: nowrap;
 }
 /* Bottom row: owner·time on the left, kind tag (原型/幻灯片…) pushed to the
-   bottom-right corner. */
+   bottom-right corner. The 8px inset (per product) is the card's only
+   horizontal padding — the card box itself is flush with the thumbnail above. */
 .recent-projects__card-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--spacing-8);
   min-width: 0;
+  padding: 0 var(--spacing-8);
+}
+/* List rows carry their own horizontal rhythm from .recent-projects__row--list;
+   the grid's inset would fight it. */
+.recent-projects__row--list .recent-projects__card-footer {
+  padding: 0;
 }
 .recent-projects__card-footer .design-card-tag-row {
   flex: 0 0 auto;
   margin: 0;
 }
+/* One neutral chip for every kind here. The per-kind hues (mention-home.css's
+   `.design-card-tag.tag-*`) read as status on a card footer rather than as a
+   type, so this surface takes a grey fill with black ink and lets the glyph do
+   the identifying. Reaching through .design-card-tag-row for (0,3,0) — the
+   hue rules are (0,2,0) and live in another file, so equal specificity would
+   leave the winner up to load order. */
+.recent-projects__card-footer .design-card-tag-row .design-card-tag {
+  gap: 4px;
+  background: var(--bg-subtle);
+  border-color: transparent;
+  color: var(--text-strong);
+  margin-bottom: 0;
+}
+.design-card-tag__icon {
+  flex: 0 0 auto;
+}
 .recent-projects__card-time {
   font-size: 12px;
-  color: var(--text-muted);
+  /* Secondary metadata stays one step below the 600 project name while the
+     lighter grey keeps the title as the card's primary reading target. */
+  font-weight: 500;
+  color: var(--text-soft);
   display: flex;
   align-items: center;
   gap: 4px;
@@ -463,11 +543,11 @@
   width: 26px;
   height: 26px;
   padding: 0;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border: 0;
+  border-radius: var(--radius-circular, 50%);
   background: var(--bg-panel);
   color: var(--text-muted);
-  box-shadow: var(--shadow-xs);
+  box-shadow: none;
   cursor: pointer;
   opacity: 0;
   transform: translateY(-1px);
@@ -486,7 +566,6 @@
 }
 .recent-projects__card-more:hover,
 .recent-projects__card-more:focus-visible {
-  border-color: var(--border-strong);
   background: var(--bg-panel);
   color: var(--text-strong);
 }
@@ -659,15 +738,20 @@
   align-items: center;
   justify-content: center;
   gap: var(--spacing-6);
-  height: 28px;
-  padding: 0 var(--spacing-12);
+  /* `height: auto` + 12px of vertical padding (per product): built from the
+     same 13px/line-height-1 label as the pills beside it, so they stay locked
+     together if that type ever moves. `auto` is load-bearing — primitives.css's
+     bare `button { height: 36px }` would otherwise pin the box and swallow the
+     padding (that is why this sat at a fixed 28). */
+  height: auto;
+  padding: var(--spacing-12);
   border: var(--stroke-thin) solid var(--border);
   border-radius: var(--radius-pill);
   background: transparent;
   color: var(--text);
   font: inherit;
   font-size: var(--font-size-13);
-  font-weight: 500;
+  font-weight: 600;
   line-height: 1;
   white-space: nowrap;
   cursor: pointer;
@@ -798,8 +882,13 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  /* Icon-only, so it cannot be built from a label's padding like the pills
+     beside it — but it shares their row, and a 28px dot next to two 39px
+     pills reads as ragged. 39 is those pills' resolved height (12 + 13px
+     label + 12 + 2 borders); keep the three in step. Square, so the circular
+     radius stays a circle. */
+  width: 39px;
+  height: 39px;
   padding: 0;
   border: var(--stroke-thin) solid var(--border);
   border-radius: var(--radius-circular);
@@ -921,7 +1010,11 @@
 .recent-projects__heading {
   margin: 0;
   font-family: var(--serif);
-  font-size: 20px;
+  font-size: 24px;
+  /* Own line box: the inherited 17.5px was shorter than the 24px glyphs, which
+     both clipped the CJK descenders and left the head's height (and so the
+     heading's own top) set by the filter buttons beside it. */
+  line-height: 1.2;
   font-weight: 600;
   letter-spacing: -0.01em;
   color: var(--text-strong);
@@ -931,15 +1024,20 @@
   align-items: center;
   justify-content: center;
   gap: var(--spacing-6);
-  height: 28px;
-  padding: 0 var(--spacing-12);
+  /* `height: auto` + 12px of vertical padding (per product): built from the
+     same 13px/line-height-1 label as the pills beside it, so they stay locked
+     together if that type ever moves. `auto` is load-bearing — primitives.css's
+     bare `button { height: 36px }` would otherwise pin the box and swallow the
+     padding (that is why this sat at a fixed 28). */
+  height: auto;
+  padding: var(--spacing-12);
   border: var(--stroke-thin) solid var(--border);
   border-radius: var(--radius-pill);
   background: transparent;
   color: var(--text);
   font: inherit;
   font-size: var(--font-size-13);
-  font-weight: 500;
+  font-weight: 600;
   line-height: 1;
   white-space: nowrap;
   cursor: pointer;
@@ -1086,25 +1184,34 @@
 
 /* Shared badge on the thumbnail + creator avatar in the meta row. Private projects stay unbadged. */
 .recent-projects__card-badge {
-  /* 4px inside the thumb's top-left corner (the thumb is the positioned
-     ancestor), pill-shaped. Hidden at rest — it fades in on card hover so
-     covers stay clean. */
+  /* Mirrors `.recent-projects__card-menu-anchor` exactly — same positioned
+     ancestor (the card), same 8px inset — so the badge sits as far in from the
+     left edge as the ⋯ button does from the right (per product: 这个间距和最
+     右侧的一样). It must NOT hang off the thumb: that box scales 1.03 on
+     hover, which grew the badge and pushed it out to the card's edge at the
+     very moment it faded in. Pill-shaped, hidden at rest — it fades in on card
+     hover so covers stay clean. */
   position: absolute;
-  top: 4px;
-  left: 4px;
-  z-index: 2;
+  top: 8px;
+  left: 8px;
+  z-index: 3;
   opacity: 0;
   pointer-events: none;
   transition: opacity 140ms var(--ease-out);
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  height: 20px;
+  /* Same 26px box the ⋯ button wears, so the two hover affordances read as one
+     pair across the cover's top edge (per product: 高度和右边的一样). */
+  height: 26px;
   padding: 0 8px;
   border-radius: var(--radius-pill);
-  border: var(--stroke-thin) solid color-mix(in srgb, var(--green) 24%, transparent);
-  background: color-mix(in srgb, var(--green) 10%, var(--bg-panel));
-  color: color-mix(in srgb, var(--green) 72%, var(--text-strong));
+  /* A plain white chip, like ⋯ — no stroke, no green wash. The tokens land on
+     the values product asked for in light mode (#fafafa ground, #353535 text)
+     and still invert with the dark theme, which literal hex values would not. */
+  border: 0;
+  background: var(--bg-panel);
+  color: var(--accent);
   font-size: 12px;
   font-weight: 600;
 }

@@ -305,6 +305,9 @@
   cursor: not-allowed;
 }
 
+/* DELIBERATE exception to the app's one scrim (styles/material.css):
+   presentation mode blacks the room out on purpose, same reasoning as the
+   image lightboxes — a light scrim would defeat it. */
 .present-overlay {
   position: fixed;
   top: 0;
@@ -2043,7 +2046,11 @@ button.qf-chip-other:disabled { cursor: default; opacity: 0.6; }
   position: fixed;
   inset: 0;
   z-index: 1700;
-  background: rgba(28, 27, 26, 0.42);
+  /* The app's one scrim material (styles/material.css). This is the SHARED
+     modal scrim — PreviewModal and every ds-* modal mount into it. Read as
+     tokens rather than literals: the literals bypassed the accessibility
+     contract, where `--scrim-backdrop` goes to `none`. */
+  background: var(--scrim-tint);
   -webkit-backdrop-filter: var(--scrim-backdrop);
   backdrop-filter: var(--scrim-backdrop);
   -webkit-app-region: no-drag;

@@ -32,6 +32,18 @@ import {
   invalidateProjectFilesCache,
 } from '../../src/providers/registry';
 
+const homeStrip = vi.hoisted(() => ({ onViewAll: undefined as (() => void) | undefined }));
+vi.mock('../../src/components/RecentProjectsStrip', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/components/RecentProjectsStrip')>();
+  return {
+    ...actual,
+    RecentProjectsStrip: (props: React.ComponentProps<typeof actual.RecentProjectsStrip>) => {
+      if (props.onViewAll) homeStrip.onViewAll = props.onViewAll;
+      return <actual.RecentProjectsStrip {...props} />;
+    },
+  };
+});
+
 const originalFetch = globalThis.fetch;
 const originalResizeObserver = globalThis.ResizeObserver;
 
@@ -210,8 +222,47 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe('EntryShell signed-out recent projects', () => {
+  const localProject = {
+    id: 'local-project', name: 'Local project', skillId: null,
+    designSystemId: null, createdAt: 1, updatedAt: 1,
+  };
+  beforeEach(() => {
+    homeStrip.onViewAll = undefined;
+    globalThis.fetch = vi.fn(async () => jsonResponse({ context: null, projects: [], plugins: [] }));
+  });
+
+  it('keeps Home card actions and the View all callback', async () => {
+    const props = renderAt('/', { projects: [localProject] });
+    const home = screen.getByTestId('entry-view-home');
+    await waitFor(() => expect(home.querySelector('.recent-projects')).not.toBeNull());
+    fireEvent.click(within(home.querySelector('.recent-projects') as HTMLElement).getByRole('button', { name: /more/i }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }));
+    const input = within(screen.getByRole('dialog')).getByRole('textbox');
+    fireEvent.change(input, { target: { value: 'Renamed local project' } });
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'OK' }));
+    expect(props.onRenameProject).toHaveBeenCalledWith('local-project', 'Renamed local project');
+    // The full-grid header currently hides View all; exercise its supplied
+    // callback at the strip boundary without changing that existing layout.
+    expect(homeStrip.onViewAll).toBeTypeOf('function');
+    act(() => homeStrip.onViewAll!());
+    expect(window.location.pathname).toBe('/projects');
+  });
+
+  it('keeps the Community dock to the composer with local projects present', async () => {
+    renderAt('/community', { projects: [localProject] });
+    const dock = await screen.findByTestId('community-composer-dock');
+    expect(within(dock).getByTestId('home-hero-composer-card')).toBeTruthy();
+    expect(dock.querySelector('.recent-projects')).toBeNull();
+  });
+});
+
 describe('EntryShell team project content readiness', () => {
-  it('renders another member\'s catalog name and timestamp on Home instead of the fresh pulled placeholder', async () => {
+  // The grid this reads lives on 全部项目 now: with a cloud identity Home carries
+  // no recent-projects grid any more (#7635 / OPEND-2683 — the rail's 最近项目
+  // section is the entry there), so the catalog-name-over-placeholder rule is
+  // asserted on the team grid surface instead.
+  it('renders another member\'s catalog name and timestamp on 全部项目 instead of the fresh pulled placeholder', async () => {
     const catalogUpdatedAt = Date.now() - (2 * 24 * 60 * 60 * 1000);
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
       const pathname = new URL(String(input), 'http://d.local').pathname;
@@ -236,7 +287,7 @@ describe('EntryShell team project content readiness', () => {
       return jsonResponse({});
     }) as typeof fetch;
 
-    renderAt('/', {
+    renderAt('/all-projects', {
       projects: [{
         id: 'shared-pulled',
         name: '共享项目',

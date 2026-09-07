@@ -1,14 +1,23 @@
 .backdrop {
   position: fixed;
   inset: 0;
-  background: color-mix(in srgb, #202020 42%, transparent);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
+  /* The app's one scrim material (apps/web styles/material.css). Read as
+     tokens, like every other value in this file — this is the base every
+     `<Dialog>` mounts into, so it is where the shared look has to live. */
+  background: var(--scrim-tint);
+  backdrop-filter: var(--scrim-backdrop);
+  -webkit-backdrop-filter: var(--scrim-backdrop);
   -webkit-app-region: no-drag;
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 100;
+  /* Above ALL app chrome — the workspace tabs row (z-index 120) and the
+     floating top-right account/credits cluster (150) — so the scrim covers the
+     whole window: its blur reads as one frosted sheet over everything instead
+     of stopping at the content area's edge, and chrome that is not part of the
+     dialog cannot float over it. 1700 is the app's own `.modal-backdrop`
+     value, and stays under toasts (1800) and the radial layer (1900). */
+  z-index: 1700;
   animation: dialog-backdrop-fade-in var(--duration-fast, 150ms) var(--curve-decelerate-mid, ease-out);
 }
 

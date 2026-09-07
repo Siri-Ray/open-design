@@ -5429,6 +5429,7 @@ function AppInner() {
           }
           onboardingCompleted={config.onboardingCompleted === true}
           identityScopeKey={workspaceTabsIdentityScopeKey}
+          workspaceContext={workspaceContext}
         />
         {/* Avatar + credits keep their home-view spot (the top-right actions
             host inside the tabs chrome) while a project tab is open, even

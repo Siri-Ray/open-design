@@ -517,7 +517,9 @@
 .qs-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(13, 12, 10, 0.32);
+  background: var(--scrim-tint);
+  -webkit-backdrop-filter: var(--scrim-backdrop);
+  backdrop-filter: var(--scrim-backdrop);
   /* Sits in the modal tier so the palette renders above any open context
    * menus or popovers. */
   z-index: 1500;
@@ -1381,7 +1383,9 @@
   display: grid;
   place-items: center;
   padding: 0;
-  background: color-mix(in srgb, var(--overlay-scrim, rgba(0, 0, 0, 0.42)) 72%, transparent);
+  background: var(--scrim-tint);
+  -webkit-backdrop-filter: var(--scrim-backdrop);
+  backdrop-filter: var(--scrim-backdrop);
 }
 
 .memory-action-modal {

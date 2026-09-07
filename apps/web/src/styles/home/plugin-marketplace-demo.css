@@ -667,7 +667,7 @@
   display: grid;
   place-items: center;
   padding: 28px;
-  background: color-mix(in srgb, #000 28%, transparent);
+  background: var(--scrim-tint);
   -webkit-backdrop-filter: var(--scrim-backdrop);
   backdrop-filter: var(--scrim-backdrop);
 }
@@ -1649,27 +1649,14 @@
   display: grid;
   place-items: center;
   padding: 28px;
-  background: color-mix(in srgb, #000 30%, transparent);
+  /* The app's one scrim material (styles/material.css). This REPLACES the
+     earlier "shaped blur, not a flat frost" treatment: that one tinted the
+     scrim #000 at 30% and painted four pastel wash blobs in a ::before, so the
+     backdrop carried both a dark cast and a colour of its own. */
+  background: var(--scrim-tint);
   -webkit-backdrop-filter: var(--scrim-backdrop);
   backdrop-filter: var(--scrim-backdrop);
 }
-/* Shape-blur layer on the scrim itself: soft radial blobs (blurred by
-   construction, the app-wash language) so the backdrop carries its own
-   frosted material instead of relying solely on the content blur beneath.
-   z-index -1 keeps it above the scrim tint but under the preview panel. */
-.community-template-preview::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  pointer-events: none;
-  background:
-    radial-gradient(46% 38% at 16% 8%, var(--wash-blue) 0%, transparent 66%),
-    radial-gradient(40% 34% at 86% 12%, var(--wash-pink) 0%, transparent 64%),
-    radial-gradient(48% 42% at 78% 92%, var(--wash-peach) 0%, transparent 62%),
-    radial-gradient(52% 44% at 12% 96%, var(--wash-mist) 0%, transparent 68%);
-}
-
 .community-template-preview__panel {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
@@ -1808,4 +1795,48 @@
   .plugin-marketplace__row > svg {
     display: none;
   }
+}
+
+/* -------- Docked composer under the community grid -------------------- */
+/* Home's composer, parked at the foot of the community view so a template can
+   be browsed and a prompt written without a trip back to 首页.
+   `sticky`, not `fixed`: fixed would be positioned against the viewport and so
+   would ignore the entry column's gutters — it would slide under the nav rail
+   and stay put while a modal scrolls the page behind it. As the last child of
+   the scroll column, sticky rides the bottom edge while the grid passes under
+   it, and settles naturally under short result sets. */
+.community-composer-dock {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  display: flex;
+  justify-content: center;
+  /* Short tabs used to strand the bar wherever the grid happened to end —
+     原型 › 应用 is six cards, so it floated in the middle of the page while a
+     full tab put it at the foot. `auto` pushes it to the bottom of the column,
+     which `.entry-main__inner` keeps at least one scrollport tall. */
+  margin-top: auto;
+  /* That column ends 48px above its own bottom edge — `.entry-main__inner`'s
+     scroll runout (padding: 24px 24px 48px). Cancelling it makes this
+     wrapper's bottom edge the scrollport's, so the offset below is measured
+     from the same place whether the bar is sitting at the end of a short tab
+     or stuck to the port while a long one scrolls. Keep the two numbers in
+     step if that padding ever moves. */
+  margin-bottom: -48px;
+  /* 16 off the bottom (per product, was 24), and it lives here — under the
+     pill, inside the wrapper — precisely so it is one fixed number and not
+     whatever the current tab's content height leaves over. */
+  padding: 28px 0 16px;
+  /* No fade band (per product: 底下的白色渐变去掉). It used to dissolve the
+     grid rows into the content card's surface as they passed under the bar;
+     the rows now simply run behind it. */
+  background: none;
+  /* The wrapper still spans the full column even with nothing painted on it,
+     so only the bar inside it may take the pointer — otherwise the strip would
+     eat clicks on the cards it covers. */
+  pointer-events: none;
+}
+.community-composer-dock > * {
+  pointer-events: auto;
+  width: 100%;
 }

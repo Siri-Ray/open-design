@@ -3,7 +3,7 @@
   position: fixed;
   inset: 0;
   z-index: 100;
-  background: color-mix(in srgb, #111827 18%, transparent);
+  background: var(--scrim-tint);
   -webkit-backdrop-filter: var(--scrim-backdrop);
   backdrop-filter: var(--scrim-backdrop);
   display: flex;
@@ -1834,7 +1834,9 @@
   display: grid;
   place-items: center;
   padding: 28px;
-  background: color-mix(in srgb, #111827 38%, transparent);
+  background: var(--scrim-tint);
+  -webkit-backdrop-filter: var(--scrim-backdrop);
+  backdrop-filter: var(--scrim-backdrop);
   animation: page-creator-fade 180ms cubic-bezier(0.23, 1, 0.32, 1);
 }
 .page-creator-modal {
@@ -2418,7 +2420,9 @@
   display: grid;
   place-items: center;
   padding: 24px;
-  background: color-mix(in srgb, #111827 46%, transparent);
+  background: var(--scrim-tint);
+  -webkit-backdrop-filter: var(--scrim-backdrop);
+  backdrop-filter: var(--scrim-backdrop);
 }
 .page-template-preview-modal {
   width: min(980px, calc(100vw - 48px));

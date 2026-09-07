@@ -5,8 +5,9 @@
   display: grid;
   place-items: center;
   padding: 24px;
-  background: color-mix(in srgb, #111 28%, transparent);
-  backdrop-filter: blur(2px);
+  background: var(--scrim-tint);
+  -webkit-backdrop-filter: var(--scrim-backdrop);
+  backdrop-filter: var(--scrim-backdrop);
   animation: updateBackdropIn 160ms ease-out;
 }
 

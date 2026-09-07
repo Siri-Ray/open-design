@@ -749,7 +749,9 @@ test('[P1] home left rail expands and collapses from the shell controls', async 
 
   const shell = page.locator('.entry');
   const rail = page.locator('.entry-nav-rail');
-  const expand = page.getByTestId('workspace-home-rail-toggle');
+  // #7635: the toggle lives in the chrome row's search/toggle cluster and
+  // owns both directions; the pinned Home pill is hidden in the entry chrome.
+  const expand = page.getByTestId('entry-rail-collapse');
 
   await expect(shell).not.toHaveClass(/entry--rail-open/);
   await expect(rail).toHaveAttribute('aria-hidden', 'true');
@@ -764,7 +766,7 @@ test('[P1] home left rail expands and collapses from the shell controls', async 
   await expect(page.getByTestId('entry-nav-design-systems')).toBeVisible();
 
   // The rail has no in-rail collapse control (the header is chrome-free);
-  // the pinned Home tab's toggle folds it back.
+  // the same chrome-row toggle folds it back.
   await expect(expand).toHaveAttribute('aria-expanded', 'true');
   await expand.click();
   await expect(shell).not.toHaveClass(/entry--rail-open/);
@@ -1809,7 +1811,7 @@ test('[P1] live dashboard preset sends the active workspace name to plugin apply
   });
 
   await gotoEntryHome(page);
-  await page.getByTestId('workspace-home-rail-toggle').click();
+  await page.getByTestId('entry-rail-collapse').click();
   await expect(page.getByTestId('workspace-switcher')).toContainText('Personal Workspace');
 
   await pickHomeTemplate(page, 'live-artifact');

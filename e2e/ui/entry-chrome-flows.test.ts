@@ -92,12 +92,14 @@ test('[P0] @critical entry chrome exposes the primary home creation surface and 
 
   await gotoEntryHome(page);
   await expect(page.getByTestId('recent-projects-strip')).toHaveCount(0);
-  // The nav rail is collapsed by default — the pinned Home tab in the
-  // workspace tabs bar is the expand toggle (#5517: no entry topbar).
-  await expect(page.getByTestId('workspace-home-rail-toggle')).toBeVisible();
-  await page.getByTestId('workspace-home-rail-toggle').click();
-  await expect(page.locator('.entry-nav-rail')).toBeVisible();
+  // The nav rail is collapsed by default — the rail toggle beside the search
+  // button in the workspace tabs chrome is the expand control (#7635 moved
+  // the pair out of the rail; #5517: no entry topbar). Search is reachable
+  // before the rail opens.
   await expect(page.getByTestId('entry-nav-search')).toBeVisible();
+  await expect(page.getByTestId('entry-rail-collapse')).toBeVisible();
+  await page.getByTestId('entry-rail-collapse').click();
+  await expect(page.locator('.entry-nav-rail')).toBeVisible();
   await expect(page.locator('.entry-brand')).toHaveCount(0);
   await expect(page.getByTestId('home-hero-input')).toBeVisible();
   await expect(page.getByTestId('home-hero-plus-trigger')).toBeVisible();
@@ -434,12 +436,13 @@ test('[P1] entry top navigation matches the current home tab structure', async (
   await gotoEntryHome(page);
   await ensureRailOpen(page);
 
-  // The rail is header-free: no logo, no in-rail collapse control — the
-  // column starts at the search box, and folding lives in the pinned Home
-  // tab's toggle on the workspace tabs bar.
+  // The rail is header-free: no logo, no in-rail search row — the column
+  // starts at the workspace switcher / 首页, and both search and folding live
+  // in the chrome row's cluster beside the tabs (#7635).
   await expect(page.getByTestId('entry-nav-logo')).toHaveCount(0);
   await expect(page.getByTestId('entry-nav-collapse')).toHaveCount(0);
-  await expect(page.getByTestId('entry-nav-search')).toBeVisible();
+  await expect(page.locator('.entry-nav-rail').getByTestId('entry-nav-search')).toHaveCount(0);
+  await expect(page.locator('.workspace-tabs-rail-actions').getByTestId('entry-nav-search')).toBeVisible();
   await expect(page.getByTestId('entry-nav-home')).toHaveAttribute('aria-current', 'page');
   await expect(page.getByTestId('entry-nav-community')).toBeVisible();
   await expect(page.locator('.entry-nav-rail__group').getByTestId('entry-nav-design-systems')).toBeVisible();
@@ -1477,7 +1480,7 @@ test('[P1] rail can be collapsed again on coarse-pointer / non-hover devices', a
   await gotoEntryHome(page);
   await ensureRailOpen(page);
 
-  const toggle = page.getByTestId('workspace-home-rail-toggle');
+  const toggle = page.getByTestId('entry-rail-collapse');
   await expect(toggle).toBeVisible();
   await toggle.click();
   await expect(page.locator('.entry')).not.toHaveClass(/entry--rail-open/);
