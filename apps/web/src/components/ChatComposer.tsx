@@ -3738,6 +3738,13 @@ function workspaceContextKindLabel(kind: WorkspaceContextItem['kind']): string {
   }
 }
 
+/** Human labels may omit the filename; retain image-only staging metadata as a fallback. */
+function attachmentPreviewKind(attachment: ChatAttachment) {
+  return fileTypePreviewKind(attachment.name)
+    ?? fileTypePreviewKind(attachment.path)
+    ?? (attachment.kind === 'image' ? 'image' : null);
+}
+
 function StagedRunContexts({
   designSystemPicker,
   workspaceItems,
@@ -3942,9 +3949,9 @@ function StagedRunContexts({
       ))}
       {attachments.map((a, index) => {
         // Rasters, vectors and videos lead with a thumbnail; every other type
-        // leads with its own mark (per product). `a.kind` cannot decide it —
-        // the daemon only splits image/file, so a video arrives as 'file'.
-        const previewKind = fileTypePreviewKind(a.name || a.path);
+        // leads with its own mark (per product). The daemon's image/file
+        // kind is a fallback: videos arrive as 'file'.
+        const previewKind = attachmentPreviewKind(a);
         const canPreview = previewKind !== null && Boolean(projectId);
         const imageUrl = canPreview
           ? projectRawUrl(projectId!, a.path, workspaceContext)
@@ -4031,7 +4038,7 @@ function StagedRunContexts({
               <Icon name="close" size={14} />
             </button>
           </div>
-          {fileTypePreviewKind(preview.name || preview.path) === 'video' ? (
+          {attachmentPreviewKind(preview) === 'video' ? (
             <video src={previewUrl} controls playsInline />
           ) : (
             <img src={previewUrl} alt={preview.name} />
