@@ -23,7 +23,7 @@ import {
   ProjectHoverPreviewCard,
   useProjectHoverCover,
 } from './entry-nav-rail/ProjectHoverPreview';
-import { useProjectRunStatuses } from '../hooks/useProjectRunStatuses';
+import { acknowledgeProjectCompletion, useProjectRunStatuses } from '../hooks/useProjectRunStatuses';
 import { STATUS_LABEL_KEYS } from '../state/projectRunStatus';
 import {
   HOME_APPLY_TEMPLATE_EVENT,
@@ -1526,6 +1526,9 @@ export function WorkspaceTabsBar({
       activateTab({ ...tab, view: 'home' });
       return;
     }
+    // Opening a project is what spends its ✓ (per product) — the same rule,
+    // in the same shared feed, as the rail's 最近项目 rows (OPEND-2795).
+    if (tab.kind === 'project') acknowledgeProjectCompletion(tab.projectId);
     activateTab(tab);
   }
 
