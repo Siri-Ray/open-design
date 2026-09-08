@@ -55,7 +55,10 @@ import {
   renderPluginBriefTemplate,
   resolvePluginQueryFallback,
 } from '../state/projects';
-import { takeHomeComposerAttachments } from '../state/home-composer-stash';
+import {
+  HOME_COMPOSER_ATTACHMENTS_EVENT,
+  takeHomeComposerAttachments,
+} from '../state/home-composer-stash';
 import { FigmaImportModal } from './FigmaImportModal';
 import { fetchMcpServers } from '../state/mcp';
 import { takeHomeComposerAssetSeed } from '../state/libraryHandoff';
@@ -783,6 +786,20 @@ export function HomeView({
     window.addEventListener(HOME_COMPOSER_SEED_EVENT, onSeed);
     return () => window.removeEventListener(HOME_COMPOSER_SEED_EVENT, onSeed);
   }, [variant]);
+  // The attachment hand-off's second consumer: a failed optimistic create that
+  // lands while this page composer is already mounted (the user pressed Back on
+  // the pending frame mid-create) cannot rely on the mount initializer above,
+  // so take the stash on the event instead. Page variant only, like the draft.
+  useEffect(() => {
+    if (!ownsComposerDraft) return;
+    function onAttachmentsHandedBack() {
+      const files = takeHomeComposerAttachments();
+      if (files.length === 0) return;
+      setStagedFiles((current) => [...current, ...files]);
+    }
+    window.addEventListener(HOME_COMPOSER_ATTACHMENTS_EVENT, onAttachmentsHandedBack);
+    return () => window.removeEventListener(HOME_COMPOSER_ATTACHMENTS_EVENT, onAttachmentsHandedBack);
+  }, [ownsComposerDraft]);
   const [figmaModalOpen, setFigmaModalOpen] = useState(false);
   const examplePromptInfoRef = useRef<ExamplePromptInfo | null>(null);
   const handleExamplePromptStatusChange = useCallback((info: ExamplePromptInfo | null) => {

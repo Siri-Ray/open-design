@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useState } from 'react';
 
 import { AgentIcon } from './AgentIcon';
 import { ChatComposer } from './ChatComposer';
@@ -30,6 +30,24 @@ function attachmentKind(file: File): 'image' | 'file' {
   return file.type.startsWith('image/') ? 'image' : 'file';
 }
 
+/** Object URL for an image chip, or null where unavailable (e.g. jsdom). */
+function createPreviewUrl(file: File): string | null {
+  try {
+    if (typeof URL === 'undefined' || typeof URL.createObjectURL !== 'function') return null;
+    return URL.createObjectURL(file);
+  } catch {
+    return null;
+  }
+}
+
+function revokePreviewUrl(url: string): void {
+  try {
+    URL.revokeObjectURL?.(url);
+  } catch {
+    /* no-op */
+  }
+}
+
 /**
  * Immediate, read-free handoff shown while POST /api/projects is still
  * settling. It deliberately mirrors the first ProjectView frame without
@@ -55,24 +73,21 @@ export function ProjectCreationPendingView({
   const agentName = agentDisplayName(agentId) ?? t('assistant.role');
   const iconId = agentIconId(agentId);
   // Image chips preview the staged file itself; the upload has not happened
-  // yet, so there is no project raw URL to point at.
-  const previewUrls = useMemo(
-    () =>
-      attachments.map((file) =>
-        attachmentKind(file) === 'image' && typeof URL.createObjectURL === 'function'
-          ? URL.createObjectURL(file)
-          : null,
-      ),
-    [attachments],
-  );
-  useEffect(
-    () => () => {
-      for (const url of previewUrls) {
-        if (url && typeof URL.revokeObjectURL === 'function') URL.revokeObjectURL(url);
-      }
-    },
-    [previewUrls],
-  );
+  // yet, so there is no project raw URL to point at. Creation and revocation
+  // are paired inside one `attachments`-keyed effect (the StrictMode-safe
+  // shape from DesignSystemAssetDropzone): the cleanup revokes exactly the
+  // URLs its own setup created, so StrictMode's simulated unmount cannot leave
+  // a memoized list of dead blob: links for the remount to hand to <img>.
+  const [previewUrls, setPreviewUrls] = useState<ReadonlyArray<string | null>>([]);
+  useEffect(() => {
+    const next = attachments.map((file) =>
+      attachmentKind(file) === 'image' ? createPreviewUrl(file) : null,
+    );
+    setPreviewUrls(next);
+    return () => {
+      for (const url of next) if (url) revokePreviewUrl(url);
+    };
+  }, [attachments]);
 
   // The `.app` shell belongs to App.tsx, which wraps this view and ProjectView
   // in the same element so React reconciles one `div.app` across the hand-off
@@ -111,7 +126,7 @@ export function ProjectCreationPendingView({
                       >
                         {attachments.map((file, index) => {
                           const kind = attachmentKind(file);
-                          const previewUrl = previewUrls[index];
+                          const previewUrl = previewUrls[index] ?? null;
                           return (
                             <button
                               type="button"

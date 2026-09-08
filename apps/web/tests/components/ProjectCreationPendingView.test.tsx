@@ -7,20 +7,31 @@
 // request while the project does not exist yet.
 
 import { cleanup, render, screen } from '@testing-library/react';
+import { StrictMode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ProjectCreationPendingView } from '../../src/components/ProjectCreationPendingView';
 import { I18nProvider } from '../../src/i18n';
 
 let fetchMock: ReturnType<typeof vi.fn>;
+let createdUrls: string[];
+let revokedUrls: string[];
 
 beforeEach(() => {
   fetchMock = vi.fn(async () =>
     new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }));
   vi.stubGlobal('fetch', fetchMock);
+  createdUrls = [];
+  revokedUrls = [];
   Object.assign(URL, {
-    createObjectURL: vi.fn(() => 'blob:preview'),
-    revokeObjectURL: vi.fn(),
+    createObjectURL: vi.fn(() => {
+      const url = `blob:preview-${createdUrls.length + 1}`;
+      createdUrls.push(url);
+      return url;
+    }),
+    revokeObjectURL: vi.fn((url: string) => {
+      revokedUrls.push(url);
+    }),
   });
 });
 
@@ -63,9 +74,34 @@ describe('ProjectCreationPendingView', () => {
     const chips = screen.getByTestId('pending-user-attachments').querySelectorAll('.user-attachment');
     expect(Array.from(chips).map((chip) => chip.textContent)).toEqual(['1brief.txt', '2mood.png']);
     expect(chips[1]!.className).toContain('staged-image');
-    expect(chips[1]!.querySelector('img')?.getAttribute('src')).toBe('blob:preview');
+    expect(chips[1]!.querySelector('img')?.getAttribute('src')).toBe('blob:preview-1');
     // The chips are labels, not openable files: nothing has been uploaded.
     expect(Array.from(chips).every((chip) => (chip as HTMLButtonElement).disabled)).toBe(true);
+  });
+
+  it('keeps image previews alive through a StrictMode double mount', () => {
+    // apps/web runs with reactStrictMode: the simulated unmount fires the
+    // preview cleanup, and the remount must mint fresh URLs rather than reuse
+    // revoked ones (the useMemo + separate-cleanup split did exactly that).
+    render(
+      <StrictMode>
+        <I18nProvider initial="en">
+          <ProjectCreationPendingView
+            projectName="Coffee shop landing page"
+            prompt="Make a landing page"
+            attachments={[new File(['png'], 'mood.png', { type: 'image/png' })]}
+            onBack={() => undefined}
+          />
+        </I18nProvider>
+      </StrictMode>,
+    );
+
+    const src = screen.getByTestId('pending-user-attachments').querySelector('img')?.getAttribute('src');
+    expect(src).toBeTruthy();
+    expect(createdUrls).toContain(src);
+    expect(revokedUrls).not.toContain(src);
+    // Whatever the simulated unmount revoked was one of ours, never the live one.
+    expect(revokedUrls.every((url) => createdUrls.includes(url))).toBe(true);
   });
 
   it('renders the real composer as an inert, non-sendable shell', () => {

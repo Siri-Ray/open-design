@@ -6,7 +6,7 @@
 // must pick them up so the retry sends the same payload.
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, render, screen } from '@testing-library/react';
 
 vi.mock('../../src/components/home-hero/PlaceholderCarousel', () => ({
   PlaceholderCarousel: () => null,
@@ -79,6 +79,23 @@ describe('home composer attachment stash', () => {
     expect(takeHomeComposerAttachments()).toEqual([]);
   });
 
+  it('takes attachments handed back while it is already mounted', async () => {
+    // The user pressed Back on the pending frame mid-create, so Home is on
+    // screen when the create later fails: no remount, no initializer. The
+    // hand-off has to reach the live instance through the event.
+    renderHome();
+    await screen.findByTestId('home-hero-input');
+    expect(screen.queryByTestId('home-hero-staged-files')).toBeNull();
+
+    act(() => {
+      stashHomeComposerAttachments([new File(['brief'], 'brief.txt', { type: 'text/plain' })]);
+    });
+
+    const band = await screen.findByTestId('home-hero-staged-files');
+    expect(band.textContent).toContain('brief.txt');
+    expect(takeHomeComposerAttachments()).toEqual([]);
+  });
+
   it('leaves the stash alone when nothing was handed back', async () => {
     renderHome();
 
@@ -93,6 +110,13 @@ describe('home composer attachment stash', () => {
     renderHome('dock');
 
     await screen.findByTestId('home-hero-input');
+    expect(screen.queryByTestId('home-hero-staged-files')).toBeNull();
+    expect(takeHomeComposerAttachments()).toEqual([file]);
+
+    // Nor while mounted: the event is addressed to the page composer only.
+    act(() => {
+      stashHomeComposerAttachments([file]);
+    });
     expect(screen.queryByTestId('home-hero-staged-files')).toBeNull();
     expect(takeHomeComposerAttachments()).toEqual([file]);
   });

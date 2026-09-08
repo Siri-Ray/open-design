@@ -47,7 +47,10 @@ import {
   patchProject,
   ProjectCreateError,
 } from '../../src/state/projects';
-import { takeHomeComposerAttachments } from '../../src/state/home-composer-stash';
+import {
+  HOME_COMPOSER_ATTACHMENTS_EVENT,
+  takeHomeComposerAttachments,
+} from '../../src/state/home-composer-stash';
 import {
   WORKSPACE_CONTEXT_REFRESH_EVENT,
   notifyWorkspaceContextRefresh,
@@ -1347,6 +1350,50 @@ describe('App project creation routing', () => {
     // Home remounts on the way back; the staged File objects ride the stash
     // so the retry can resend the same payload.
     expect(takeHomeComposerAttachments().map((file) => file.name)).toEqual(['brief.txt']);
+  });
+
+  it('hands attachments to an already-mounted Home when the user backed out before the create failed', async () => {
+    mockedListProjects.mockResolvedValue([]);
+    const creation = deferred<{
+      project: Project;
+      conversationId: string;
+    }>();
+    mockedCreateProject.mockImplementation(() => creation.promise);
+    // Stands in for the mounted page HomeView (EntryView is mocked here): the
+    // real listener in HomeView.attachment-stash.test.tsx takes the slot on
+    // this event and appends the files to its staged band.
+    const handedBack: string[] = [];
+    const onHandedBack = () => {
+      handedBack.push(...takeHomeComposerAttachments().map((file) => file.name));
+    };
+    window.addEventListener(HOME_COMPOSER_ATTACHMENTS_EVENT, onHandedBack);
+    try {
+      render(<App />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Create prompted project' }));
+      await screen.findByTestId('project-creation-pending-view');
+
+      // Back during the in-flight create: Home is on screen before the 504.
+      fireEvent.click(screen.getByRole('button', { name: 'Back to projects' }));
+      await screen.findByTestId('entry-home-surface');
+      expect(handedBack).toEqual([]);
+
+      creation.reject(new ProjectCreateError(
+        'Project preparation timed out while loading plugin resources. Please try again.',
+        504,
+        'PROJECT_CREATE_PREPARATION_TIMEOUT',
+        true,
+        null,
+      ));
+
+      await waitFor(() => expect(handedBack).toEqual(['brief.txt']));
+      expect(window.location.pathname).toBe('/');
+      expect(screen.getByRole('alert').textContent)
+        .toContain('Project setup timed out before it could start. Try sending again.');
+      // Consumed by the mounted composer, so nothing is left for a later mount.
+      expect(takeHomeComposerAttachments()).toEqual([]);
+    } finally {
+      window.removeEventListener(HOME_COMPOSER_ATTACHMENTS_EVENT, onHandedBack);
+    }
   });
 
   it('releases a persisted project when attachment setup fails after creation', async () => {
