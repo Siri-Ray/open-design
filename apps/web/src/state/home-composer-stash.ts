@@ -8,14 +8,18 @@
  * stashes them here while rolling back to Home. Two consumers exist because
  * Home may or may not be mounted at that moment:
  *
- * - a `HomeView` that mounts afterwards takes the slot in its state
- *   initializer (the stay-on-pending-until-failure path);
+ * - a `HomeView` that mounts afterwards seeds its staged band from the
+ *   snapshot (the stay-on-pending-until-failure path);
  * - a `HomeView` that is already mounted — the user pressed Back on the
  *   pending frame while the create was still in flight — hears
- *   `HOME_COMPOSER_ATTACHMENTS_EVENT` and takes the slot right away.
+ *   `HOME_COMPOSER_ATTACHMENTS_EVENT` and appends the snapshot right away.
  *
- * The slot holds one hand-off at a time and is emptied on read, so whichever
- * consumer runs first wins and the other sees nothing.
+ * Reading is side-effect free (`peek`): React StrictMode double-invokes state
+ * initializers, so a consume-on-read slot would hand the files to the
+ * discarded call and leave the kept one empty. The consumer clears the slot
+ * explicitly once the files are in state, and App clears it when a create
+ * succeeds or a new optimistic create starts, so a later Home visit never
+ * revives attachments that already belong to a project.
  */
 export const HOME_COMPOSER_ATTACHMENTS_EVENT = 'open-design:home-composer:attachments';
 
@@ -28,8 +32,11 @@ export function stashHomeComposerAttachments(files: readonly File[]): void {
   }
 }
 
-export function takeHomeComposerAttachments(): File[] {
-  const files = stashedAttachments ?? [];
+/** The current snapshot; never mutates the slot. */
+export function peekHomeComposerAttachments(): File[] {
+  return stashedAttachments ? [...stashedAttachments] : [];
+}
+
+export function clearHomeComposerAttachments(): void {
   stashedAttachments = null;
-  return files;
 }

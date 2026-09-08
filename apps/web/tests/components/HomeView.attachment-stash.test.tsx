@@ -7,6 +7,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render, screen } from '@testing-library/react';
+import { StrictMode } from 'react';
 
 vi.mock('../../src/components/home-hero/PlaceholderCarousel', () => ({
   PlaceholderCarousel: () => null,
@@ -27,8 +28,9 @@ vi.mock('../../src/collab/useWorkspaceContext', async (importOriginal) => {
 import { HomeView } from '../../src/components/HomeView';
 import { I18nProvider } from '../../src/i18n';
 import {
+  clearHomeComposerAttachments,
+  peekHomeComposerAttachments,
   stashHomeComposerAttachments,
-  takeHomeComposerAttachments,
 } from '../../src/state/home-composer-stash';
 import { writeHomeGuideStage } from '../../src/components/home-hero/firstRunGuide';
 
@@ -36,7 +38,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   cleanup();
   window.localStorage.clear();
-  takeHomeComposerAttachments();
+  clearHomeComposerAttachments();
 });
 
 function stubPluginsFetch() {
@@ -51,10 +53,10 @@ function stubPluginsFetch() {
   }));
 }
 
-function renderHome(variant: 'page' | 'dock' = 'page') {
+function renderHome(variant: 'page' | 'dock' = 'page', strict = false) {
   writeHomeGuideStage('done');
   stubPluginsFetch();
-  return render(
+  const tree = (
     <I18nProvider initial="en">
       <HomeView
         projects={[]}
@@ -63,8 +65,9 @@ function renderHome(variant: 'page' | 'dock' = 'page') {
         onOpenProject={() => undefined}
         onViewAllProjects={() => undefined}
       />
-    </I18nProvider>,
+    </I18nProvider>
   );
+  return render(strict ? <StrictMode>{tree}</StrictMode> : tree);
 }
 
 describe('home composer attachment stash', () => {
@@ -76,7 +79,22 @@ describe('home composer attachment stash', () => {
     const band = await screen.findByTestId('home-hero-staged-files');
     expect(band.textContent).toContain('brief.txt');
     // The stash is a one-shot hand-off: nothing is left for a later mount.
-    expect(takeHomeComposerAttachments()).toEqual([]);
+    expect(peekHomeComposerAttachments()).toEqual([]);
+  });
+
+  it('keeps the restored attachments through a StrictMode double mount', async () => {
+    // apps/web runs with reactStrictMode: the state initializer runs twice and
+    // effects mount twice. A consume-on-read slot handed the files to the
+    // discarded initializer call, leaving the kept state empty (this is the
+    // stay-on-pending-until-timeout path, where Home mounts fresh).
+    stashHomeComposerAttachments([new File(['brief'], 'brief.txt', { type: 'text/plain' })]);
+
+    renderHome('page', true);
+
+    const band = await screen.findByTestId('home-hero-staged-files');
+    expect(band.textContent).toContain('brief.txt');
+    expect(band.querySelectorAll('.home-hero__active-label').length).toBe(1);
+    expect(peekHomeComposerAttachments()).toEqual([]);
   });
 
   it('takes attachments handed back while it is already mounted', async () => {
@@ -93,7 +111,7 @@ describe('home composer attachment stash', () => {
 
     const band = await screen.findByTestId('home-hero-staged-files');
     expect(band.textContent).toContain('brief.txt');
-    expect(takeHomeComposerAttachments()).toEqual([]);
+    expect(peekHomeComposerAttachments()).toEqual([]);
   });
 
   it('leaves the stash alone when nothing was handed back', async () => {
@@ -111,13 +129,13 @@ describe('home composer attachment stash', () => {
 
     await screen.findByTestId('home-hero-input');
     expect(screen.queryByTestId('home-hero-staged-files')).toBeNull();
-    expect(takeHomeComposerAttachments()).toEqual([file]);
+    expect(peekHomeComposerAttachments()).toEqual([file]);
 
     // Nor while mounted: the event is addressed to the page composer only.
     act(() => {
       stashHomeComposerAttachments([file]);
     });
     expect(screen.queryByTestId('home-hero-staged-files')).toBeNull();
-    expect(takeHomeComposerAttachments()).toEqual([file]);
+    expect(peekHomeComposerAttachments()).toEqual([file]);
   });
 });

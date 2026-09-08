@@ -49,7 +49,8 @@ import {
 } from '../../src/state/projects';
 import {
   HOME_COMPOSER_ATTACHMENTS_EVENT,
-  takeHomeComposerAttachments,
+  clearHomeComposerAttachments,
+  peekHomeComposerAttachments,
 } from '../../src/state/home-composer-stash';
 import {
   WORKSPACE_CONTEXT_REFRESH_EVENT,
@@ -1349,7 +1350,8 @@ describe('App project creation routing', () => {
       .toContain('Project setup timed out before it could start. Try sending again.');
     // Home remounts on the way back; the staged File objects ride the stash
     // so the retry can resend the same payload.
-    expect(takeHomeComposerAttachments().map((file) => file.name)).toEqual(['brief.txt']);
+    expect(peekHomeComposerAttachments().map((file) => file.name)).toEqual(['brief.txt']);
+    clearHomeComposerAttachments();
   });
 
   it('hands attachments to an already-mounted Home when the user backed out before the create failed', async () => {
@@ -1364,7 +1366,8 @@ describe('App project creation routing', () => {
     // this event and appends the files to its staged band.
     const handedBack: string[] = [];
     const onHandedBack = () => {
-      handedBack.push(...takeHomeComposerAttachments().map((file) => file.name));
+      handedBack.push(...peekHomeComposerAttachments().map((file) => file.name));
+      clearHomeComposerAttachments();
     };
     window.addEventListener(HOME_COMPOSER_ATTACHMENTS_EVENT, onHandedBack);
     try {
@@ -1390,7 +1393,7 @@ describe('App project creation routing', () => {
       expect(screen.getByRole('alert').textContent)
         .toContain('Project setup timed out before it could start. Try sending again.');
       // Consumed by the mounted composer, so nothing is left for a later mount.
-      expect(takeHomeComposerAttachments()).toEqual([]);
+      expect(peekHomeComposerAttachments()).toEqual([]);
     } finally {
       window.removeEventListener(HOME_COMPOSER_ATTACHMENTS_EVENT, onHandedBack);
     }

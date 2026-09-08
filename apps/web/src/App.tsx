@@ -88,6 +88,7 @@ import {
 } from './components/SettingsDialog';
 import { PrivacyConsentModal } from './components/PrivacyConsentModal';
 import {
+  clearHomeComposerAttachments,
   stashHomeComposerAttachments,
 } from './state/home-composer-stash';
 import {
@@ -2984,6 +2985,9 @@ function AppInner() {
               : {}),
           };
           rememberLocalProject(optimisticProjectId);
+          // A previous rollback's snapshot must not outlive the retry that
+          // carries the same files; the new attempt owns them from here.
+          clearHomeComposerAttachments();
           flushSync(() => {
             setPendingProjectCreation({
               projectId: optimisticProjectId!,
@@ -3103,6 +3107,9 @@ function AppInner() {
           }
         : result.project;
       if (optimisticProjectId) {
+        // The files now belong to this project (uploaded below); a later Home
+        // visit must not revive them into the composer.
+        clearHomeComposerAttachments();
         rememberLocalProject(project.id);
         flushSync(() => {
           setProjects((curr) => [

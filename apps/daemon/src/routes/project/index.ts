@@ -4153,10 +4153,14 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
         // `/api/plugins/:id/apply-local` uses, then read the example's bytes
         // from the record's own path. The request body contributes an identity
         // claim only; it never contributes content.
-        const resolvedExample = await ctx.pluginScope?.getLocalPluginBySource?.(
-          examplePluginId,
-          exampleSource,
-        ) ?? null;
+        const resolvedExample = await awaitProjectCreatePreparation(
+          ctx.pluginScope?.getLocalPluginBySource?.(
+            examplePluginId,
+            exampleSource,
+          ) ?? Promise.resolve(null),
+          projectCreatePreparationDeadline,
+          'resolving the selected example',
+        );
         const resolvedExampleRecord = resolvedExample as
           { id?: unknown; source?: unknown; fsPath?: unknown } | null;
         if (
@@ -4172,8 +4176,10 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
           exampleBinding = createProjectExampleBinding({
             pluginId: examplePluginId,
             pluginSource: exampleSource,
-            manifestSourceDigest: await digestExampleSkillManifest(
-              resolvedExampleRecord.fsPath,
+            manifestSourceDigest: await awaitProjectCreatePreparation(
+              digestExampleSkillManifest(resolvedExampleRecord.fsPath),
+              projectCreatePreparationDeadline,
+              'reading the selected example',
             ),
             boundAt: now,
           });

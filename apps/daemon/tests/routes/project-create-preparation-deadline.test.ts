@@ -36,6 +36,7 @@ function buildDeps(input: {
   projectCreatePreparationTimeoutMs: number;
   designSystemDelayMs?: number;
   skillDelayMs?: number;
+  getLocalPluginBySource?: ReturnType<typeof vi.fn>;
 }) {
   return {
     projectCreatePreparationTimeoutMs: input.projectCreatePreparationTimeoutMs,
@@ -110,6 +111,9 @@ function buildDeps(input: {
         scenarios: [],
       })),
       getPlugin: vi.fn(async () => ({})),
+      ...(input.getLocalPluginBySource
+        ? { getLocalPluginBySource: input.getLocalPluginBySource }
+        : {}),
     },
   } as unknown as Parameters<typeof registerProjectRoutes>[1];
 }
@@ -126,11 +130,12 @@ async function start(deps: Parameters<typeof registerProjectRoutes>[1]) {
   return `http://127.0.0.1:${address.port}`;
 }
 
-async function post(baseUrl: string) {
+async function post(baseUrl: string, overrides: Record<string, unknown> = {}) {
   return fetch(`${baseUrl}/api/projects`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
+      ...overrides,
       id: 'deadline-project',
       name: 'Deadline project',
       skillId: null,
@@ -190,6 +195,35 @@ describe('POST /api/projects preparation deadline', () => {
       },
     });
     expect(insertProject).not.toHaveBeenCalled();
+  });
+
+  it('bounds the example-card lookup that runs after the catalogue validations', async () => {
+    const insertProject = vi.fn();
+    const insertConversation = vi.fn();
+    // Home Send takes this path when an official example card was picked under
+    // an automatic OD Next route; the lookup must not escape the deadline.
+    const getLocalPluginBySource = vi.fn(() => new Promise<never>(() => undefined));
+    const baseUrl = await start(buildDeps({
+      insertProject,
+      insertConversation,
+      projectCreatePreparationTimeoutMs: 60,
+      getLocalPluginBySource,
+    }));
+
+    const response = await post(baseUrl, {
+      exampleReference: { pluginId: 'example-web-prototype', source: '/tmp/example-web-prototype' },
+    });
+    expect(response.status).toBe(504);
+    expect(await response.json()).toMatchObject({
+      error: {
+        code: 'PROJECT_CREATE_PREPARATION_TIMEOUT',
+        retryable: true,
+        details: { stage: 'resolving the selected example' },
+      },
+    });
+    expect(getLocalPluginBySource).toHaveBeenCalledTimes(1);
+    expect(insertProject).not.toHaveBeenCalled();
+    expect(insertConversation).not.toHaveBeenCalled();
   });
 
   it('still creates the project when preparation finishes inside the deadline', async () => {
