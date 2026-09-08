@@ -2078,20 +2078,55 @@ export function WorkspaceTabsBar({
             </div>
           );
         })}
-        {/* Search + the rail toggle, moved out of the rail and up into the
+        {/* The rail toggle + search, moved out of the rail and up into the
             chrome row (per product: 搜索和收起跟 home icon 一起放在顶部). They
             are this row's only controls now — the pinned Home pill is hidden
             here by CSS (routines.css), so the toggle owns BOTH directions: it
             stays rendered while the rail is collapsed, where the pill used to
-            be the expand control. Only the undocked (entry) chrome shows them,
-            and only on routes that actually mount EntryShell — in chat the
-            strip lives in the column dock and there is no entry rail to
-            toggle, and full-page settings replaces the rail outright
-            (settingsPageChrome). Both targets live in EntryShell's tree, so the
-            clicks travel as window events (see entryRailBridge). The classes
-            are the rail's own, so the controls keep their look. */}
+            be the expand control. The toggle takes the FIRST slot after the
+            traffic-light space (OPEND-2685: the sidebar switch sits where a
+            macOS sidebar switch is expected, right beside the window
+            controls, and stays put across open/collapsed so the expand entry
+            is the same target as the collapse one); the search follows it.
+            Only the undocked (entry) chrome shows them, and only on routes
+            that actually mount EntryShell — in chat the strip lives in the
+            column dock and there is no entry rail to toggle, and full-page
+            settings replaces the rail outright (settingsPageChrome). Both
+            targets live in EntryShell's tree, so the clicks travel as window
+            events (see entryRailBridge). The classes are the rail's own, so
+            the controls keep their look. */}
         {!tabsDockEl && !settingsPageChrome ? (
           <div className="entry-nav-rail__search-row workspace-tabs-rail-actions">
+            <button
+              type="button"
+              className="entry-nav-rail__collapse od-tooltip"
+              aria-label={entryRailOpen ? t('entry.navCollapse') : t('entry.navExpand')}
+              aria-expanded={entryRailOpen}
+              aria-keyshortcuts={isMacPlatform() ? 'Meta+B' : 'Control+B'}
+              title={entryRailOpen ? collapseHint : expandHint}
+              data-tooltip={entryRailOpen ? collapseHint : expandHint}
+              data-tooltip-placement="bottom"
+              data-testid="entry-rail-collapse"
+              onClick={() => {
+                window.dispatchEvent(new CustomEvent(ENTRY_RAIL_TOGGLE_EVENT));
+              }}
+            >
+              {/* The bar sits on the side the rail is on while it is open, and
+                  flips out of the frame once it is collapsed. Both glyphs stay
+                  mounted, stacked, so the swap cross-fades (CSS keys it off
+                  `is-current`) instead of popping — an unmount would skip the
+                  exit transition. */}
+              <Icon
+                name="layout-left"
+                size={16}
+                className={`entry-nav-rail__collapse-glyph${entryRailOpen ? ' is-current' : ''}`}
+              />
+              <Icon
+                name="layout-right"
+                size={16}
+                className={`entry-nav-rail__collapse-glyph${entryRailOpen ? '' : ' is-current'}`}
+              />
+            </button>
             <button
               type="button"
               className="entry-nav-rail__search od-tooltip"
@@ -2121,24 +2156,6 @@ export function WorkspaceTabsBar({
               }}
             >
               <Icon name="search" size={16} />
-            </button>
-            <button
-              type="button"
-              className="entry-nav-rail__collapse od-tooltip"
-              aria-label={entryRailOpen ? t('entry.navCollapse') : t('entry.navExpand')}
-              aria-expanded={entryRailOpen}
-              aria-keyshortcuts={isMacPlatform() ? 'Meta+B' : 'Control+B'}
-              title={entryRailOpen ? collapseHint : expandHint}
-              data-tooltip={entryRailOpen ? collapseHint : expandHint}
-              data-tooltip-placement="bottom"
-              data-testid="entry-rail-collapse"
-              onClick={() => {
-                window.dispatchEvent(new CustomEvent(ENTRY_RAIL_TOGGLE_EVENT));
-              }}
-            >
-              {/* The bar sits on the side the rail is on while it is open, and
-                  flips out of the frame once it is collapsed. */}
-              <Icon name={entryRailOpen ? 'layout-left' : 'layout-right'} size={16} />
             </button>
           </div>
         ) : null}
