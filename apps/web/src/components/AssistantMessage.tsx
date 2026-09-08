@@ -834,26 +834,35 @@ function AssistantMessageImpl({
   // path), the turn is mid-handshake, not settled. Suppressed direction forms
   // render as a locked pill the user cannot answer, so they don't hold the
   // card back.
-  const hasPendingQuestionForm = useMemo(() => {
-    if (hasUnterminatedQuestionForm(message.content)) return true;
-    return splitOnQuestionForms(message.content).some(
-      (seg) =>
-        seg.kind === "form" &&
-        !(suppressDirectionForms && isDirectionForm(seg.form)) &&
-        (!nextUserContent || !parseSubmittedAnswers(seg.form, nextUserContent)),
-    );
-  }, [message.content, nextUserContent, suppressDirectionForms]);
+  // A parsed, answerable form the immediate reply has not settled. This is
+  // the half the user can act on; an unterminated form (below) is not.
+  const hasUnansweredQuestionForm = useMemo(
+    () =>
+      splitOnQuestionForms(message.content).some(
+        (seg) =>
+          seg.kind === "form" &&
+          !(suppressDirectionForms && isDirectionForm(seg.form)) &&
+          (!nextUserContent || !parseSubmittedAnswers(seg.form, nextUserContent)),
+      ),
+    [message.content, nextUserContent, suppressDirectionForms],
+  );
+  const hasPendingQuestionForm =
+    hasUnterminatedQuestionForm(message.content) || hasUnansweredQuestionForm;
   // The run title while that handshake is open (OPEND-2744): a turn that ended
   // on a form the user has not answered is not "Done" from their side, it is
   // waiting on them. Only the LAST assistant turn can be waiting — an older
   // form renders locked (see FormBlock's `interactive`), and the reply that
   // superseded it is what settled it. Failures and cancellations keep their
   // own wording; the moment the immediate user reply submits or skips the
-  // form, `hasPendingQuestionForm` drops and the title reads Done again.
+  // form, `hasUnansweredQuestionForm` drops and the title reads Done again.
+  // Deliberately NOT `hasPendingQuestionForm`: a form the run never closed
+  // (output limit hit mid-form) renders no form and no skip once the run is
+  // terminal, so there is nothing for the user to reply to and the label
+  // would be stuck forever.
   const awaitingReply =
     !!isLast &&
     !streaming &&
-    hasPendingQuestionForm &&
+    hasUnansweredQuestionForm &&
     message.runStatus !== "canceled" &&
     message.runStatus !== "failed";
   // "Next step" is a delivery affordance, not a generic terminal-state card.

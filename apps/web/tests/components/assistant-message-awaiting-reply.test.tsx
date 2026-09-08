@@ -112,6 +112,26 @@ describe('AssistantMessage run title while a question form waits (OPEND-2744)', 
     expect(footerLabel(container)).toBe('Done');
   });
 
+  it('does not wait on a form the run never closed (output limit hit mid-form)', () => {
+    // An unterminated <question-form> renders neither a form nor a skip once
+    // the run is terminal, so "Awaiting your reply" would point at nothing
+    // and never clear. The label falls back to Done.
+    const truncated = FORM.slice(0, FORM.indexOf('</question-form>') - 20);
+    const message = { ...formMessage(), content: truncated, events: [{ kind: 'text', text: truncated }] } as ChatMessage;
+    const { container } = render(
+      <AssistantMessage
+        message={message}
+        streaming={false}
+        projectId="project-1"
+        conversationId="conv-1"
+        isLast
+        onSubmitQuestionForm={() => undefined}
+      />,
+    );
+    expect(footerLabel(container)).toBe('Done');
+    expect(screen.queryByText('Awaiting your reply')).toBeNull();
+  });
+
   it('carries the same wording on the task activity card when tools ran before the form', () => {
     render(
       <AssistantMessage
