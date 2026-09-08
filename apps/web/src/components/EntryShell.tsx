@@ -1211,13 +1211,6 @@ export function EntryShell({
   const [homePromptHandoff, setHomePromptHandoff] = useState<HomePromptHandoff | null>(
     () => takeHomePromptHandoff(),
   );
-  // The same one-shot binding, addressed at the community view's docked
-  // composer instead. Kept separate rather than shared: `promptHandoff` is
-  // consumed by id, so one piece of state fed to both instances would have
-  // whichever consumed it first mark it spent for the other.
-  const [dockPromptHandoff, setDockPromptHandoff] = useState<HomePromptHandoff | null>(
-    null,
-  );
   const entryMainScrollRef = useRef<HTMLElement | null>(null);
   // Entry views share this element, so route changes must not inherit the previous view's offset.
   useLayoutEffect(() => {
@@ -1822,8 +1815,11 @@ export function EntryShell({
                 onDeleteProject={onDeleteProject}
                 onDuplicateProject={onDuplicateProject}
                 onRenameProject={onRenameProject}
-                /* Home alone consumes the page handoff. A docked instance
-                   (community) has its own — see `dockPromptHandoff`. */
+                /* Home is the one composer in the shell and consumes the page
+                   handoff. The community view used to dock a second HomeView
+                   (`variant="dock"`) with a handoff of its own; that mount
+                   was taken out (OPEND-2793) until phase three gives it a
+                   template-bound shape. */
                 promptHandoff={homePromptHandoff}
                 executionSwitcher={view === 'home' ? homeExecutionSwitcher : undefined}
               />
@@ -1984,19 +1980,20 @@ export function EntryShell({
                   })();
                 }}
                 onUsePrompt={(target) => {
-                  // Stays put (per product): the prompt lands in the docked
-                  // composer at the foot of THIS page and unfolds it, instead
-                  // of throwing the user back to 首页 and making them find
-                  // their place in the gallery again. Same seed + binding pair
-                  // Home used, only addressed at the dock.
-                  // (App.tsx's standalone /community route has no dock and
-                  // still hands off to Home — see the branch there.)
-                  seedHomeComposerPrompt(target.prompt, 'dock');
-                  setDockPromptHandoff(createPluginUseHandoff(Date.now(), target.templateId, {
+                  // Hands off to Home (OPEND-2793, product decision B): the
+                  // community view no longer docks a composer at its foot —
+                  // that bar had no relation to the gallery, the filters or
+                  // the card under it, and phase three will bring it back in
+                  // a template-bound shape. Same seed + binding pair the
+                  // standalone /community route in App.tsx uses, so Use
+                  // lands the prompt AND the plugin driver in Home's composer.
+                  seedHomeComposerPrompt(target.prompt);
+                  setHomePromptHandoff(createPluginUseHandoff(Date.now(), target.templateId, {
                     action: 'use',
                     chipId: target.chipId,
                     projectKind: target.projectKind,
                   }));
+                  changeView('home');
                 }}
                 // The gallery card's full details modal routes Use through the
                 // same Home hand-off the plugin library uses, so the plugin
@@ -2009,31 +2006,6 @@ export function EntryShell({
                   });
                 }}
               />
-            ) : null}
-            {/* Home's composer, docked to the bottom of the community view: you
-                can browse templates and still start from your own sentence
-                without going back to 首页. Collapsed it is the input line and
-                the send button; typing unfolds the rest (HomeHero's `dock`
-                variant owns both states). Mounted only while the view is up so
-                it does not hold a second composer's worth of pickers alive
-                behind every other destination. */}
-            {view === 'community' ? (
-              <div
-                className="community-composer-dock"
-                data-testid="community-composer-dock"
-              >
-                <HomeView
-                  {...homeViewProps}
-                  variant="dock"
-                  isActive
-                  /* The agent/model chip too, so the docked row is the same
-                     control set as Home's. Only ever one of the two instances
-                     renders it — each is gated on a different view — so the
-                     switcher is never mounted twice. */
-                  executionSwitcher={homeExecutionSwitcher}
-                  promptHandoff={dockPromptHandoff}
-                />
-              </div>
             ) : null}
             {/* Team destinations — the entry shell owns the nav frame only; each
                 view is provided by another lane (B = members/board, D = team

@@ -55,6 +55,8 @@ export function TemplatePicker({
     <div
       className="home-hero__footer-option home-hero__footer-option--select home-hero__template-option has-selection"
       data-field-name="template"
+      // The stylesheet keys the lead types' hue (原型 / 幻灯片 / 文档) on this.
+      data-chip={active.id}
       data-testid="home-hero-template-picker"
     >
       {/* Not a button any more — there is nothing to open; the clear inside it

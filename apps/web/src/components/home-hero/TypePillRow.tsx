@@ -118,6 +118,8 @@ export function TypePillRow({ chips, activeChipId, disabled, labelFor, onPick }:
         className={`home-hero__type-pill${isActive ? ' is-active' : ''}`}
         disabled={disabled}
         data-testid={`home-hero-type-pill-${chip.id}${inPopover ? '-more' : ''}`}
+        // The stylesheet keys the lead chips' hue (原型 / 幻灯片 / 文档) on this.
+        data-chip={chip.id}
         onClick={() => {
           setMoreOpen(false);
           if (chip.id !== activeChipId) onPick(chip);
@@ -172,7 +174,7 @@ export function TypePillRow({ chips, activeChipId, disabled, labelFor, onPick }:
           measure pill widths — never interactive, never painted. */}
       <div className="home-hero__type-pills-probe" ref={probeRef} aria-hidden>
         {flowing.map((chip) => (
-          <span key={chip.id} className="home-hero__type-pill">
+          <span key={chip.id} className="home-hero__type-pill" data-chip={chip.id}>
             <Icon name={chip.icon} size={14} />
             <span>{labelFor(chip.id)}</span>
           </span>

@@ -3415,6 +3415,7 @@ export const ko: Dict = {
   'assistant.role': '어시스턴트 (Assistant)',
   'assistant.workingLabel': '작업 중',
   'assistant.doneLabel': '완료됨',
+  'assistant.awaitingReplyLabel': '답변 대기 중',
   'assistant.canceledLabel': '취소됨',
   'assistant.copyMarkdown': '응답 Markdown 복사',
   'assistant.forkConversation': '여기서 포크',

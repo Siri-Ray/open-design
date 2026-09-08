@@ -3415,6 +3415,7 @@ export const id: Dict = {
   'assistant.role': 'Asisten',
   'assistant.workingLabel': 'Sedang bekerja',
   'assistant.doneLabel': 'Selesai',
+  'assistant.awaitingReplyLabel': 'Menunggu balasan',
   'assistant.canceledLabel': 'Dibatalkan',
   'assistant.copyMarkdown': 'Salin Markdown respons',
   'assistant.forkConversation': 'Fork dari sini',
