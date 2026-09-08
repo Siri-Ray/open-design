@@ -75,7 +75,7 @@ import { useProjectDeleteFlow } from './project-actions/useProjectDeleteFlow';
 import { useProjectDuplicateFlow } from './project-actions/useProjectDuplicateFlow';
 import { useWorkspaceProjectMove } from './project-actions/useWorkspaceProjectMove';
 import type { SharedProjectPredicate } from '../collab/all-projects-list';
-import { useProjectRunSummaries } from '../hooks/useProjectRunStatuses';
+import { acknowledgeProjectCompletion, useProjectRunStatuses } from '../hooks/useProjectRunStatuses';
 import { MessageCenter } from './MessageCenter';
 import type { EntrySettingsSection } from './EntrySettingsMenu';
 import type { Project } from '../types';
@@ -350,6 +350,13 @@ function NavButton({
  *  control. */
 const RECENT_SECTION_STORAGE_KEY = 'od.entry.railRecentOpen';
 
+/**
+ * How many rows the 最近项目 list shows before it scrolls — 11 × 38px rows on a
+ * desktop window (see `.entry-nav-rail__recent-list`). The head of the list
+ * whose status is asked for before the scroll observer has reported.
+ */
+const RECENT_STATUS_HEAD_ROWS = 11;
+
 function readStoredRecentOpen(): boolean {
   if (typeof window === 'undefined') return true;
   try {
@@ -358,53 +365,6 @@ function readStoredRecentOpen(): boolean {
     return window.localStorage.getItem(RECENT_SECTION_STORAGE_KEY) !== 'false';
   } catch {
     return true;
-  }
-}
-
-/**
- * Which finished run the user has already looked at, per project (per product:
- * 点进去之后对号换回默认 icon).
- *
- * Invariant: a ✓ is acknowledged for ONE specific finished run — the value is
- * that run's id — and a newer finished run is a new notice. Keyed on the run
- * rather than the project so the acknowledgement stays correct even when the
- * section was collapsed (and not polling) for the whole of the next run: on
- * re-expanding, the newest terminal run's id no longer matches and the ✓ shows
- * again. Only a project whose live status is `succeeded` consults this at all.
- *
- * Persisted next to the section's own open/closed flag: a reload re-reads the
- * same runs feed and would otherwise re-raise every ✓ the user has already
- * cleared.
- */
-const RECENT_SEEN_DONE_STORAGE_KEY = 'od.entry.railRecentSeenDone';
-
-type AcknowledgedRuns = Readonly<Record<string, string>>;
-
-function readStoredSeenDone(): AcknowledgedRuns {
-  if (typeof window === 'undefined') return {};
-  try {
-    const raw = window.localStorage.getItem(RECENT_SEEN_DONE_STORAGE_KEY);
-    const parsed: unknown = raw ? JSON.parse(raw) : null;
-    // Anything but a plain object of run ids — including a bare list of
-    // project ids, which cannot say which run it meant — reads as "nothing
-    // acknowledged". The worst case is one ✓ the user has already seen, never a
-    // missing one.
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
-    const acknowledged: Record<string, string> = {};
-    for (const [projectId, runId] of Object.entries(parsed as Record<string, unknown>)) {
-      if (typeof runId === 'string' && runId) acknowledged[projectId] = runId;
-    }
-    return acknowledged;
-  } catch {
-    return {};
-  }
-}
-
-function writeStoredSeenDone(acknowledged: AcknowledgedRuns): void {
-  try {
-    window.localStorage.setItem(RECENT_SEEN_DONE_STORAGE_KEY, JSON.stringify(acknowledged));
-  } catch {
-    // Private mode / storage disabled: the ✓ still clears for this session.
   }
 }
 
@@ -507,14 +467,16 @@ function RailRecentSection({
   // Run status for the rows' leading glyph. `Project.status` cannot serve it —
   // it only arrives on the UNSCOPED project list, so it is absent for every
   // workspace-bound project (see the hook's own note) — and this is the same
-  // feed the workspace tab dropdown reads, which is what keeps the two glyph
-  // columns telling one story.
+  // feed, with the same display mapping (✓-spending included), that the
+  // workspace tab dropdown reads, which is what keeps the two glyph columns
+  // telling one story about a project (OPEND-2795).
   const recentListRef = useRef<HTMLUListElement>(null);
-  const [runStatusProjectIds, setRunStatusProjectIds] = useState<string[]>([]);
   // Keep the full catalog navigable, but poll only rows intersecting its
   // scrollport. The list's existing height cap bounds the status request set.
+  // `null` until the observer has reported once; never reset on a catalog
+  // hand-over, so a re-render cannot blank the rows' glyphs.
+  const [visibleProjectIds, setVisibleProjectIds] = useState<string[] | null>(null);
   useEffect(() => {
-    setRunStatusProjectIds([]);
     const list = recentListRef.current;
     if (!open || !list || typeof IntersectionObserver === 'undefined') return;
     const visible = new Set<string>();
@@ -525,36 +487,38 @@ function RailRecentSection({
         if (entry.isIntersecting) visible.add(id);
         else visible.delete(id);
       }
-      setRunStatusProjectIds([...visible]);
+      const next = [...visible].sort();
+      setVisibleProjectIds((prev) =>
+        prev && prev.length === next.length && prev.every((id, index) => id === next[index])
+          ? prev
+          : next);
     }, { root: list });
     for (const row of list.children) observer.observe(row);
     return () => observer.disconnect();
   }, [items, open]);
-  const runSummaryByProjectId = useProjectRunSummaries(runStatusProjectIds, {
+  // Until the observer has spoken, ask for the head of the list — the rows the
+  // cap shows on a desktop window — in the same commit that paints them
+  // (OPEND-2762). The observer's first report lands a frame later, and waiting
+  // for it is what left the rows a round trip ahead of their glyphs.
+  const runStatusProjectIds = useMemo(
+    () => visibleProjectIds
+      ?? items.slice(0, RECENT_STATUS_HEAD_ROWS).map((project) => project.id),
+    [visibleProjectIds, items],
+  );
+  const runStatusByProjectId = useProjectRunStatuses(runStatusProjectIds, {
     enabled: open,
     workspaceContext,
   });
-  const [seenDone, setSeenDone] = useState<AcknowledgedRuns>(readStoredSeenDone);
 
   // Opening a project is what spends its ✓ (per product): the finished run on
-  // screen is recorded as seen. Recorded only when there is actually one, so
-  // the store stays the list of notices the user has dismissed rather than of
-  // every project ever opened.
+  // screen is recorded as seen — in the shared feed, so the tab switcher drops
+  // the mark in the same moment.
   const openProject = useCallback(
     (id: string) => {
-      const summary = runSummaryByProjectId.get(id);
-      if (summary?.status === 'succeeded' && summary.latestTerminalRunId) {
-        const runId = summary.latestTerminalRunId;
-        setSeenDone((prev) => {
-          if (prev[id] === runId) return prev;
-          const next = { ...prev, [id]: runId };
-          writeStoredSeenDone(next);
-          return next;
-        });
-      }
+      acknowledgeProjectCompletion(id);
       return onOpen?.(id);
     },
-    [onOpen, runSummaryByProjectId],
+    [onOpen],
   );
 
   function toggle() {
@@ -598,22 +562,12 @@ function RailRecentSection({
         <div className="accordion-collapsible-inner">
           <ul ref={recentListRef} className="entry-nav-rail__recent-list">
             {items.map((project) => {
-              const summary = runSummaryByProjectId.get(project.id);
-              const status = summary?.status;
-              // An acknowledged ✓ is DROPPED, not drawn quieter: the row goes
-              // back to its default chat mark (per product). Every other status
-              // is live and stays. Acknowledged means THIS finished run was
-              // seen; a newer one is a new notice.
-              const acknowledged =
-                status === 'succeeded'
-                && summary?.latestTerminalRunId !== undefined
-                && seenDone[project.id] === summary.latestTerminalRunId;
               return (
                 <li key={project.id} data-project-id={project.id}>
                   <RailRecentRow
                     project={project}
                     workspaceContext={workspaceContext}
-                    runStatus={acknowledged ? undefined : status}
+                    runStatus={runStatusByProjectId.get(project.id)}
                     ownedBySelf={ownedBySelf(project.id)}
                     shared={isSharedProject(project.id)}
                     moveToTeamAvailable={moveToTeamAvailable}

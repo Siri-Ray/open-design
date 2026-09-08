@@ -2,7 +2,7 @@
 // @vitest-environment jsdom
 
 import { StrictMode } from 'react';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -1841,6 +1841,69 @@ describe('WorkspaceTabsBar identity-scope tab reset', () => {
       expect(JSON.stringify(parsed.scopes?.['user-1::ws-a'] ?? {})).toContain(
         'project-alpha',
       );
+    });
+  });
+});
+
+// OPEND-2795: the dock dropdown's lead glyph and the rail's 最近项目 rows read
+// ONE run-status feed, with one display mapping — including the rule that
+// opening a project spends its ✓. Before this, the switcher still drew a ✓ the
+// rail had already cleared for the same project.
+describe('WorkspaceTabsBar dock dropdown run status', () => {
+  const originalFetch = globalThis.fetch;
+  const dock = document.createElement('div');
+
+  beforeEach(() => {
+    window.localStorage.clear();
+    vi.clearAllMocks();
+    document.body.append(dock);
+    setWorkspaceTabsDock(dock);
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (url === '/api/runs?projectId=project-alpha') {
+        return new Response(JSON.stringify({
+          runs: [{
+            id: 'run-alpha-1',
+            projectId: 'project-alpha',
+            conversationId: null,
+            assistantMessageId: null,
+            agentId: 'claude',
+            status: 'succeeded',
+            createdAt: 1,
+            updatedAt: 2,
+          }],
+          awaitingInputProjectIds: [],
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      return new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }) as unknown as typeof fetch;
+  });
+
+  afterEach(() => {
+    cleanup();
+    globalThis.fetch = originalFetch;
+    setWorkspaceTabsDock(null);
+    dock.remove();
+  });
+
+  it('leads a finished project with the ✓ and spends it when the row opens it', async () => {
+    render(<WorkspaceTabsBar route={{ ...projectRoute }} projects={[project]} />);
+    fireEvent.click(await screen.findByTestId('workspace-tabs-dropdown-trigger'));
+    const listbox = screen.getByRole('listbox');
+    await waitFor(() => {
+      expect(within(listbox).getByRole('img', { name: 'designs.status.succeeded' })).toBeTruthy();
+    });
+
+    fireEvent.click(within(listbox).getByRole('option', { name: /Project Alpha/ }));
+    // Same acknowledgement record the rail keeps, keyed on THIS finished run.
+    expect(JSON.parse(window.localStorage.getItem('od.entry.railRecentSeenDone') ?? '{}')).toEqual({
+      'project-alpha': 'run-alpha-1',
+    });
+
+    fireEvent.click(screen.getByTestId('workspace-tabs-dropdown-trigger'));
+    const reopened = screen.getByRole('listbox');
+    await waitFor(() => {
+      expect(within(reopened).queryByRole('img', { name: 'designs.status.succeeded' })).toBeNull();
     });
   });
 });

@@ -202,6 +202,56 @@ describe('EntryNavRail 最近浏览过 section', () => {
     expect(runRequests()).toHaveLength(44);
   });
 
+  it('asks for the rows\' statuses in the same commit that paints them (OPEND-2762)', () => {
+    // No hop through the scroll observer, no timer: the head of the list is
+    // known the moment the rows render, so its status reads leave right then.
+    renderRail();
+    const runRequests = vi.mocked(fetch).mock.calls.filter(([url]) =>
+      String(url).startsWith('/api/runs?projectId='));
+    // Ten rows: fewer than the head window, so every one of them.
+    expect(runRequests.map(([url]) => String(url)).sort()).toEqual(
+      Array.from({ length: 10 }, (_, i) => `/api/runs?projectId=p${i + 1}`).sort(),
+    );
+  });
+
+  it('keeps every glyph when the catalog is handed over again (OPEND-2762)', async () => {
+    // EntryShell rebuilds the catalog array on unrelated renders. That must
+    // neither blank the glyphs (a flash to the default mark and back) nor
+    // re-ask for statuses it already has.
+    const catalog = () => Array.from({ length: 10 }, (_, index) =>
+      project(`p${index + 1}`, 1_000 - index));
+    const tree = (projects: Project[]) => (
+      <I18nProvider initial="en">
+        <EntryNavRail
+          view="home"
+          onViewChange={() => {}}
+          onNewProject={() => {}}
+          open
+          context={signedInContext}
+          recentProjects={projects}
+        />
+      </I18nProvider>
+    );
+    const { rerender } = render(tree(catalog()));
+    const rowFor = (id: string) =>
+      screen.getAllByTestId('entry-nav-recent-item').find((row) => row.textContent === `Project ${id}`)!;
+    await waitFor(() => {
+      expect(within(rowFor('p4')).getByRole('img', { name: 'Completed' })).toBeTruthy();
+    });
+    const runRequests = () => vi.mocked(fetch).mock.calls.filter(([url]) =>
+      String(url).startsWith('/api/runs?projectId='));
+    const before = runRequests().length;
+
+    rerender(tree(catalog()));
+    // Synchronously after the commit, and again once the observer has had its
+    // say: the ✓ never leaves.
+    expect(within(rowFor('p4')).getByRole('img', { name: 'Completed' })).toBeTruthy();
+    expect(within(rowFor('p1')).getByRole('img', { name: 'Running' })).toBeTruthy();
+    await act(async () => { await Promise.resolve(); });
+    expect(within(rowFor('p4')).getByRole('img', { name: 'Completed' })).toBeTruthy();
+    expect(runRequests()).toHaveLength(before);
+  });
+
   it('renders nothing without projects or without a cloud identity', () => {
     renderRail({ recentProjects: [] });
     expect(screen.queryByTestId('entry-nav-recent-toggle')).toBeNull();

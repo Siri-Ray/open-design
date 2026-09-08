@@ -142,6 +142,79 @@ export function foldRunsToProjectRunSummaries(
 }
 
 /**
+ * Which finished run the user has already looked at, per project (per product:
+ * 点进去之后对号换回默认 icon).
+ *
+ * Invariant: a ✓ is acknowledged for ONE specific finished run — the value is
+ * that run's id — and a newer finished run is a new notice. Keyed on the run
+ * rather than the project so the acknowledgement stays correct even when no
+ * surface was polling for the whole of the next run: the newest terminal run's
+ * id no longer matches and the ✓ shows again. Only a project whose live status
+ * is `succeeded` consults this at all.
+ *
+ * Persisted so a reload, which re-reads the same runs feed, does not re-raise
+ * every ✓ the user has already cleared. The key predates the shared feed (it
+ * was the rail's own), and is kept so existing acknowledgements survive.
+ */
+export type AcknowledgedRuns = Readonly<Record<string, string>>;
+
+export const ACKNOWLEDGED_RUNS_STORAGE_KEY = 'od.entry.railRecentSeenDone';
+
+export function readStoredAcknowledgedRuns(): AcknowledgedRuns {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = window.localStorage.getItem(ACKNOWLEDGED_RUNS_STORAGE_KEY);
+    const parsed: unknown = raw ? JSON.parse(raw) : null;
+    // Anything but a plain object of run ids — including a bare list of
+    // project ids, which cannot say which run it meant — reads as "nothing
+    // acknowledged". The worst case is one ✓ the user has already seen, never a
+    // missing one.
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    const acknowledged: Record<string, string> = {};
+    for (const [projectId, runId] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof runId === 'string' && runId) acknowledged[projectId] = runId;
+    }
+    return acknowledged;
+  } catch {
+    return {};
+  }
+}
+
+export function writeStoredAcknowledgedRuns(acknowledged: AcknowledgedRuns): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(ACKNOWLEDGED_RUNS_STORAGE_KEY, JSON.stringify(acknowledged));
+  } catch {
+    // Private mode / storage disabled: the ✓ still clears for this session.
+  }
+}
+
+/**
+ * The status a glyph surface should DRAW for a project — the one display
+ * mapping every surface (the rail's 最近项目 rows, the workspace tab switcher)
+ * applies, so they can never tell different stories about the same project
+ * (OPEND-2795).
+ *
+ * An acknowledged ✓ is DROPPED (`undefined`: the row goes back to its default
+ * mark), not drawn quieter. Every other status is live and stays: a running,
+ * blocked or failed project is not a notice the user can spend.
+ */
+export function displayStatusForSummary(
+  projectId: string,
+  summary: ProjectRunSummary,
+  acknowledged: AcknowledgedRuns,
+): ProjectDisplayStatus | undefined {
+  if (
+    summary.status === 'succeeded'
+    && summary.latestTerminalRunId !== undefined
+    && acknowledged[projectId] === summary.latestTerminalRunId
+  ) {
+    return undefined;
+  }
+  return summary.status;
+}
+
+/**
  * `Map<projectId, ProjectDisplayStatus>` for every project the runs cover —
  * the status half of {@link foldRunsToProjectRunSummaries}, for consumers that
  * only draw a glyph and never acknowledge anything.
