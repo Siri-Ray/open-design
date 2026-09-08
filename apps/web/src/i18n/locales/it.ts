@@ -3415,6 +3415,7 @@ export const it: Dict = {
   'assistant.role': 'Assistente',
   'assistant.workingLabel': 'In corso',
   'assistant.doneLabel': 'Completato',
+  'assistant.awaitingReplyLabel': 'In attesa di risposta',
   'assistant.canceledLabel': 'Annullato',
   'assistant.copyMarkdown': 'Copia il Markdown della risposta',
   'assistant.forkConversation': 'Fork da qui',

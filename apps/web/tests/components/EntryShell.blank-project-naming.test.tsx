@@ -249,11 +249,16 @@ describe('EntryShell signed-out recent projects', () => {
     expect(window.location.pathname).toBe('/projects');
   });
 
-  it('keeps the Community dock to the composer with local projects present', async () => {
+  // OPEND-2793 (product decision B): the community gallery browses without a
+  // docked composer until phase three gives it a template-bound shape. The
+  // `dock` variant of HomeView stays in the codebase; Community just no longer
+  // mounts it, so the grid can use the full page height.
+  it('renders the Community gallery without a docked composer', async () => {
     renderAt('/community', { projects: [localProject] });
-    const dock = await screen.findByTestId('community-composer-dock');
-    expect(within(dock).getByTestId('home-hero-composer-card')).toBeTruthy();
-    expect(dock.querySelector('.recent-projects')).toBeNull();
+    await screen.findByTestId('entry-view-home');
+    expect(screen.queryByTestId('community-composer-dock')).toBeNull();
+    // Home's own composer is still the single composer in the shell.
+    expect(screen.getAllByTestId('home-hero-composer-card')).toHaveLength(1);
   });
 });
 

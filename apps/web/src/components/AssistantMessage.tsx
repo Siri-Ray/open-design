@@ -834,15 +834,37 @@ function AssistantMessageImpl({
   // path), the turn is mid-handshake, not settled. Suppressed direction forms
   // render as a locked pill the user cannot answer, so they don't hold the
   // card back.
-  const hasPendingQuestionForm = useMemo(() => {
-    if (hasUnterminatedQuestionForm(message.content)) return true;
-    return splitOnQuestionForms(message.content).some(
-      (seg) =>
-        seg.kind === "form" &&
-        !(suppressDirectionForms && isDirectionForm(seg.form)) &&
-        (!nextUserContent || !parseSubmittedAnswers(seg.form, nextUserContent)),
-    );
-  }, [message.content, nextUserContent, suppressDirectionForms]);
+  // A parsed, answerable form the immediate reply has not settled. This is
+  // the half the user can act on; an unterminated form (below) is not.
+  const hasUnansweredQuestionForm = useMemo(
+    () =>
+      splitOnQuestionForms(message.content).some(
+        (seg) =>
+          seg.kind === "form" &&
+          !(suppressDirectionForms && isDirectionForm(seg.form)) &&
+          (!nextUserContent || !parseSubmittedAnswers(seg.form, nextUserContent)),
+      ),
+    [message.content, nextUserContent, suppressDirectionForms],
+  );
+  const hasPendingQuestionForm =
+    hasUnterminatedQuestionForm(message.content) || hasUnansweredQuestionForm;
+  // The run title while that handshake is open (OPEND-2744): a turn that ended
+  // on a form the user has not answered is not "Done" from their side, it is
+  // waiting on them. Only the LAST assistant turn can be waiting — an older
+  // form renders locked (see FormBlock's `interactive`), and the reply that
+  // superseded it is what settled it. Failures and cancellations keep their
+  // own wording; the moment the immediate user reply submits or skips the
+  // form, `hasUnansweredQuestionForm` drops and the title reads Done again.
+  // Deliberately NOT `hasPendingQuestionForm`: a form the run never closed
+  // (output limit hit mid-form) renders no form and no skip once the run is
+  // terminal, so there is nothing for the user to reply to and the label
+  // would be stuck forever.
+  const awaitingReply =
+    !!isLast &&
+    !streaming &&
+    hasUnansweredQuestionForm &&
+    message.runStatus !== "canceled" &&
+    message.runStatus !== "failed";
   // "Next step" is a delivery affordance, not a generic terminal-state card.
   // Keep it out of pure Q&A, failures/cancellations and incomplete Todo turns;
   // only a successful turn that actually produced something may surface it.
@@ -917,6 +939,7 @@ function AssistantMessageImpl({
                 message.runStatus === "canceled" ||
                 hasResultDeliveryFailure)
             }
+            awaitingReply={awaitingReply}
             startedAt={message.startedAt}
             endedAt={message.endedAt}
             durationMs={usage?.durationMs}
@@ -1111,6 +1134,7 @@ function AssistantMessageImpl({
                   forking,
                   forceVisible: true,
                   isLast: !!isLast,
+                  awaitingReply,
                   hideRunStatus:
                     taskActivity !== null ||
                     hasTodoSnapshot ||
@@ -1129,6 +1153,7 @@ function AssistantMessageImpl({
                 onFork={canFork ? onForkFromMessage : undefined}
                 forking={forking}
                 isLast={!!isLast}
+                awaitingReply={awaitingReply}
                 hideRunStatus={
                   taskActivity !== null ||
                   hasTodoSnapshot ||
@@ -1633,6 +1658,8 @@ interface AssistantFooterProps {
   // When the turn has an execution disclosure, its run state lives at the top
   // of the answer. The footer keeps only actions so run state is not repeated.
   hideRunStatus?: boolean;
+  /** The turn ended on a question form the user has not answered yet. */
+  awaitingReply?: boolean;
 }
 
 function AssistantFooter({
@@ -1649,6 +1676,7 @@ function AssistantFooter({
   forceVisible = false,
   isLast = false,
   hideRunStatus = false,
+  awaitingReply = false,
 }: AssistantFooterProps) {
   const t = useT();
   if (
@@ -1684,6 +1712,8 @@ function AssistantFooter({
               ? t("assistant.canceledLabel")
               : hasUnfinishedTodos
               ? t("assistant.unfinishedLabel")
+              : awaitingReply
+              ? t("assistant.awaitingReplyLabel")
               : t("assistant.doneLabel")}
           </span>
         </>
@@ -3860,6 +3890,7 @@ function TaskActivityCard({
   terminalRunSucceeded,
   runCanceled,
   runFailed,
+  awaitingReply = false,
   startedAt,
   endedAt,
   durationMs,
@@ -3875,6 +3906,8 @@ function TaskActivityCard({
   terminalRunSucceeded: boolean;
   runCanceled: boolean;
   runFailed: boolean;
+  /** The turn ended on a question form the user has not answered yet. */
+  awaitingReply?: boolean;
   startedAt: number | undefined;
   endedAt: number | undefined;
   durationMs: number | undefined;
@@ -3912,7 +3945,9 @@ function TaskActivityCard({
       ? t("assistant.canceledLabel")
       : hasError
         ? t("critiqueTheater.failedHeading")
-        : t("assistant.doneLabel");
+        : awaitingReply
+          ? t("assistant.awaitingReplyLabel")
+          : t("assistant.doneLabel");
   const runState = running
     ? "running"
     : runCanceled

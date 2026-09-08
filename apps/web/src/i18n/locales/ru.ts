@@ -3415,6 +3415,7 @@ export const ru: Dict = {
   'assistant.role': 'Ассистент',
   'assistant.workingLabel': 'Работает',
   'assistant.doneLabel': 'Готово',
+  'assistant.awaitingReplyLabel': 'Ожидает ответа',
   'assistant.canceledLabel': 'Отменено',
   'assistant.copyMarkdown': 'Скопировать Markdown ответа',
   'assistant.forkConversation': 'Создать форк отсюда',
