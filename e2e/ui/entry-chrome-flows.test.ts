@@ -443,6 +443,11 @@ test('[P1] entry top navigation matches the current home tab structure', async (
   await expect(page.getByTestId('entry-nav-collapse')).toHaveCount(0);
   await expect(page.locator('.entry-nav-rail').getByTestId('entry-nav-search')).toHaveCount(0);
   await expect(page.locator('.workspace-tabs-rail-actions').getByTestId('entry-nav-search')).toBeVisible();
+  // OPEND-2685: the rail toggle is the cluster's FIRST control (right after
+  // the traffic-light space on macOS), the search second.
+  await expect(
+    page.locator('.workspace-tabs-rail-actions > [data-testid]').first(),
+  ).toHaveAttribute('data-testid', 'entry-rail-collapse');
   await expect(page.getByTestId('entry-nav-home')).toHaveAttribute('aria-current', 'page');
   await expect(page.getByTestId('entry-nav-community')).toBeVisible();
   await expect(page.locator('.entry-nav-rail__group').getByTestId('entry-nav-design-systems')).toBeVisible();

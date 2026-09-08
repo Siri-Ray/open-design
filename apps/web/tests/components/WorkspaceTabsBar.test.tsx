@@ -373,6 +373,69 @@ describe('WorkspaceTabsBar navigation semantics', () => {
     expect(screen.queryByRole('button', { name: 'Search tabs' })).toBeNull();
   });
 
+  it('puts the rail toggle first in the entry chrome cluster and mirrors the rail state on it', async () => {
+    // OPEND-2685: the sidebar switch is the FIRST control after the window's
+    // traffic-light space — where a macOS sidebar toggle is expected — and the
+    // search follows it. It stays mounted in both rail states, so the
+    // collapsed rail's expand entry is the same target as the collapse one;
+    // only its label, aria-expanded and glyph flip.
+    render(<WorkspaceTabsBar route={homeRoute} projects={[project]} />);
+
+    const cluster = document.querySelector('.workspace-tabs-rail-actions');
+    expect(cluster).not.toBeNull();
+    const order = Array.from(cluster!.querySelectorAll('[data-testid]')).map(
+      (el) => (el as HTMLElement).dataset.testid,
+    );
+    expect(order).toEqual(['entry-rail-collapse', 'entry-nav-search']);
+
+    const toggle = screen.getByTestId('entry-rail-collapse');
+    // Fresh storage: the rail is collapsed, so the toggle reads as "expand".
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(toggle.getAttribute('aria-label')).toBe('entry.navExpand');
+    const currentGlyph = () =>
+      toggle.querySelectorAll('.entry-nav-rail__collapse-glyph.is-current').length;
+    expect(toggle.querySelectorAll('.entry-nav-rail__collapse-glyph')).toHaveLength(2);
+    expect(currentGlyph()).toBe(1);
+
+    // Clicking asks EntryShell (a sibling tree) to flip the rail via the
+    // bridge event; the button itself owns no state.
+    const toggled = vi.fn();
+    window.addEventListener('od:entry-rail-toggle', toggled);
+    fireEvent.click(toggle);
+    expect(toggled).toHaveBeenCalledTimes(1);
+    window.removeEventListener('od:entry-rail-toggle', toggled);
+
+    // EntryShell answers with the state event; the toggle mirrors it in place
+    // (same element, same slot) and flips to the collapse affordance.
+    act(() => {
+      window.dispatchEvent(new CustomEvent('od:entry-rail-state', { detail: { open: true } }));
+    });
+    expect(screen.getByTestId('entry-rail-collapse')).toBe(toggle);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(toggle.getAttribute('aria-label')).toBe('entry.navCollapse');
+    expect(currentGlyph()).toBe(1);
+    expect(
+      Array.from(cluster!.querySelectorAll('[data-testid]')).map(
+        (el) => (el as HTMLElement).dataset.testid,
+      ),
+    ).toEqual(['entry-rail-collapse', 'entry-nav-search']);
+  });
+
+  it('shows no rail toggle in the docked (project) chrome — there is no entry rail to switch', async () => {
+    const dock = document.createElement('div');
+    document.body.appendChild(dock);
+    setWorkspaceTabsDock(dock);
+    try {
+      render(<WorkspaceTabsBar route={projectRoute} projects={[project]} />);
+      expect(screen.queryByTestId('entry-rail-collapse')).toBeNull();
+      expect(screen.queryByTestId('entry-nav-search')).toBeNull();
+      // The docked chrome keeps the brand-logo Home button in that first slot.
+      expect(screen.getByTestId('workspace-home-chrome')).toBeTruthy();
+    } finally {
+      dock.remove();
+    }
+  });
+
   it('collapses every entry section into the single leftmost tab (no new tab per section)', async () => {
     const { rerender } = render(
       <WorkspaceTabsBar route={{ kind: 'home', view: 'home' }} projects={[project]} />,

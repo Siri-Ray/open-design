@@ -430,6 +430,23 @@ describe('workspace tabs chrome styles', () => {
     expect(ruleValue(cluster, 'margin')).toBe('0 0 0 14.8px');
   });
 
+  it('cross-fades the rail toggle glyphs on the ease-out curve (enter 200ms, exit 140ms)', () => {
+    // OPEND-2685: both glyphs stay mounted; the swap is a fade + settle from
+    // scale(0.9), never a pop or a scale(0) start (AGENTS.md animation rules).
+    const glyph = cssDeclarations(entryLayoutCss, '.entry-nav-rail__collapse-glyph');
+    const current = cssDeclarations(entryLayoutCss, '.entry-nav-rail__collapse-glyph.is-current');
+    expect(ruleValue(glyph, 'position')).toBe('absolute');
+    expect(ruleValue(glyph, 'opacity')).toBe('0');
+    expect(ruleValue(glyph, 'transform')).toBe('scale(0.9)');
+    expect(ruleValue(glyph, 'transition')).toContain('opacity 140ms cubic-bezier(0.23, 1, 0.32, 1)');
+    expect(ruleValue(glyph, 'transition')).toContain('transform 140ms cubic-bezier(0.23, 1, 0.32, 1)');
+    expect(ruleValue(current, 'opacity')).toBe('1');
+    expect(ruleValue(current, 'transform')).toBe('none');
+    expect(ruleValue(current, 'transition-duration')).toBe('200ms, 200ms');
+    const toggle = cssDeclarations(entryLayoutCss, '.entry-nav-rail__collapse');
+    expect(ruleValue(toggle, 'position')).toBe('relative');
+  });
+
   it('caps the docked tab dropdown at six rows and scrolls the rest', () => {
     const menu = cssDeclarations(routinesCss, '.workspace-tabs-dropdown__menu');
     const row = cssDeclarations(routinesCss, '.workspace-tabs-dropdown__row-main');
