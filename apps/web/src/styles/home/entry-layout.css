@@ -46,6 +46,13 @@
    to the right (it stays docked until the user collapses it again). */
 .entry-shell--no-header .entry {
   grid-template-columns: 0 minmax(0, 1fr);
+  /* The single row must be the shell's height and nothing more (OPEND-2757).
+     Without it the row is an implicit `auto` track, which sizes to its tallest
+     item — and the rail's column is content-sized, so a long 最近项目 list grew
+     the row past the window and carried the footer's Discord / X / mail links
+     off screen with it. `minmax(0, 1fr)` pins the track to the container, so
+     the rail's flex chain below actually has a height to shrink to. */
+  grid-template-rows: minmax(0, 1fr);
   /* Collapse: hold the horizontal squeeze until the rows have cascaded out
      top-to-bottom (see the staggered rail-row fade below), otherwise the
      0-width clip would swallow the lower rows before their turn. */
@@ -77,6 +84,11 @@
      visible surface is the floating `.entry-nav-rail__panel` inside it. */
   width: 100%;
   min-width: 0;
+  /* A grid item's automatic minimum is its content height; this is the top
+     of the flex chain that lets the recent list shrink (see
+     `.entry-nav-rail__recent-list`), so it has to opt out like every box
+     below it. */
+  min-height: 0;
   border-right: 0;
   background: transparent;
   display: flex;
@@ -1032,10 +1044,27 @@
   background: color-mix(in srgb, var(--text-strong) 10%, transparent);
   color: var(--text-strong);
 }
-/* Armed delete: the second click is the destructive one, so it says so. */
-.entry-nav-rail__recent-menu button.is-danger,
+/* 删除 reads as the destructive item (red ink, red-tinted hover), the same
+   treatment the project cards' menu gives theirs. It no longer arms in place:
+   the confirmation is the shared delete dialog (OPEND-2797). */
+.entry-nav-rail__recent-menu button.is-danger {
+  color: var(--red, #f04142);
+}
 .entry-nav-rail__recent-menu button.is-danger:hover:not(:disabled) {
   background: color-mix(in srgb, var(--red, #f04142) 12%, transparent);
+  color: var(--red, #f04142);
+}
+.entry-nav-rail__recent-menu button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+/* A failed move to the team space is reported inside the menu, under the item
+   that asked for it — the project cards keep theirs in the same place. */
+.entry-nav-rail__recent-menu-error {
+  padding: 4px 8px 6px;
+  max-width: 220px;
+  font-size: 12px;
+  line-height: 1.4;
   color: var(--red, #f04142);
 }
 /* The preview floats OUT of the rail, over the content column: the rail panel

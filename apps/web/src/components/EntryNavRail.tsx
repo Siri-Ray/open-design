@@ -47,6 +47,8 @@ import {
   type WorkspaceCollabContext,
   type WorkspaceDirectoryItem,
   type WorkspaceDirectoryResponse,
+  type WorkspaceProjectSummary,
+  workspaceContextHasTeamIdentity,
 } from '@open-design/contracts';
 import {
   fetchVelaLoginStatus,
@@ -61,7 +63,18 @@ import { GITHUB_STARS_FALLBACK_LABEL, formatStars, useGithubStars } from './useG
 import { PlanWordmark, planBadgeTierForWorkspace } from './PlanWordmark';
 import { RemixIcon } from './RemixIcon';
 import { InviteDialog } from './InviteDialog';
-import { RailRecentRow } from './entry-nav-rail/RailRecentRow';
+import {
+  closeRailRecentRowMenu,
+  openRailRecentRowMenu,
+  RailRecentRow,
+} from './entry-nav-rail/RailRecentRow';
+import { MoveToTeamConfirmDialog, moveConfirmSkipped } from './MoveToTeamConfirmDialog';
+import { ProjectDeleteConfirmDialog } from './project-actions/ProjectDeleteConfirmDialog';
+import { projectOwnedBySelf } from './project-actions/ownership';
+import { useProjectDeleteFlow } from './project-actions/useProjectDeleteFlow';
+import { useProjectDuplicateFlow } from './project-actions/useProjectDuplicateFlow';
+import { useWorkspaceProjectMove } from './project-actions/useWorkspaceProjectMove';
+import type { SharedProjectPredicate } from '../collab/all-projects-list';
 import { useProjectRunSummaries } from '../hooks/useProjectRunStatuses';
 import { MessageCenter } from './MessageCenter';
 import type { EntrySettingsSection } from './EntrySettingsMenu';
@@ -88,6 +101,7 @@ import { useDeepSeekV4FlashCampaignVisibility } from '../campaigns/use-deepseek-
 import type { EntryHomeView } from '../router';
 import type {
   AccountMenuClickProps,
+  TrackingProjectCollectionPage,
   TrackingWorkspacePage,
 } from '@open-design/contracts/analytics';
 import { useAnalytics } from '../analytics/provider';
@@ -254,9 +268,22 @@ interface Props {
    *  never drift; this list only takes the head of it. Empty (or absent) hides
    *  the section entirely. */
   recentProjects?: Project[];
-  /** Row actions for the 最近浏览过 list's ⋮ menu. Omit either to drop its item. */
+  /** Row actions for the 最近项目 list's ⋮ menu (重命名 / 复制 / 转入团队空间 /
+   *  删除 — OPEND-2686, OPEND-2794). Omit one to drop its item. They are the
+   *  SAME handlers the project cards drive their menu with, so an action from
+   *  the rail lands in exactly one place. */
   onRenameRecentProject?: (id: string, name: string) => void;
   onDeleteRecentProject?: (id: string) => Promise<boolean | void> | boolean | void;
+  onDuplicateRecentProject?: (id: string) => Promise<void> | void;
+  /** The one shared-state answer for a row (see `createSharedProjectPredicate`)
+   *  and the hub's projectId → sharing member map; together they decide which
+   *  rows the member may mutate and which are already in the team space. */
+  isSharedRecentProject?: SharedProjectPredicate;
+  recentProjectOwnerMemberIds?: ReadonlyMap<string, string>;
+  /** Optimistic shared-state markers for a 转入团队空间 from the rail — the
+   *  same callbacks EntryShell hands the project cards. */
+  onRecentProjectShared?: (project: WorkspaceProjectSummary) => void;
+  onRecentProjectShareFailed?: (projectId: string) => void;
   /** Opens one of those projects — the pull-first opener, so a shared project
    *  that is not local yet still lands. */
   onOpenRecentProject?: (id: string) => void | Promise<unknown>;
@@ -395,17 +422,81 @@ function RailRecentSection({
   onOpen,
   onRename,
   onDelete,
+  onDuplicate,
+  isShared,
+  ownerMemberIds,
+  onProjectShared,
+  onProjectShareFailed,
   workspaceContext,
+  analyticsPage,
   label,
 }: {
   projects: Project[];
   onOpen?: (id: string) => void | Promise<unknown>;
   onRename?: (id: string, name: string) => void;
   onDelete?: (id: string) => Promise<boolean | void> | boolean | void;
+  onDuplicate?: (id: string) => Promise<void> | void;
+  isShared?: SharedProjectPredicate;
+  ownerMemberIds?: ReadonlyMap<string, string>;
+  onProjectShared?: (project: WorkspaceProjectSummary) => void;
+  onProjectShareFailed?: (projectId: string) => void;
   workspaceContext?: WorkspaceCollabContext | null;
+  analyticsPage: TrackingWorkspacePage;
   label: string;
 }) {
   const [open, setOpen] = useState(readStoredRecentOpen);
+  // The row actions report under the project-collection page the rail is
+  // standing on; every other entry view files under Home, where the rail's
+  // list is the recent-projects surface.
+  const collectionPage: TrackingProjectCollectionPage =
+    analyticsPage === 'drafts' || analyticsPage === 'all_projects' ? analyticsPage : 'home';
+  // The same gates the project cards apply (RecentProjectsStrip): a move needs
+  // a team plane to move into AND the right to share, and only the member's
+  // own projects can be changed at all.
+  const moveToTeamAvailable =
+    workspaceContextHasTeamIdentity(workspaceContext)
+    && workspaceContext?.permissions.canShareProjects === true;
+  const isSharedProject: SharedProjectPredicate = isShared ?? (() => false);
+  const ownedBySelf = (projectId: string) => projectOwnedBySelf({
+    projectId,
+    ownerMemberIds,
+    selfMemberId: workspaceContext?.workspaceMemberId,
+    isShared: isSharedProject,
+  });
+  // 删除 confirms through the shared project delete dialog (OPEND-2797) — one
+  // component for the rail and the project cards.
+  const deleteFlow = useProjectDeleteFlow({
+    onDelete,
+    analyticsPage: collectionPage,
+    workspaceContext,
+  });
+  const duplicateFlow = useProjectDuplicateFlow({
+    onDuplicate,
+    analyticsPage: collectionPage,
+    workspaceContext,
+  });
+  // 转入团队空间 runs the flow the project cards run, confirmation dialog
+  // included. Its progress and failure show in the row's ⋮ menu — the card
+  // menu is where the cards report theirs — so the section re-opens that menu
+  // once the request is on its way and closes it again on success.
+  const moveFlow = useWorkspaceProjectMove({
+    workspaceContext,
+    analyticsPage: collectionPage,
+    onProjectShared,
+    onProjectShareFailed,
+    onMoveStart: (project) => openRailRecentRowMenu(project.id),
+    onMoveSettled: (project, _action, ok) => {
+      if (ok) closeRailRecentRowMenu(project.id);
+    },
+  });
+  const [moveTarget, setMoveTarget] = useState<Project | null>(null);
+  function requestMoveToTeam(project: Project) {
+    if (moveConfirmSkipped()) {
+      void moveFlow.shareToTeam(project);
+      return;
+    }
+    setMoveTarget(project);
+  }
   // Every recent project, newest first (OPEND-2757: the old 8-row cap hid the
   // rest from the rail entirely). The LIST scrolls past ~11 rows, not the rail
   // — see `.entry-nav-rail__recent-list` in entry-layout.css.
@@ -523,9 +614,16 @@ function RailRecentSection({
                     project={project}
                     workspaceContext={workspaceContext}
                     runStatus={acknowledged ? undefined : status}
+                    ownedBySelf={ownedBySelf(project.id)}
+                    shared={isSharedProject(project.id)}
+                    moveToTeamAvailable={moveToTeamAvailable}
+                    sharing={moveFlow.sharingId === project.id}
+                    shareError={moveFlow.error?.projectId === project.id ? moveFlow.error.kind : null}
                     onOpen={openProject}
                     onRename={onRename}
-                    onDelete={onDelete}
+                    onDuplicate={onDuplicate ? (target) => { void duplicateFlow.duplicate(target); } : undefined}
+                    onMoveToTeam={requestMoveToTeam}
+                    onDelete={onDelete ? deleteFlow.request : undefined}
                   />
                 </li>
               );
@@ -533,6 +631,26 @@ function RailRecentSection({
           </ul>
         </div>
       </div>
+      {deleteFlow.target ? (
+        <ProjectDeleteConfirmDialog
+          projectName={deleteFlow.target.name}
+          pending={deleteFlow.pending}
+          failed={deleteFlow.failed}
+          onCancel={deleteFlow.cancel}
+          onConfirm={() => void deleteFlow.commit()}
+        />
+      ) : null}
+      {moveTarget ? (
+        <MoveToTeamConfirmDialog
+          action="to-team"
+          onCancel={() => setMoveTarget(null)}
+          onConfirm={() => {
+            const project = moveTarget;
+            setMoveTarget(null);
+            void moveFlow.shareToTeam(project);
+          }}
+        />
+      ) : null}
     </div>
   );
 }
@@ -1519,6 +1637,11 @@ export function EntryNavRail({
   onOpenRecentProject,
   onRenameRecentProject,
   onDeleteRecentProject,
+  onDuplicateRecentProject,
+  isSharedRecentProject,
+  recentProjectOwnerMemberIds,
+  onRecentProjectShared,
+  onRecentProjectShareFailed,
   priorityAnnouncementActive,
   onPriorityAnnouncementPendingChange,
   priorityAnnouncementCurrentPlanId,
@@ -2046,7 +2169,13 @@ export function EntryNavRail({
               onOpen={onOpenRecentProject}
               onRename={onRenameRecentProject}
               onDelete={onDeleteRecentProject}
+              onDuplicate={onDuplicateRecentProject}
+              isShared={isSharedRecentProject}
+              ownerMemberIds={recentProjectOwnerMemberIds}
+              onProjectShared={onRecentProjectShared}
+              onProjectShareFailed={onRecentProjectShareFailed}
               workspaceContext={context}
+              analyticsPage={analyticsPage}
               label={t('recentProjects.title')}
             />
             {/* Product decision (2026-07-20): 成员 and 数据大盘 leave the rail

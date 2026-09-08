@@ -1751,6 +1751,13 @@ export function EntryShell({
              rename or a delete from the rail lands in exactly one place. */
           onRenameRecentProject={onRenameProject}
           onDeleteRecentProject={onDeleteProject}
+          onDuplicateRecentProject={onDuplicateProject}
+          /* And the same shared-state answer + optimistic markers the grids
+             get, so 转入团队空间 from the rail updates every list at once. */
+          isSharedRecentProject={isSharedProject}
+          recentProjectOwnerMemberIds={teamProjectOwnerMemberIds}
+          onRecentProjectShared={markProjectShared}
+          onRecentProjectShareFailed={markProjectShareFailed}
           priorityAnnouncementActive={
             view === 'home'
             && goPlanSunsetMessagePending
