@@ -6,7 +6,8 @@
 //   • the FULL plugin details modal (PluginDetailsModal → PreviewModal):
 //     top-right Use split action + Share menu + close;
 //   • the LIGHTWEIGHT template preview (TemplatePreviewModal): header
-//     title/category + close, footer category + Remix.
+//     title/category + close; no footer (the Remix bar is gone per product,
+//     OPEND-2692).
 //
 // Product mapping: the Community gallery card opens the FULL modal, and the
 // creation page's active template chip opens the LIGHTWEIGHT preview. This
@@ -156,7 +157,7 @@ describe('Community template card → full details modal', () => {
 });
 
 describe('creation page active template chip → lightweight preview', () => {
-  it('opens the lightweight template preview (footer category + Remix), not the full details modal', async () => {
+  it('opens the lightweight template preview (header only, no Remix footer), not the full details modal', async () => {
     stubAnimationFrame();
     render(
       <HomeView
@@ -174,13 +175,16 @@ describe('creation page active template chip → lightweight preview', () => {
 
     fireEvent.click(screen.getByTitle('Plugin: Seed Round Pitch'));
 
-    // Lightweight preview: header + footer category with the Remix action.
+    // Lightweight preview: the header carries title + category, and that is
+    // the whole chrome — the footer bar that used to hold the Remix action is
+    // gone (per product, OPEND-2692).
     await waitFor(() => {
       expect(document.querySelector('.community-template-preview')).not.toBeNull();
     });
-    const foot = document.querySelector('.community-template-preview__foot');
-    expect(foot?.textContent).toContain('Slides');
-    expect(foot?.textContent).toContain('Remix');
+    const head = document.querySelector('.community-template-preview__head');
+    expect(head?.textContent).toContain('Slides');
+    expect(document.querySelector('.community-template-preview__foot')).toBeNull();
+    expect(document.querySelector('.community-template-preview')?.textContent).not.toContain('Remix');
 
     // The full modal's Use split action + Share menu must NOT appear here.
     expect(screen.queryByTestId('plugin-details-use-example-fundraising-deck')).toBeNull();

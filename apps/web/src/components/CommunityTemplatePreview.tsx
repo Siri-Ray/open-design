@@ -191,12 +191,15 @@ export function buildCommunityTemplates(
 export function TemplatePreviewModal({
   template,
   onClose,
-  onUse,
-  busy,
 }: {
   template: TemplateDemo;
   onClose: () => void;
-  onUse: () => void;
+  /* The footer bar that carried the Remix / 使用 action is gone (per product:
+     去掉下边的 remix 那一条; OPEND-2692), so nothing consumes these any more.
+     Kept — and made optional — so the call sites that still pass them
+     type-check unchanged; drop them there whenever those files are touched
+     next. */
+  onUse?: () => void;
   busy?: boolean;
 }) {
   const t = useT();
@@ -234,12 +237,6 @@ export function TemplatePreviewModal({
             ? { src: template.previewSrc }
             : { srcDoc: templatePreviewHtml(template) })}
         />
-        <footer className="community-template-preview__foot">
-          <span>{template.meta}</span>
-          <button type="button" disabled={busy} onClick={onUse}>
-            {busy ? t('common.loading') : templateActionLabel(template)}
-          </button>
-        </footer>
       </section>
     </div>
   );
