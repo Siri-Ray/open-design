@@ -29,6 +29,10 @@ import type { DesignSystemSummary, Project, ProjectDisplayStatus, ProjectFile } 
 import { Icon } from './Icon';
 import type { IconName } from './Icon';
 import { InviteDialog } from './InviteDialog';
+import { ProjectDeleteConfirmDialog } from './project-actions/ProjectDeleteConfirmDialog';
+import { useProjectDeleteFlow } from './project-actions/useProjectDeleteFlow';
+import { useProjectDuplicateFlow } from './project-actions/useProjectDuplicateFlow';
+import { useWorkspaceProjectMove } from './project-actions/useWorkspaceProjectMove';
 import { STATUS_LABEL_KEYS } from './DesignsTab';
 import { isDesignSystemProject, isPublishedDesignSystemProject } from './design-system-project';
 import type { SharedProjectPredicate } from '../collab/all-projects-list';
@@ -44,7 +48,7 @@ import {
   workspaceInviteAvailableSeats,
   workspaceUpgradeUrl,
 } from './EntryNavRail';
-import { moveWorkspaceProject, workspaceProjectMoveErrorCode } from '../state/projects';
+import { moveWorkspaceProject } from '../state/projects';
 import {
   workspaceContextHasTeamIdentity,
   type WorkspaceCollabContext,
@@ -76,7 +80,6 @@ import {
 } from '../analytics/events';
 import {
   countBucket,
-  stableAnalyticsRequestErrorCode,
   workspaceAnalyticsDimensions,
 } from '../analytics/workspace';
 import type { ProjectCollectionClickProps } from '@open-design/contracts/analytics';
@@ -486,24 +489,27 @@ export function RecentProjectsStrip({
   const [menuPlacement, setMenuPlacement] = useState<'down' | 'up'>('down');
   const [renameTarget, setRenameTarget] = useState<{ id: string; original: string } | null>(null);
   const [renameInput, setRenameInput] = useState('');
-  const [confirmTarget, setConfirmTarget] = useState<Project | null>(null);
-  // recvqbh189zBY6: commitDelete used to await onDelete and drop the result on
-  // the floor either way — a 403/network failure closed the dialog exactly
-  // like a success, leaving the project right where it was with no signal
-  // that anything went wrong. Track failure so the dialog can stay open and
-  // say so instead of silently doing nothing.
-  const [deleteFailed, setDeleteFailed] = useState(false);
-  const [deletePending, setDeletePending] = useState(false);
-  // Project → team-space sharing (the project card entry). The daemon gates on
-  // `canShareProjects` (403 off-team / no rights), so we only badge on success.
-  const [sharingId, setSharingId] = useState<string | null>(null);
-  const [unsharingId, setUnsharingId] = useState<string | null>(null);
-  const [shareErrorProjectId, setShareErrorProjectId] = useState<string | null>(null);
-  // 'owner-conflict' is the daemon's TEAM_PROJECT_OWNER_CONFLICT refusal: the
-  // team hub already registers this project under another member's ownership.
-  // That state is permanent until the registered owner unshares, so it gets
-  // its own message instead of the retryable 'share' hint.
-  const [shareErrorKind, setShareErrorKind] = useState<'share' | 'unshare' | 'owner-conflict'>('share');
+  // Delete confirm → request → settle, shared with the rail's 最近项目 rows
+  // (OPEND-2797) so both entry points open the very same dialog. A failed
+  // request keeps that dialog open with a visible reason (recvqbh189zBY6).
+  const deleteFlow = useProjectDeleteFlow({ onDelete, analyticsPage, workspaceContext });
+  const duplicateFlow = useProjectDuplicateFlow({ onDuplicate, analyticsPage, workspaceContext });
+  // Project → team-space sharing (the project card entry), through the flow
+  // the rail rows share. The card menu is this surface's progress readout: it
+  // stays open to say 分享中… and to hold the failure text, so a move keeps
+  // (re)opening it until the request succeeds.
+  const moveFlow = useWorkspaceProjectMove({
+    workspaceContext,
+    analyticsPage,
+    onProjectShared,
+    onProjectShareFailed,
+    onProjectUnshared,
+    onMoveStart: (project) => setMenuOpenId(project.id),
+    onMoveSettled: (project, _action, ok) => setMenuOpenId(ok ? null : project.id),
+  });
+  const { sharingId, unsharingId } = moveFlow;
+  const shareErrorProjectId = moveFlow.error?.projectId ?? null;
+  const shareErrorKind = moveFlow.error?.kind ?? 'share';
   // Whether a card is team-shared is decided upstream, not here — the grids'
   // 全部项目 / 草稿 partition reads the very same predicate, so the badge and the
   // card's grid can no longer disagree.
@@ -562,7 +568,6 @@ export function RecentProjectsStrip({
   const menuContainerRef = useRef<HTMLDivElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const renameTitleId = useId();
-  const confirmTitleId = useId();
   const moveTitleId = useId();
   const bulkMoveTitleId = useId();
   const bulkDeleteTitleId = useId();
@@ -1050,109 +1055,17 @@ export function RecentProjectsStrip({
       project_relation: 'self',
     });
     setMenuOpenId(null);
-    setDeleteFailed(false);
-    setConfirmTarget(project);
+    deleteFlow.request(project);
   }
 
   // Promote/demote a project through the same workspace move endpoint used by
   // the full project grid so cards and in-file sharing cannot drift.
-  async function handleShareToTeam(project: Project) {
-    const startedAt = performance.now();
-    setShareErrorProjectId(null);
-    setMenuOpenId(project.id);
-    setSharingId(project.id);
-    try {
-      const movedProject = await moveWorkspaceProject({
-        projectId: project.id,
-        visibility: 'team',
-        workspaceContext,
-      });
-      onProjectShared?.(movedProject);
-      notifyTeamProjectsChanged();
-      setMenuOpenId(null);
-      trackWorkspaceProjectActionResult(analytics.track, {
-        page_name: analyticsPage,
-        area: 'project_collection',
-        action: 'move_to_team',
-        result: 'success',
-        requested_count: 1,
-        succeeded_count: 1,
-        failed_count: 0,
-        duration_ms: Math.round(performance.now() - startedAt),
-        ...workspaceDimensions,
-      });
-    } catch (err) {
-      onProjectShareFailed?.(project.id);
-      console.warn('[RecentProjectsStrip] share project to team failed:', err);
-      setShareErrorProjectId(project.id);
-      setShareErrorKind(
-        workspaceProjectMoveErrorCode(err) === 'TEAM_PROJECT_OWNER_CONFLICT'
-          ? 'owner-conflict'
-          : 'share',
-      );
-      setMenuOpenId(project.id);
-      trackWorkspaceProjectActionResult(analytics.track, {
-        page_name: analyticsPage,
-        area: 'project_collection',
-        action: 'move_to_team',
-        result: 'failed',
-        requested_count: 1,
-        succeeded_count: 0,
-        failed_count: 1,
-        duration_ms: Math.round(performance.now() - startedAt),
-        error_code: workspaceProjectMoveErrorCode(err) ?? 'request_failed',
-        ...workspaceDimensions,
-      });
-    } finally {
-      setSharingId(null);
-    }
+  function handleShareToTeam(project: Project) {
+    return moveFlow.shareToTeam(project);
   }
 
-  async function handleUnshareFromTeam(project: Project) {
-    const startedAt = performance.now();
-    setShareErrorProjectId(null);
-    setMenuOpenId(project.id);
-    setUnsharingId(project.id);
-    try {
-      await moveWorkspaceProject({
-        projectId: project.id,
-        visibility: 'personal',
-        workspaceContext,
-      });
-      onProjectUnshared?.(project.id);
-      notifyTeamProjectsChanged();
-      setMenuOpenId(null);
-      trackWorkspaceProjectActionResult(analytics.track, {
-        page_name: analyticsPage,
-        area: 'project_collection',
-        action: 'move_to_personal',
-        result: 'success',
-        requested_count: 1,
-        succeeded_count: 1,
-        failed_count: 0,
-        duration_ms: Math.round(performance.now() - startedAt),
-        ...workspaceDimensions,
-      });
-    } catch (err) {
-      console.warn('[RecentProjectsStrip] unshare project from team failed:', err);
-      setShareErrorProjectId(project.id);
-      setShareErrorKind('unshare');
-      setMenuOpenId(project.id);
-      trackWorkspaceProjectActionResult(analytics.track, {
-        page_name: analyticsPage,
-        area: 'project_collection',
-        action: 'move_to_personal',
-        result: 'failed',
-        requested_count: 1,
-        succeeded_count: 0,
-        failed_count: 1,
-        duration_ms: Math.round(performance.now() - startedAt),
-        error_code: workspaceProjectMoveErrorCode(err) ?? 'request_failed',
-        ...workspaceDimensions,
-      });
-    } finally {
-      setUnsharingId(null);
-    }
+  function handleUnshareFromTeam(project: Project) {
+    return moveFlow.unshareFromTeam(project);
   }
 
   function requestDuplicate(project: Project) {
@@ -1168,94 +1081,7 @@ export function RecentProjectsStrip({
       project_relation: 'self',
     });
     setMenuOpenId(null);
-    const startedAt = performance.now();
-    void Promise.resolve(onDuplicate(project.id)).then(() => {
-      trackWorkspaceProjectActionResult(analytics.track, {
-        page_name: analyticsPage,
-        area: 'project_collection',
-        action: 'duplicate',
-        result: 'success',
-        requested_count: 1,
-        succeeded_count: 1,
-        failed_count: 0,
-        duration_ms: Math.round(performance.now() - startedAt),
-        ...workspaceDimensions,
-      });
-    }).catch((err) => {
-      console.warn('[RecentProjectsStrip] duplicate project failed:', err);
-      trackWorkspaceProjectActionResult(analytics.track, {
-        page_name: analyticsPage,
-        area: 'project_collection',
-        action: 'duplicate',
-        result: 'failed',
-        requested_count: 1,
-        succeeded_count: 0,
-        failed_count: 1,
-        duration_ms: Math.round(performance.now() - startedAt),
-        error_code: 'request_failed',
-        ...workspaceDimensions,
-      });
-    });
-  }
-
-  async function commitDelete() {
-    if (!confirmTarget || !onDelete || deletePending) return;
-    const target = confirmTarget;
-    const startedAt = performance.now();
-    setDeleteFailed(false);
-    setDeletePending(true);
-    try {
-      const result = await onDelete(target.id);
-      // A falsy result (false, or void from a caller that never resolves the
-      // promise either way) means the daemon refused or the request failed —
-      // keep the dialog open with a visible reason instead of closing it as
-      // if the project were gone (recvqbh189zBY6).
-      if (result === false) {
-        trackWorkspaceProjectActionResult(analytics.track, {
-          page_name: analyticsPage,
-          area: 'project_collection',
-          action: 'delete',
-          result: 'failed',
-          requested_count: 1,
-          succeeded_count: 0,
-          failed_count: 1,
-          duration_ms: Math.round(performance.now() - startedAt),
-          error_code: 'request_failed',
-          ...workspaceDimensions,
-        });
-        setDeleteFailed(true);
-        return;
-      }
-      setConfirmTarget(null);
-      trackWorkspaceProjectActionResult(analytics.track, {
-        page_name: analyticsPage,
-        area: 'project_collection',
-        action: 'delete',
-        result: 'success',
-        requested_count: 1,
-        succeeded_count: 1,
-        failed_count: 0,
-        duration_ms: Math.round(performance.now() - startedAt),
-        ...workspaceDimensions,
-      });
-    } catch (err) {
-      console.warn('[RecentProjectsStrip] delete project failed:', err);
-      setDeleteFailed(true);
-      trackWorkspaceProjectActionResult(analytics.track, {
-        page_name: analyticsPage,
-        area: 'project_collection',
-        action: 'delete',
-        result: 'failed',
-        requested_count: 1,
-        succeeded_count: 0,
-        failed_count: 1,
-        duration_ms: Math.round(performance.now() - startedAt),
-        error_code: stableAnalyticsRequestErrorCode(err),
-        ...workspaceDimensions,
-      });
-    } finally {
-      setDeletePending(false);
-    }
+    void duplicateFlow.duplicate(project);
   }
 
   function toggleSelection(projectId: string) {
@@ -1917,7 +1743,7 @@ export function RecentProjectsStrip({
                         project_key: project.id,
                         project_relation: creator.ownedBySelf ? 'self' : 'other',
                       });
-                      setShareErrorProjectId(null);
+                      moveFlow.clearError();
                       setMenuOpenId((current) => current === project.id ? null : project.id);
                     }}
                   >
@@ -2071,48 +1897,14 @@ export function RecentProjectsStrip({
           </DialogFooter>
         </Dialog>
       ) : null}
-      {confirmTarget ? (
-        <Dialog
-          className="modal-confirm"
-          role="alertdialog"
-          onClose={() => {
-            if (deletePending) return;
-            setConfirmTarget(null);
-            setDeleteFailed(false);
-          }}
-          closeOnBackdrop={!deletePending}
-          ariaLabelledBy={confirmTitleId}
-        >
-          <DialogTitle id={confirmTitleId}>{t('designs.deleteTitle')}</DialogTitle>
-          <DialogDescription>
-            {t('designs.deleteConfirm', { name: confirmTarget.name })}
-          </DialogDescription>
-          {deleteFailed ? (
-            <p className="recent-projects__card-menu-error" role="alert">
-              {t('ds.actionFailed')}
-            </p>
-          ) : null}
-          <DialogFooter className="row">
-            <button
-              type="button"
-              disabled={deletePending}
-              onClick={() => {
-                setConfirmTarget(null);
-                setDeleteFailed(false);
-              }}
-            >
-              {t('designs.renameCancel')}
-            </button>
-            <button
-              type="button"
-              className="primary danger"
-              disabled={deletePending}
-              onClick={() => void commitDelete()}
-            >
-              {t('designs.menuDelete')}
-            </button>
-          </DialogFooter>
-        </Dialog>
+      {deleteFlow.target ? (
+        <ProjectDeleteConfirmDialog
+          projectName={deleteFlow.target.name}
+          pending={deleteFlow.pending}
+          failed={deleteFlow.failed}
+          onCancel={deleteFlow.cancel}
+          onConfirm={() => void deleteFlow.commit()}
+        />
       ) : null}
       {moveTarget ? (
         <Dialog

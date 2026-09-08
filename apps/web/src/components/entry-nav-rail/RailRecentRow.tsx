@@ -5,17 +5,17 @@
 // `ProjectHoverPreview.tsx`, shared with the chat project switcher so both
 // surfaces show one and the same card for a project (OPEND-2694).
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import type { ProjectDisplayStatus, WorkspaceCollabContext } from '@open-design/contracts';
 
 import { useT } from '../../i18n';
-import { RemixIcon } from '../RemixIcon';
+import { Icon } from '../Icon';
 import { hasRunStatusGlyph, ProjectRunStatusIcon } from '../ProjectRunStatusIcon';
 import { STATUS_LABEL_KEYS } from '../../state/projectRunStatus';
-import { exportProjectAsZip } from '../../runtime/exports';
 import type { Project } from '../../types';
+import type { ProjectMoveErrorKind } from '../project-actions/useWorkspaceProjectMove';
 import { ProjectHoverPreviewCard, useProjectHoverCover } from './ProjectHoverPreview';
 
 /**
@@ -41,6 +41,21 @@ function claimPopup(next: PopupClaim) {
  *  by an earlier row's pointer-leave arriving afterwards. */
 function releasePopup(rowId: string, kind: 'preview' | 'menu') {
   if (popupClaim?.rowId === rowId && popupClaim.kind === kind) claimPopup(null);
+}
+
+/**
+ * Open (or close) one row's ⋮ menu from outside the row. The menu is where a
+ * row reports the progress and the failure of a move to the team space — the
+ * same readout the project cards keep in THEIR menu — but the confirm dialog
+ * that precedes the move has already dismissed it, so the section re-opens it
+ * once the request is on its way. The row measures its own anchor when the
+ * claim lands (see `useLayoutEffect` in `RailRecentRow`).
+ */
+export function openRailRecentRowMenu(rowId: string) {
+  claimPopup({ rowId, kind: 'menu' });
+}
+export function closeRailRecentRowMenu(rowId: string) {
+  releasePopup(rowId, 'menu');
 }
 
 /** Gap between the rail's right edge and the popup that hangs off it (per
@@ -138,8 +153,15 @@ export function RailRecentRow({
   project,
   workspaceContext,
   runStatus,
+  ownedBySelf = true,
+  shared = false,
+  moveToTeamAvailable = false,
+  sharing = false,
+  shareError = null,
   onOpen,
   onRename,
+  onDuplicate,
+  onMoveToTeam,
   onDelete,
 }: {
   project: Project;
@@ -147,9 +169,28 @@ export function RailRecentRow({
   /** This project's live run status, when it has one (per product: 如果有项目在
    *  进行，这个 icon 换成状态). Drives the leading glyph and nothing else. */
   runStatus?: ProjectDisplayStatus;
+  /** The daemon's canMutate is privileged-or-self-created and 403s the rest,
+   *  so a row someone else shared keeps its mutations disabled with the same
+   *  explanation the project cards give (`recentProjects.ownOnlyMutation`). */
+  ownedBySelf?: boolean;
+  /** Already in the team space: 转入团队空间 reads 已在团队空间 and is inert. */
+  shared?: boolean;
+  /** Whether the workspace has a team plane to move into at all; a personal
+   *  workspace hides the item entirely rather than offering a 403. */
+  moveToTeamAvailable?: boolean;
+  /** A move for THIS row is in flight: the item reads 分享中… and is inert. */
+  sharing?: boolean;
+  /** The last move for THIS row failed; shown under the items until the menu
+   *  closes. */
+  shareError?: ProjectMoveErrorKind | null;
   onOpen?: (id: string) => void | Promise<unknown>;
   onRename?: (id: string, name: string) => void;
-  onDelete?: (id: string) => Promise<boolean | void> | boolean | void;
+  onDuplicate?: (project: Project) => void;
+  onMoveToTeam?: (project: Project) => void;
+  /** Asks the SECTION to confirm (OPEND-2797): the row never deletes on its
+   *  own — the confirmation is the shared project delete dialog, the same one
+   *  the project cards open. */
+  onDelete?: (project: Project) => void;
 }) {
   const t = useT();
   const hoverCover = useProjectHoverCover(project, workspaceContext);
@@ -166,19 +207,24 @@ export function RailRecentRow({
   }, []);
   const ownsPreview = claim?.rowId === project.id && claim.kind === 'preview';
   const menuOpen = claim?.rowId === project.id && claim.kind === 'menu';
+  const rootRef = useRef<HTMLDivElement | null>(null);
   // The menu opens where the preview would have been (per product), which puts
-  // it outside the rail — so it needs its own anchor, frozen at click time.
-  // `anchor` cannot serve: it is cleared the moment the pointer leaves the row,
-  // which happens on the way to the menu itself.
+  // it outside the rail — so it needs its own anchor, frozen when the menu
+  // claim lands. `anchor` cannot serve: it is cleared the moment the pointer
+  // leaves the row, which happens on the way to the menu itself. Measured in
+  // an effect rather than in the ⋮ click so a menu the SECTION opens (to show
+  // a move's progress, see `openRailRecentRowMenu`) lands on the row too.
   const [menuAnchor, setMenuAnchor] = useState<{ top: number; left: number } | null>(null);
-  // Delete asks in place rather than through a dialog: the rail is a narrow
-  // column and a modal over it to confirm a one-line row is heavier than the
-  // action. The menu swaps to a confirm row and the click that destroys is a
-  // second, differently-labelled one.
-  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  useLayoutEffect(() => {
+    if (!menuOpen) {
+      setMenuAnchor(null);
+      return;
+    }
+    const rect = rootRef.current?.getBoundingClientRect();
+    if (rect) setMenuAnchor({ top: rect.top + rect.height / 2, left: rect.right + POPUP_GAP_PX });
+  }, [menuOpen]);
   const [renaming, setRenaming] = useState(false);
   const [draftName, setDraftName] = useState(project.name);
-  const rootRef = useRef<HTMLDivElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   useEffect(() => {
@@ -194,7 +240,6 @@ export function RailRecentRow({
     if (!menuOpen) return undefined;
     function close() {
       releasePopup(project.id, 'menu');
-      setConfirmingDelete(false);
     }
     function onDocPointerDown(event: PointerEvent) {
       const target = event.target as Node;
@@ -231,6 +276,9 @@ export function RailRecentRow({
     if (!next || next === project.name) return;
     onRename?.(project.id, next);
   }
+
+  const hasMenu = Boolean(onRename || onDuplicate || onDelete || (moveToTeamAvailable && onMoveToTeam));
+  const foreignTitle = ownedBySelf ? undefined : t('recentProjects.ownOnlyMutation');
 
   return (
     <div
@@ -307,7 +355,7 @@ export function RailRecentRow({
           <span className="entry-nav-rail__recent-name">{project.name}</span>
         </button>
       )}
-      {onRename || onDelete ? (
+      {hasMenu ? (
         <button
           type="button"
           className="entry-nav-rail__recent-more"
@@ -320,9 +368,6 @@ export function RailRecentRow({
              is what made it impossible to click through to. */
           onClick={(event) => {
             event.stopPropagation();
-            setConfirmingDelete(false);
-            const rect = rootRef.current?.getBoundingClientRect();
-            if (rect) setMenuAnchor({ top: rect.top + rect.height / 2, left: rect.right + POPUP_GAP_PX });
             if (menuOpen) releasePopup(project.id, 'menu');
             else claimPopup({ rowId: project.id, kind: 'menu' });
           }}
@@ -333,20 +378,26 @@ export function RailRecentRow({
       {/* Same slot as the hover preview — beside the row, clear of the rail
           (per product: 弹窗的位置就是预览图的位置). Portalled for the same
           reason the preview is: inside the rail it would sit behind the content
-          column whatever its z-index. */}
+          column whatever its z-index.
+
+          Items, in order: 重命名 / 复制 / 转入团队空间 (team workspaces only) /
+          删除 — the product's list for this menu (OPEND-2686, OPEND-2794). No
+          导出: a list row has no rendered file to export, and the whole-project
+          archive the old item offered is not what this menu is for. */}
       {menuOpen && menuAnchor && typeof document !== 'undefined' ? createPortal(
         <div
           ref={menuRef}
           className="entry-nav-rail__recent-menu"
           role="menu"
+          data-testid="entry-nav-recent-menu"
           style={{ top: menuAnchor.top, left: menuAnchor.left }}
-          /* The pointer arriving here is what cancels the close the ⋮ scheduled
-             when it left; leaving the menu closes it. */
         >
           {onRename ? (
             <button
               type="button"
               role="menuitem"
+              disabled={!ownedBySelf}
+              title={foreignTitle}
               onClick={() => {
                 releasePopup(project.id, 'menu');
                 setDraftName(project.name);
@@ -357,63 +408,73 @@ export function RailRecentRow({
               <span>{t('designs.menuRename')}</span>
             </button>
           ) : null}
-          {/* Export sits between Rename and Delete (per product: 增加一个导出，
-              在删除上边). It is the ONE export a list row can honestly offer:
-              the project is not open here, so there is no rendered file to turn
-              into a PDF / image / standalone HTML — those four rows in the
-              viewer all need a loaded source. The whole-project archive needs
-              nothing but the id, so that is what this is.
-              Calls the shared runtime helper directly rather than taking an
-              `onExport` prop like its neighbours: Rename and Delete mutate
-              state the parent owns, while this one is a download — no parent
-              has anything to do with it.
-              `preview.exportMenu` is the bare word "Export" already translated
-              in all 19 locales (导出 / 匯出 / Exporter …); same reasoning as the
-              `designs.renameSave` reuse below, rather than a 20th copy of one
-              word in every file. */}
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => {
-              releasePopup(project.id, 'menu');
-              // No file scope: an empty `filePath` leaves `root` off the
-              // archive URL, which is what asks for the whole project.
-              void exportProjectAsZip({
-                projectId: project.id,
-                filePath: '',
-                fallbackHtml: '',
-                fallbackTitle: project.name,
-                workspaceContext,
-              });
-            }}
-          >
-            {/* The viewer's Export button glyph (per product), from the same
-                shared set it uses there — `RemixIcon name="download-line"`,
-                sized to this menu's 14px marks. */}
-            <RemixIcon name="download-line" size={14} />
-            <span>{t('preview.exportMenu')}</span>
-          </button>
+          {onDuplicate ? (
+            <button
+              type="button"
+              role="menuitem"
+              disabled={!ownedBySelf}
+              title={foreignTitle}
+              onClick={() => {
+                releasePopup(project.id, 'menu');
+                onDuplicate(project);
+              }}
+            >
+              <Icon name="copy" size={14} />
+              <span>{t('designs.menuDuplicate')}</span>
+            </button>
+          ) : null}
+          {/* Hidden, not disabled, in a workspace with no team plane: there is
+              nowhere to move to, and a disabled 转入团队空间 would name a place
+              the workspace cannot have (OPEND-2794: 无可用团队空间时按产品规则
+              隐藏). A shared row and a foreign row keep the item and explain
+              themselves instead. */}
+          {moveToTeamAvailable && onMoveToTeam ? (
+            <button
+              type="button"
+              role="menuitem"
+              disabled={sharing || shared || !ownedBySelf}
+              title={foreignTitle}
+              data-testid="entry-nav-recent-move-to-team"
+              onClick={() => {
+                releasePopup(project.id, 'menu');
+                onMoveToTeam(project);
+              }}
+            >
+              <Icon name="share" size={14} />
+              <span>
+                {sharing
+                  ? t('recentProjects.shareInProgress')
+                  : shared
+                    ? t('recentProjects.sharedInTeam')
+                    : t('recentProjects.moveToTeam')}
+              </span>
+            </button>
+          ) : null}
+          {shareError ? (
+            <div className="entry-nav-rail__recent-menu-error" role="alert">
+              {t(
+                shareError === 'unshare'
+                  ? 'recentProjects.unshareFailed'
+                  : shareError === 'owner-conflict'
+                    ? 'recentProjects.shareOwnerConflict'
+                    : 'recentProjects.shareFailed',
+              )}
+            </div>
+          ) : null}
           {onDelete ? (
             <button
               type="button"
               role="menuitem"
-              className={confirmingDelete ? 'is-danger' : undefined}
+              className="is-danger"
+              disabled={!ownedBySelf}
+              title={foreignTitle}
               onClick={() => {
-                if (!confirmingDelete) {
-                  setConfirmingDelete(true);
-                  return;
-                }
                 releasePopup(project.id, 'menu');
-                setConfirmingDelete(false);
-                void onDelete(project.id);
+                onDelete(project);
               }}
             >
               <DeleteMark />
-              {/* `designs.renameSave` is the generic confirm word in every
-                  locale (确定 / OK) — it just happens to live under the rename
-                  dialog. Reused rather than adding a 20th copy of the same
-                  string to all 19 locale files. */}
-              <span>{confirmingDelete ? t('designs.renameSave') : t('designs.menuDelete')}</span>
+              <span>{t('designs.menuDelete')}</span>
             </button>
           ) : null}
         </div>,

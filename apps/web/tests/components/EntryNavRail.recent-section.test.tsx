@@ -22,6 +22,27 @@ const signedInContext = {
   permissions: { canInviteMembers: false, canViewWorkspaceSettings: false },
 } as unknown as WorkspaceCollabContext;
 
+const teamContext = {
+  ...signedInContext,
+  workspaceId: 'ws-team',
+  workspaceType: 'team',
+  permissions: {
+    canInviteMembers: false,
+    canViewWorkspaceSettings: false,
+    canShareProjects: true,
+  },
+} as unknown as WorkspaceCollabContext;
+
+/** What `POST …/projects/:id/move` answers; tests flip it to a refusal. */
+let MOVE_STATUS = 200;
+
+function moveRequests(): string[] {
+  return vi.mocked(fetch).mock.calls
+    .filter(([, init]) => init?.method === 'POST')
+    .map(([url]) => String(url))
+    .filter((url) => /\/projects\/[^/]+\/move$/.test(url));
+}
+
 function project(id: string, updatedAt: number, name = `Project ${id}`): Project {
   return {
     id,
@@ -48,8 +69,18 @@ let RUNS: Record<string, RunFixture> = { ...DEFAULT_RUNS };
 const originalFetch = globalThis.fetch;
 
 function stubFetch() {
-  globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+  globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+    const moveMatch = /^\/api\/workspaces\/[^/]+\/projects\/([^/]+)\/move$/.exec(url);
+    if (moveMatch && init?.method === 'POST') {
+      const id = decodeURIComponent(moveMatch[1]!);
+      return new Response(
+        JSON.stringify(MOVE_STATUS === 200
+          ? { id, name: `Project ${id}`, workspaceId: 'ws-team', visibility: 'team', project: { id } }
+          : { error: { code: 'FORBIDDEN', message: 'no' } }),
+        { status: MOVE_STATUS, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
     const match = /^\/api\/runs\?projectId=([^&]+)$/.exec(url);
     if (match) {
       const id = decodeURIComponent(match[1]!);
@@ -79,6 +110,7 @@ function renderRail(overrides: Partial<Parameters<typeof EntryNavRail>[0]> = {})
   const onOpen = vi.fn();
   const onRename = vi.fn();
   const onDelete = vi.fn(async () => true);
+  const onDuplicate = vi.fn(async () => {});
   render(
     <I18nProvider initial="en">
       <EntryNavRail
@@ -92,11 +124,12 @@ function renderRail(overrides: Partial<Parameters<typeof EntryNavRail>[0]> = {})
         onOpenRecentProject={onOpen}
         onRenameRecentProject={onRename}
         onDeleteRecentProject={onDelete}
+        onDuplicateRecentProject={onDuplicate}
         {...overrides}
       />
     </I18nProvider>,
   );
-  return { onOpen, onRename, onDelete };
+  return { onOpen, onRename, onDelete, onDuplicate };
 }
 
 let reportVisibleRows: (start: number, end: number) => void;
@@ -119,6 +152,7 @@ beforeEach(() => {
   vi.stubGlobal('IntersectionObserver', VisibleRowsObserver);
   window.localStorage.clear();
   RUNS = { ...DEFAULT_RUNS };
+  MOVE_STATUS = 200;
   stubFetch();
 });
 
@@ -257,20 +291,22 @@ describe('EntryNavRail 最近浏览过 section', () => {
     expect(screen.getByTestId('entry-nav-recent-toggle').getAttribute('aria-expanded')).toBe('false');
   });
 
-  it('offers rename and a two-step delete from the row menu', async () => {
-    const { onDelete, onRename } = renderRail();
-    const more = screen.getAllByTestId('entry-nav-recent-more')[0]!;
-    fireEvent.click(more);
+  it('offers rename / duplicate / delete in a personal workspace — no export, no team item', () => {
+    const { onDuplicate } = renderRail();
+    fireEvent.click(screen.getAllByTestId('entry-nav-recent-more')[0]!);
     const menu = screen.getByRole('menu');
-    const items = within(menu).getAllByRole('menuitem').map((item) => item.textContent);
-    expect(items).toEqual(['Rename', 'Export', 'Delete']);
+    // OPEND-2686: 导出 is gone; 复制 sits between 重命名 and 删除. OPEND-2794: a
+    // personal workspace has no team plane, so 转入团队空间 is hidden here.
+    expect(within(menu).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(
+      ['Rename', 'Duplicate project', 'Delete'],
+    );
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Duplicate project' }));
+    expect(onDuplicate).toHaveBeenCalledWith('p1');
+    expect(screen.queryByRole('menu')).toBeNull();
+  });
 
-    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Delete' }));
-    // First click only arms the destructive action.
-    expect(onDelete).not.toHaveBeenCalled();
-    fireEvent.click(within(screen.getByRole('menu')).getByRole('menuitem', { name: 'OK' }));
-    expect(onDelete).toHaveBeenCalledWith('p1');
-
+  it('renames inline from the row menu', async () => {
+    const { onRename } = renderRail();
     fireEvent.click(screen.getAllByTestId('entry-nav-recent-more')[1]!);
     fireEvent.click(within(screen.getByRole('menu')).getByRole('menuitem', { name: 'Rename' }));
     const input = screen.getByRole('textbox', { name: 'Rename' }) as HTMLInputElement;
@@ -280,5 +316,114 @@ describe('EntryNavRail 最近浏览过 section', () => {
       fireEvent.keyDown(input, { key: 'Enter' });
     });
     expect(onRename).toHaveBeenCalledWith('p2', 'Renamed');
+  });
+
+  it('confirms delete in the shared dialog: names the project, backs out on Esc / 取消, submits once', async () => {
+    let resolveDelete!: (value: boolean) => void;
+    const onDelete = vi.fn(() => new Promise<boolean>((resolve) => { resolveDelete = resolve; }));
+    renderRail({ onDeleteRecentProject: onDelete });
+    const openDelete = () => {
+      fireEvent.click(screen.getAllByTestId('entry-nav-recent-more')[0]!);
+      fireEvent.click(within(screen.getByRole('menu')).getByRole('menuitem', { name: 'Delete' }));
+      return screen.getByRole('alertdialog');
+    };
+    // OPEND-2797: the menu item no longer arms in place — nothing is deleted
+    // until the dialog's own red 删除 is pressed.
+    let dialog = openDelete();
+    expect(onDelete).not.toHaveBeenCalled();
+    expect(within(dialog).getByText('Delete "Project p1"?')).toBeTruthy();
+    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toBeTruthy();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(onDelete).not.toHaveBeenCalled();
+
+    dialog = openDelete();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+
+    dialog = openDelete();
+    const confirm = within(dialog).getByRole('button', { name: 'Delete' });
+    fireEvent.click(confirm);
+    fireEvent.click(confirm);
+    expect(onDelete).toHaveBeenCalledTimes(1);
+    expect(onDelete).toHaveBeenCalledWith('p1');
+    // In flight: both buttons lock, and the scrim / Esc cannot dismiss it.
+    expect((confirm as HTMLButtonElement).disabled).toBe(true);
+    expect((within(dialog).getByRole('button', { name: 'Cancel' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.getByRole('alertdialog')).toBe(dialog);
+    await act(async () => resolveDelete(true));
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+  });
+
+  it('keeps the delete dialog open with a visible error when the request fails', async () => {
+    const onDelete = vi.fn(async () => false);
+    renderRail({ onDeleteRecentProject: onDelete });
+    fireEvent.click(screen.getAllByTestId('entry-nav-recent-more')[0]!);
+    fireEvent.click(within(screen.getByRole('menu')).getByRole('menuitem', { name: 'Delete' }));
+    const dialog = screen.getByRole('alertdialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
+    await waitFor(() => {
+      expect(onDelete).toHaveBeenCalledWith('p1');
+      expect(within(dialog).getByRole('alert')).toBeTruthy();
+    });
+    expect(screen.getByRole('alertdialog')).toBe(dialog);
+    expect((within(dialog).getByRole('button', { name: 'Delete' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('offers 转入团队空间 in a team workspace through the shared confirm dialog and reports progress in the row menu', async () => {
+    const onProjectShared = vi.fn();
+    renderRail({
+      context: teamContext,
+      onRecentProjectShared: onProjectShared,
+      isSharedRecentProject: (id) => id === 'p2',
+    });
+    fireEvent.click(screen.getAllByTestId('entry-nav-recent-more')[0]!);
+    const menu = screen.getByRole('menu');
+    expect(within(menu).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(
+      ['Rename', 'Duplicate project', 'Move to team space', 'Delete'],
+    );
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Move to team space' }));
+    // The same confirmation the project cards show — nothing moves yet.
+    const dialog = screen.getByRole('alertdialog', { name: 'Move to team space' });
+    expect(moveRequests()).toHaveLength(0);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm move' }));
+    await waitFor(() => expect(moveRequests()).toHaveLength(1));
+    expect(moveRequests()[0]).toBe('/api/workspaces/ws-team/projects/p1/move');
+    await waitFor(() => expect(onProjectShared).toHaveBeenCalledWith(expect.objectContaining({ id: 'p1' })));
+    // The row menu re-opened to say 分享中… and closes on success.
+    await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+
+    // A project already in the team space says so and cannot be moved again.
+    fireEvent.click(screen.getAllByTestId('entry-nav-recent-more')[1]!);
+    const shared = within(screen.getByRole('menu')).getByRole('menuitem', { name: 'In team space' });
+    expect((shared as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('keeps the row menu open with the failure when the move is refused', async () => {
+    MOVE_STATUS = 403;
+    const onProjectShareFailed = vi.fn();
+    renderRail({ context: teamContext, onRecentProjectShareFailed: onProjectShareFailed });
+    fireEvent.click(screen.getAllByTestId('entry-nav-recent-more')[0]!);
+    fireEvent.click(within(screen.getByRole('menu')).getByRole('menuitem', { name: 'Move to team space' }));
+    fireEvent.click(
+      within(screen.getByRole('alertdialog', { name: 'Move to team space' })).getByRole('button', { name: 'Confirm move' }),
+    );
+    await waitFor(() => expect(onProjectShareFailed).toHaveBeenCalledWith('p1'));
+    const menu = await screen.findByRole('menu');
+    expect(within(menu).getByRole('alert').textContent).toBe('Could not move to team space. Try again.');
+  });
+
+  it('disables mutations on a row someone else shared', () => {
+    renderRail({
+      context: teamContext,
+      isSharedRecentProject: (id) => id === 'p1',
+      recentProjectOwnerMemberIds: new Map([['p1', 'wm-other']]),
+    });
+    fireEvent.click(screen.getAllByTestId('entry-nav-recent-more')[0]!);
+    const menu = screen.getByRole('menu');
+    for (const name of ['Rename', 'Duplicate project', 'In team space', 'Delete']) {
+      expect((within(menu).getByRole('menuitem', { name }) as HTMLButtonElement).disabled, name).toBe(true);
+    }
   });
 });
