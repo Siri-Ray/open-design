@@ -836,6 +836,7 @@ export const hu: Dict = {
   'entry.authExpiredBody': 'Your sign-in has expired. Sign in to continue using OpenDesign Cloud.',
   'home.createFailed': 'Failed to start the run. Try again.',
   'home.daemonRecovering': 'Local service connection interrupted. Recovering automatically…',
+  'home.createTimedOut': 'A projekt előkészítése túllépte az időkorlátot, és nem indult el. Küldd el újra.',
   'home.bundledScenarioMissing': 'Bundled scenario "{scenarioId}" is not installed. Reinstall the daemon to restore the default plugin set.',
   "entry.cloudCalloutBody": "Jelentkezzen be az OpenDesign Cloud használatához és a felhőalapú együttműködéshez",
   "entry.cloudCalloutDismissAria": "OpenDesign Cloud értesítés bezárása",

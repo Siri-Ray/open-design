@@ -836,6 +836,7 @@ export const ru: Dict = {
   'entry.authExpiredBody': 'Your sign-in has expired. Sign in to continue using OpenDesign Cloud.',
   'home.createFailed': 'Failed to start the run. Try again.',
   'home.daemonRecovering': 'Local service connection interrupted. Recovering automatically…',
+  'home.createTimedOut': 'Подготовка проекта не уложилась в отведённое время и не была запущена. Отправьте ещё раз.',
   'home.bundledScenarioMissing': 'Bundled scenario "{scenarioId}" is not installed. Reinstall the daemon to restore the default plugin set.',
   "entry.cloudCalloutBody": "Войдите, чтобы использовать OpenDesign Cloud и работать совместно в облаке",
   "entry.cloudCalloutDismissAria": "Закрыть уведомление OpenDesign Cloud",

@@ -1225,6 +1225,8 @@ export interface Dict {
   'entry.authExpiredBody': string;
   'home.createFailed': string;
   'home.daemonRecovering': string;
+  /** Toast after POST /api/projects answered PROJECT_CREATE_PREPARATION_TIMEOUT. */
+  'home.createTimedOut': string;
   'home.bundledScenarioMissing': string;
   'entry.cloudCalloutBody': string;
   'entry.cloudCalloutDismissAria': string;

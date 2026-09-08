@@ -55,6 +55,11 @@ import {
   renderPluginBriefTemplate,
   resolvePluginQueryFallback,
 } from '../state/projects';
+import {
+  HOME_COMPOSER_ATTACHMENTS_EVENT,
+  clearHomeComposerAttachments,
+  peekHomeComposerAttachments,
+} from '../state/home-composer-stash';
 import { FigmaImportModal } from './FigmaImportModal';
 import { fetchMcpServers } from '../state/mcp';
 import { takeHomeComposerAssetSeed } from '../state/libraryHandoff';
@@ -638,7 +643,17 @@ export function HomeView({
   const [selectedMcpContexts, setSelectedMcpContexts] = useState<SelectedMcpContext[]>([]);
   const [selectedConnectorContexts, setSelectedConnectorContexts] = useState<SelectedConnectorContext[]>([]);
   const [contextWorkspaceItems, setContextWorkspaceItems] = useState<WorkspaceContextItem[]>([]);
-  const [stagedFiles, setStagedFiles] = useState<File[]>([]);
+  // A failed optimistic create hands the staged attachments back through the
+  // stash (App owns the rollback); a plain mount starts empty. `peek` is
+  // side-effect free on purpose: StrictMode invokes this initializer twice and
+  // keeps only one result, so consuming here would hand the files to the
+  // discarded call. The effect below clears the slot once they are in state.
+  const [stagedFiles, setStagedFiles] = useState<File[]>(() =>
+    ownsComposerDraft ? peekHomeComposerAttachments() : [],
+  );
+  useEffect(() => {
+    if (ownsComposerDraft) clearHomeComposerAttachments();
+  }, [ownsComposerDraft]);
   const [workingDir, setWorkingDir] = useState<string | null>(null);
   // Token paired with `workingDir` when picked through the desktop host's
   // native dialog. Spent on the post-creation working-dir POST so the
@@ -778,6 +793,21 @@ export function HomeView({
     window.addEventListener(HOME_COMPOSER_SEED_EVENT, onSeed);
     return () => window.removeEventListener(HOME_COMPOSER_SEED_EVENT, onSeed);
   }, [variant]);
+  // The attachment hand-off's second consumer: a failed optimistic create that
+  // lands while this page composer is already mounted (the user pressed Back on
+  // the pending frame mid-create) cannot rely on the mount initializer above,
+  // so take the stash on the event instead. Page variant only, like the draft.
+  useEffect(() => {
+    if (!ownsComposerDraft) return;
+    function onAttachmentsHandedBack() {
+      const files = peekHomeComposerAttachments();
+      if (files.length === 0) return;
+      clearHomeComposerAttachments();
+      setStagedFiles((current) => [...current, ...files]);
+    }
+    window.addEventListener(HOME_COMPOSER_ATTACHMENTS_EVENT, onAttachmentsHandedBack);
+    return () => window.removeEventListener(HOME_COMPOSER_ATTACHMENTS_EVENT, onAttachmentsHandedBack);
+  }, [ownsComposerDraft]);
   const [figmaModalOpen, setFigmaModalOpen] = useState(false);
   const examplePromptInfoRef = useRef<ExamplePromptInfo | null>(null);
   const handleExamplePromptStatusChange = useCallback((info: ExamplePromptInfo | null) => {
