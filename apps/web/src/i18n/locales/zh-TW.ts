@@ -843,6 +843,7 @@ export const zhTW: Dict = {
   'entry.authExpiredBody': '登入狀態已過期。登入後即可繼續使用 OpenDesign Cloud。',
   'home.createFailed': '啟動任務失敗，請再試一次。',
   'home.daemonRecovering': '本機服務連線中斷，正在自動恢復…',
+  'home.createTimedOut': '專案準備逾時，任務尚未開始。請重新傳送。',
   'home.bundledScenarioMissing': '內建場景「{scenarioId}」未安裝。請重新安裝 OpenDesign，以還原預設外掛。',
   "entry.cloudCalloutBody": "登入即可享受雲端協作",
   "entry.cloudCalloutDismissAria": "關閉 OpenDesign Cloud 版說明",

@@ -55,6 +55,7 @@ import {
   renderPluginBriefTemplate,
   resolvePluginQueryFallback,
 } from '../state/projects';
+import { takeHomeComposerAttachments } from '../state/home-composer-stash';
 import { FigmaImportModal } from './FigmaImportModal';
 import { fetchMcpServers } from '../state/mcp';
 import { takeHomeComposerAssetSeed } from '../state/libraryHandoff';
@@ -638,7 +639,11 @@ export function HomeView({
   const [selectedMcpContexts, setSelectedMcpContexts] = useState<SelectedMcpContext[]>([]);
   const [selectedConnectorContexts, setSelectedConnectorContexts] = useState<SelectedConnectorContext[]>([]);
   const [contextWorkspaceItems, setContextWorkspaceItems] = useState<WorkspaceContextItem[]>([]);
-  const [stagedFiles, setStagedFiles] = useState<File[]>([]);
+  // A failed optimistic create hands the staged attachments back through the
+  // stash (App owns the rollback); a plain mount takes an empty list.
+  const [stagedFiles, setStagedFiles] = useState<File[]>(() =>
+    ownsComposerDraft ? takeHomeComposerAttachments() : [],
+  );
   const [workingDir, setWorkingDir] = useState<string | null>(null);
   // Token paired with `workingDir` when picked through the desktop host's
   // native dialog. Spent on the post-creation working-dir POST so the

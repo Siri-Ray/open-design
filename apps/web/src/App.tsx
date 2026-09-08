@@ -88,6 +88,9 @@ import {
 } from './components/SettingsDialog';
 import { PrivacyConsentModal } from './components/PrivacyConsentModal';
 import {
+  stashHomeComposerAttachments,
+} from './state/home-composer-stash';
+import {
   daemonIsLive,
   fetchAppVersionInfo,
   fetchAgentsStream,
@@ -208,6 +211,7 @@ import {
   duplicatePluginAsProject,
   patchProject,
   resolvedWorkspaceContextForWrite,
+  ProjectCreateError,
 } from './state/projects';
 import { useModalWindowDragGuard } from './hooks/useModalWindowDragGuard';
 import { resumeThumbnailLoads, suspendThumbnailLoads } from './lib/thumbnail-load-gate';
@@ -269,9 +273,18 @@ type AppCreateProjectInput = Omit<CreateInput, 'metadata'> & {
   onboardingEntry?: OnboardingEntry;
 };
 
+/**
+ * Everything the optimistic project surface shows while POST /api/projects is
+ * in flight. It is self-contained on purpose: the pending frame must render on
+ * the tick the request is sent and keep rendering even if a project-list
+ * refresh drops the optimistic row before the daemon confirms the id.
+ */
 interface PendingProjectCreation {
   projectId: string;
+  name: string;
   prompt: string;
+  /** Home composer attachments; uploaded only after the project exists. */
+  attachments: File[];
 }
 
 const APP_CONFIG_CHANGED_EVENT = 'open-design:app-config-changed';
@@ -2922,6 +2935,9 @@ function AppInner() {
         kind === 'template' ? 'template' : 'blank';
       let createWorkspaceContext: WorkspaceCollabContext | null = null;
       let optimisticProjectId: string | null = null;
+      const stagedHomeAttachments = Array.isArray(input.pendingFiles)
+        ? input.pendingFiles.filter((file): file is File => file instanceof File)
+        : [];
       let result;
       try {
         // PRODUCT INVARIANT: ordinary project creation is local. Reuse a
@@ -2971,7 +2987,9 @@ function AppInner() {
           flushSync(() => {
             setPendingProjectCreation({
               projectId: optimisticProjectId!,
+              name: optimisticProject.name,
               prompt: derivedPendingPrompt ?? '',
+              attachments: stagedHomeAttachments,
             });
             setProjects((current) => [
               optimisticProject,
@@ -3039,13 +3057,22 @@ function AppInner() {
           setProjects((current) => current.filter((project) => project.id !== optimisticProjectId));
           setPendingProjectCreation((current) =>
             current?.projectId === optimisticProjectId ? null : current);
+          // Home remounts on the way back and restores its prompt draft on its
+          // own; the staged File objects have no persisted draft, so hand them
+          // back explicitly and the retry sends the same payload.
+          stashHomeComposerAttachments(stagedHomeAttachments);
           if (
             routeRef.current.kind === 'project'
             && routeRef.current.projectId === optimisticProjectId
           ) {
             navigate({ kind: 'home', view: 'home' });
           }
-          setProjectCreateError(errorCode);
+          setProjectCreateError(
+            err instanceof ProjectCreateError
+            && err.code === 'PROJECT_CREATE_PREPARATION_TIMEOUT'
+              ? t('home.createTimedOut')
+              : errorCode,
+          );
           return false;
         }
         throw err;
@@ -3283,7 +3310,7 @@ function AppInner() {
       }
       return true;
     },
-    [analytics.track, clearLocalProject, rememberLocalProject],
+    [analytics.track, clearLocalProject, rememberLocalProject, t],
   );
 
   const handleCreateProjectFromDesignSystem = useCallback(
@@ -5124,8 +5151,11 @@ function AppInner() {
   } else if (route.kind === 'home' && route.view === 'settings') {
     appMain = renderSettingsSurface('page');
   } else if (route.kind === 'project') {
+    // Keyed on the route, not on `activeProject`: the pending frame is built
+    // from the creation record alone so it shows on the tick the create request
+    // leaves, and survives a list refresh that has not seen the new row yet.
     const pendingCreation =
-      activeProject && pendingProjectCreation?.projectId === activeProject.id
+      pendingProjectCreation?.projectId === route.projectId
         ? pendingProjectCreation
         : null;
     const routeSurfaceState = projectRouteSurfaceState({
@@ -5137,7 +5167,7 @@ function AppInner() {
           ? deepLinkResolutionFailure.failure
           : undefined,
     });
-    if (pendingCreation && activeProject) {
+    if (pendingCreation) {
       // Same `div.app` element as the ProjectView branch below, deliberately.
       // React reconciles one element across the pending -> real hand-off, so
       // the `.app` entrance animation plays once for the whole transition
@@ -5147,8 +5177,9 @@ function AppInner() {
       appMain = (
         <div className="app">
           <ProjectCreationPendingView
-            project={activeProject}
+            projectName={activeProject?.name ?? pendingCreation.name}
             prompt={pendingCreation.prompt}
+            attachments={pendingCreation.attachments}
             agentId={config.agentId}
             onBack={handleBack}
           />

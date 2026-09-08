@@ -841,6 +841,7 @@ export const zhCN: Dict = {
   'entry.authExpiredBody': '登录状态已过期。登录后即可继续使用 OpenDesign Cloud。',
   'home.createFailed': '启动任务失败，请重试。',
   'home.daemonRecovering': '本地服务连接中断，正在自动恢复…',
+  'home.createTimedOut': '项目准备超时，任务尚未开始。请重新发送。',
   'home.bundledScenarioMissing': '内置场景“{scenarioId}”未安装。请重新安装 OpenDesign，以恢复默认插件。',
   "entry.cloudCalloutBody": "登录即可享受云端协作",
   "entry.cloudCalloutDismissAria": "关闭 OpenDesign Cloud 版说明",

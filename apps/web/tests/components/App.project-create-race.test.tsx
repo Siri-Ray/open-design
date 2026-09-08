@@ -45,7 +45,9 @@ import {
   listProjects,
   listTemplates,
   patchProject,
+  ProjectCreateError,
 } from '../../src/state/projects';
+import { takeHomeComposerAttachments } from '../../src/state/home-composer-stash';
 import {
   WORKSPACE_CONTEXT_REFRESH_EVENT,
   notifyWorkspaceContextRefresh,
@@ -1285,6 +1287,66 @@ describe('App project creation routing', () => {
     expect(screen.queryByTestId(`entry-project-${requestedProjectId}`)).toBeNull();
     expect(workspaceTabsHarness.projectIds.has(requestedProjectId!)).toBe(false);
     expect(screen.getByRole('alert').textContent).toContain('Could not create project');
+  });
+
+  it('shows the staged attachment and an inert composer on the pending frame', async () => {
+    mockedListProjects.mockResolvedValue([]);
+    const creation = deferred<{
+      project: Project;
+      conversationId: string;
+    }>();
+    mockedCreateProject.mockImplementation(() => creation.promise);
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Create prompted project' }));
+
+    // Synchronous on purpose: the optimistic hand-off is flushed inside the
+    // click, so the frame exists before the create request can even settle.
+    const pending = screen.getByTestId('project-creation-pending-view');
+    expect(pending.querySelector('[data-testid="pending-user-attachments"]')?.textContent)
+      .toContain('brief.txt');
+    const composerShell = screen.getByTestId('pending-chat-composer-shell');
+    expect(composerShell.hasAttribute('inert')).toBe(true);
+    expect(composerShell.querySelector('[data-testid="chat-composer"]')).toBeTruthy();
+    expect((screen.getByTestId('chat-send') as HTMLButtonElement).disabled).toBe(true);
+
+    creation.reject(new Error('Could not create project'));
+    await screen.findByTestId('entry-home-surface');
+  });
+
+  it('maps a create preparation timeout to a localized retry toast and hands attachments back', async () => {
+    mockedListProjects.mockResolvedValue([]);
+    const creation = deferred<{
+      project: Project;
+      conversationId: string;
+    }>();
+    let requestedProjectId: string | undefined;
+    mockedCreateProject.mockImplementation((input) => {
+      requestedProjectId = (input as typeof input & { id?: string }).id;
+      return creation.promise;
+    });
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Create prompted project' }));
+    await screen.findByTestId('project-creation-pending-view');
+
+    creation.reject(new ProjectCreateError(
+      'Project preparation timed out while validating the selected design system. Please try again.',
+      504,
+      'PROJECT_CREATE_PREPARATION_TIMEOUT',
+      true,
+      null,
+    ));
+
+    await screen.findByTestId('entry-home-surface');
+    expect(window.location.pathname).toBe('/');
+    expect(screen.queryByTestId('project-creation-pending-view')).toBeNull();
+    expect(screen.queryByTestId(`entry-project-${requestedProjectId}`)).toBeNull();
+    expect(screen.getByRole('alert').textContent)
+      .toContain('Project setup timed out before it could start. Try sending again.');
+    // Home remounts on the way back; the staged File objects ride the stash
+    // so the retry can resend the same payload.
+    expect(takeHomeComposerAttachments().map((file) => file.name)).toEqual(['brief.txt']);
   });
 
   it('releases a persisted project when attachment setup fails after creation', async () => {
