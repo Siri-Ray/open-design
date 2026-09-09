@@ -1,0 +1,171 @@
+## community-card-hover
+  actions: top: 166.188px -> 169px; left: 202.328px -> 207.328px
+  author: w: 72 -> 68.7; width: 72.0156px -> 68.6562px
+  byline: w: 347 -> 352; width: 347px -> 352px
+  card: w: 363 -> 368; h: 252.5 -> 255.3; width: 363px -> 368px; height: 252.484px -> 255.297px
+  card2: w: 363 -> 368; h: 252.5 -> 255.3; width: 363px -> 368px; height: 252.484px -> 255.297px
+  cardTitle: w: 347 -> 352; width: 347px -> 352px
+  filters: w: 1129 -> 1144; h: 32 -> 36; width: 1129px -> 1144px; height: 32px -> 36px
+  foot: w: 363 -> 368; width: 363px -> 368px
+  grid: w: 1129 -> 1144; h: 7609.6 -> 7688.3; width: 1129px -> 1144px; height: 7609.56px -> 7688.31px
+  header: w: 1129 -> 1144; width: 1129px -> 1144px
+  hero: w: 1129 -> 1144; h: 28.8 -> 25; width: 1129px -> 1144px; height: 28.7969px -> 25px
+  media: w: 361 -> 366; h: 202.2 -> 205; width: 361px -> 366px; height: 202.188px -> 205px
+  meta: w: 247 -> 255.3; width: 246.984px -> 255.344px
+  plate: w: 363 -> 368; h: 204.2 -> 207; width: 363px -> 368px; height: 204.188px -> 207px
+  preview: w: 363 -> 368; h: 204.2 -> 207; width: 363px -> 368px; height: 204.188px -> 207px
+  tab1: w: 78 -> 72; h: 32 -> 36; width: 78px -> 72px; height: 32px -> 36px; paddingTop: 0px -> 5px; paddingRight: 14px -> 12px; paddingBottom: 0px -> 5px; paddingLeft: 14px -> 12px; fontSize: 14px -> 13px; fontWeight: 600 -> 500; lineHeight: 17.5px -> 16.9px; color: rgb(53, 53, 53) -> rgb(0, 113, 6); backgroundColor: rgb(237, 237, 237) -> rgb(242, 255, 242); borderTopWidth: 0px -> 1px; borderTopColor: rgb(53, 53, 53) -> rgba(0, 0, 0, 0); boxShadow: none -> color(srgb 0 0.443137 0.0235294 / 0.22) 0px 0px 0px 1px inset; transition: background-color 0.05s cubic-bezier(0.33, 0, 0.67, 1), border-color 0.05s cubic-bezier(0.33, 0, 0.67, 1), color 0.05s cubic-bezier(0.33, 0, 0.67, 1), transform 0.1s cubic-bezier(0.33, 0, 0.67, 1), box-shadow 0.05s cubic-bezier(0.33, 0, 0.67, 1) -> color 0.12s cubic-bezier(0, 0, 0, 1), background-color 0.12s cubic-bezier(0, 0, 0, 1), border-color 0.12s cubic-bezier(0, 0, 0, 1), transform 0.12s cubic-bezier(0, 0, 0, 1)
+  tab2: w: 92 -> 85; h: 32 -> 36; width: 92px -> 85px; height: 32px -> 36px; paddingTop: 0px -> 5px; paddingRight: 14px -> 12px; paddingBottom: 0px -> 5px; paddingLeft: 14px -> 12px; fontSize: 14px -> 13px; fontWeight: 600 -> 500; lineHeight: 17.5px -> 16.9px; color: rgb(92, 92, 92) -> rgb(32, 32, 32); borderTopWidth: 0px -> 1px; borderTopColor: rgb(92, 92, 92) -> color(srgb 0.286275 0.286275 0.286275 / 0.2); transition: background-color 0.05s cubic-bezier(0.33, 0, 0.67, 1), border-color 0.05s cubic-bezier(0.33, 0, 0.67, 1), color 0.05s cubic-bezier(0.33, 0, 0.67, 1), transform 0.1s cubic-bezier(0.33, 0, 0.67, 1), box-shadow 0.05s cubic-bezier(0.33, 0, 0.67, 1) -> color 0.12s cubic-bezier(0, 0, 0, 1), background-color 0.12s cubic-bezier(0, 0, 0, 1), border-color 0.12s cubic-bezier(0, 0, 0, 1), transform 0.12s cubic-bezier(0, 0, 0, 1)
+  tab3: w: 78 -> 72; h: 32 -> 36; width: 78px -> 72px; height: 32px -> 36px; paddingTop: 0px -> 5px; paddingRight: 14px -> 12px; paddingBottom: 0px -> 5px; paddingLeft: 14px -> 12px; fontSize: 14px -> 13px; fontWeight: 600 -> 500; lineHeight: 17.5px -> 16.9px; color: rgb(92, 92, 92) -> rgb(32, 32, 32); borderTopWidth: 0px -> 1px; borderTopColor: rgb(92, 92, 92) -> color(srgb 0.286275 0.286275 0.286275 / 0.2); transition: background-color 0.05s cubic-bezier(0.33, 0, 0.67, 1), border-color 0.05s cubic-bezier(0.33, 0, 0.67, 1), color 0.05s cubic-bezier(0.33, 0, 0.67, 1), transform 0.1s cubic-bezier(0.33, 0, 0.67, 1), box-shadow 0.05s cubic-bezier(0.33, 0, 0.67, 1) -> color 0.12s cubic-bezier(0, 0, 0, 1), background-color 0.12s cubic-bezier(0, 0, 0, 1), border-color 0.12s cubic-bezier(0, 0, 0, 1), transform 0.12s cubic-bezier(0, 0, 0, 1)
+  tab4: w: 78 -> 72; h: 32 -> 36; width: 78px -> 72px; height: 32px -> 36px; paddingTop: 0px -> 5px; paddingRight: 14px -> 12px; paddingBottom: 0px -> 5px; paddingLeft: 14px -> 12px; fontSize: 14px -> 13px; fontWeight: 600 -> 500; lineHeight: 17.5px -> 16.9px; color: rgb(92, 92, 92) -> rgb(32, 32, 32); borderTopWidth: 0px -> 1px; borderTopColor: rgb(92, 92, 92) -> color(srgb 0.286275 0.286275 0.286275 / 0.2); transition: background-color 0.05s cubic-bezier(0.33, 0, 0.67, 1), border-color 0.05s cubic-bezier(0.33, 0, 0.67, 1), color 0.05s cubic-bezier(0.33, 0, 0.67, 1), transform 0.1s cubic-bezier(0.33, 0, 0.67, 1), box-shadow 0.05s cubic-bezier(0.33, 0, 0.67, 1) -> color 0.12s cubic-bezier(0, 0, 0, 1), background-color 0.12s cubic-bezier(0, 0, 0, 1), border-color 0.12s cubic-bezier(0, 0, 0, 1), transform 0.12s cubic-bezier(0, 0, 0, 1)
+  tabIcon: w: 16 -> 14; h: 16 -> 14; width: 16px -> 14px; height: 16px -> 14px; fontSize: 14px -> 13px; fontWeight: 600 -> 500; lineHeight: 17.5px -> 16.9px; color: rgb(53, 53, 53) -> rgb(26, 116, 255); borderTopColor: rgb(53, 53, 53) -> rgb(26, 116, 255)
+  tabs: w: 326 -> 405; h: 32 -> 36; width: 326px -> 405px; height: 32px -> 36px; gap: 8px 0px -> 8px; columnGap: 0px -> 8px
+  title: w: 47.5 -> 39.6; h: 28.8 -> 25; width: 47.5312px -> 39.6094px; height: 28.7969px -> 25px; fontSize: 24px -> 20px; lineHeight: 28.8px -> 25px
+  view: w: 1129 -> 1144; h: 7778.4 -> 7857.3; width: 1129px -> 1144px; height: 7778.36px -> 7857.31px
+## community-prototype
+  actions: top: 166.188px -> 169px; left: 202.328px -> 207.328px
+  author: w: 72 -> 68.7; width: 72.0156px -> 68.6562px
+  byline: w: 347 -> 352; width: 347px -> 352px
+  card: w: 363 -> 368; h: 252.5 -> 255.3; width: 363px -> 368px; height: 252.484px -> 255.297px
+  card2: w: 363 -> 368; h: 252.5 -> 255.3; width: 363px -> 368px; height: 252.484px -> 255.297px
+  cardTitle: w: 347 -> 352; width: 347px -> 352px
+  filters: w: 1129 -> 1144; h: 32 -> 36; width: 1129px -> 1144px; height: 32px -> 36px
+  foot: w: 363 -> 368; width: 363px -> 368px
+  grid: w: 1129 -> 1144; h: 7609.6 -> 7688.3; width: 1129px -> 1144px; height: 7609.56px -> 7688.31px
+  header: w: 1129 -> 1144; width: 1129px -> 1144px
+  hero: w: 1129 -> 1144; h: 28.8 -> 25; width: 1129px -> 1144px; height: 28.7969px -> 25px
+  media: w: 361 -> 366; h: 202.2 -> 205; width: 361px -> 366px; height: 202.188px -> 205px
+  meta: w: 247 -> 255.3; width: 246.984px -> 255.344px
+  plate: w: 363 -> 368; h: 204.2 -> 207; width: 363px -> 368px; height: 204.188px -> 207px
+  preview: w: 363 -> 368; h: 204.2 -> 207; width: 363px -> 368px; height: 204.188px -> 207px
+  tab1: w: 78 -> 72; h: 32 -> 36; width: 78px -> 72px; height: 32px -> 36px; paddingTop: 0px -> 5px; paddingRight: 14px -> 12px; paddingBottom: 0px -> 5px; paddingLeft: 14px -> 12px; fontSize: 14px -> 13px; fontWeight: 600 -> 500; lineHeight: 17.5px -> 16.9px; color: rgb(53, 53, 53) -> rgb(0, 113, 6); backgroundColor: rgb(237, 237, 237) -> rgb(242, 255, 242); borderTopWidth: 0px -> 1px; borderTopColor: rgb(53, 53, 53) -> rgba(0, 0, 0, 0); boxShadow: none -> color(srgb 0 0.443137 0.0235294 / 0.22) 0px 0px 0px 1px inset; transition: background-color 0.05s cubic-bezier(0.33, 0, 0.67, 1), border-color 0.05s cubic-bezier(0.33, 0, 0.67, 1), color 0.05s cubic-bezier(0.33, 0, 0.67, 1), transform 0.1s cubic-bezier(0.33, 0, 0.67, 1), box-shadow 0.05s cubic-bezier(0.33, 0, 0.67, 1) -> color 0.12s cubic-bezier(0, 0, 0, 1), background-color 0.12s cubic-bezier(0, 0, 0, 1), border-color 0.12s cubic-bezier(0, 0, 0, 1), transform 0.12s cubic-bezier(0, 0, 0, 1)
+  tab2: w: 92 -> 85; h: 32 -> 36; width: 92px -> 85px; height: 32px -> 36px; paddingTop: 0px -> 5px; paddingRight: 14px -> 12px; paddingBottom: 0px -> 5px; paddingLeft: 14px -> 12px; fontSize: 14px -> 13px; fontWeight: 600 -> 500; lineHeight: 17.5px -> 16.9px; color: rgb(92, 92, 92) -> rgb(32, 32, 32); borderTopWidth: 0px -> 1px; borderTopColor: rgb(92, 92, 92) -> color(srgb 0.286275 0.286275 0.286275 / 0.2); transition: background-color 0.05s cubic-bezier(0.33, 0, 0.67, 1), border-color 0.05s cubic-bezier(0.33, 0, 0.67, 1), color 0.05s cubic-bezier(0.33, 0, 0.67, 1), transform 0.1s cubic-bezier(0.33, 0, 0.67, 1), box-shadow 0.05s cubic-bezier(0.33, 0, 0.67, 1) -> color 0.12s cubic-bezier(0, 0, 0, 1), background-color 0.12s cubic-bezier(0, 0, 0, 1), border-color 0.12s cubic-bezier(0, 0, 0, 1), transform 0.12s cubic-bezier(0, 0, 0, 1)
+  tab3: w: 78 -> 72; h: 32 -> 36; width: 78px -> 72px; height: 32px -> 36px; paddingTop: 0px -> 5px; paddingRight: 14px -> 12px; paddingBottom: 0px -> 5px; paddingLeft: 14px -> 12px; fontSize: 14px -> 13px; fontWeight: 600 -> 500; lineHeight: 17.5px -> 16.9px; color: rgb(92, 92, 92) -> rgb(32, 32, 32); borderTopWidth: 0px -> 1px; borderTopColor: rgb(92, 92, 92) -> color(srgb 0.286275 0.286275 0.286275 / 0.2); transition: background-color 0.05s cubic-bezier(0.33, 0, 0.67, 1), border-color 0.05s cubic-bezier(0.33, 0, 0.67, 1), color 0.05s cubic-bezier(0.33, 0, 0.67, 1), transform 0.1s cubic-bezier(0.33, 0, 0.67, 1), box-shadow 0.05s cubic-bezier(0.33, 0, 0.67, 1) -> color 0.12s cubic-bezier(0, 0, 0, 1), background-color 0.12s cubic-bezier(0, 0, 0, 1), border-color 0.12s cubic-bezier(0, 0, 0, 1), transform 0.12s cubic-bezier(0, 0, 0, 1)
+  tab4: w: 78 -> 72; h: 32 -> 36; width: 78px -> 72px; height: 32px -> 36px; paddingTop: 0px -> 5px; paddingRight: 14px -> 12px; paddingBottom: 0px -> 5px; paddingLeft: 14px -> 12px; fontSize: 14px -> 13px; fontWeight: 600 -> 500; lineHeight: 17.5px -> 16.9px; color: rgb(92, 92, 92) -> rgb(32, 32, 32); borderTopWidth: 0px -> 1px; borderTopColor: rgb(92, 92, 92) -> color(srgb 0.286275 0.286275 0.286275 / 0.2); transition: background-color 0.05s cubic-bezier(0.33, 0, 0.67, 1), border-color 0.05s cubic-bezier(0.33, 0, 0.67, 1), color 0.05s cubic-bezier(0.33, 0, 0.67, 1), transform 0.1s cubic-bezier(0.33, 0, 0.67, 1), box-shadow 0.05s cubic-bezier(0.33, 0, 0.67, 1) -> color 0.12s cubic-bezier(0, 0, 0, 1), background-color 0.12s cubic-bezier(0, 0, 0, 1), border-color 0.12s cubic-bezier(0, 0, 0, 1), transform 0.12s cubic-bezier(0, 0, 0, 1)
+  tabIcon: w: 16 -> 14; h: 16 -> 14; width: 16px -> 14px; height: 16px -> 14px; fontSize: 14px -> 13px; fontWeight: 600 -> 500; lineHeight: 17.5px -> 16.9px; color: rgb(53, 53, 53) -> rgb(26, 116, 255); borderTopColor: rgb(53, 53, 53) -> rgb(26, 116, 255)
+  tabs: w: 326 -> 405; h: 32 -> 36; width: 326px -> 405px; height: 32px -> 36px; gap: 8px 0px -> 8px; columnGap: 0px -> 8px
+  title: w: 47.5 -> 39.6; h: 28.8 -> 25; width: 47.5312px -> 39.6094px; height: 28.7969px -> 25px; fontSize: 24px -> 20px; lineHeight: 28.8px -> 25px
+  view: w: 1129 -> 1144; h: 7778.4 -> 7857.3; width: 1129px -> 1144px; height: 7778.36px -> 7857.31px
+## community-图片
+  action1: w: 113.9 -> 73; width: 113.906px -> 73px
+  action2: demo=present ours=missing
+  actions: w: 194.9 -> 73; width: 194.906px -> 73px; left: 165.094px -> 287px
+  empty: demo=missing ours=missing
+  emptyMark: demo=missing ours=missing
+  emptyTitle: demo=missing ours=missing
+  filters: h: 32 -> 36; height: 32px -> 36px
+  grid: h: 4794.8 -> 4730.8; height: 4794.83px -> 4730.83px
+  hero: h: 28.8 -> 25; height: 28.7969px -> 25px
+  tab1: w: 78 -> 72; h: 32 -> 36; width: 78px -> 72px; height: 32px -> 36px; paddingTop: 0px -> 5px; paddingRight: 14px -> 12px; paddingBottom: 0px -> 5px; paddingLeft: 14px -> 12px; fontSize: 14px -> 13px; fontWeight: 600 -> 500; lineHeight: 17.5px -> 16.9px; color: rgb(92, 92, 92) -> rgb(32, 32, 32); borderTopWidth: 0px -> 1px; borderTopColor: rgb(92, 92, 92) -> color(srgb 0.286275 0.286275 0.286275 / 0.2); transition: background-color 0.05s cubic-bezier(0.33, 0, 0.67, 1), border-color 0.05s cubic-bezier(0.33, 0, 0.67, 1), color 0.05s cubic-bezier(0.33, 0, 0.67, 1), transform 0.1s cubic-bezier(0.33, 0, 0.67, 1), box-shadow 0.05s cubic-bezier(0.33, 0, 0.67, 1) -> color 0.12s cubic-bezier(0, 0, 0, 1), background-color 0.12s cubic-bezier(0, 0, 0, 1), border-color 0.12s cubic-bezier(0, 0, 0, 1), transform 0.12s cubic-bezier(0, 0, 0, 1)
+  tab2: w: 92 -> 85; h: 32 -> 36; width: 92px -> 85px; height: 32px -> 36px; paddingTop: 0px -> 5px; paddingRight: 14px -> 12px; paddingBottom: 0px -> 5px; paddingLeft: 14px -> 12px; fontSize: 14px -> 13px; fontWeight: 600 -> 500; lineHeight: 17.5px -> 16.9px; color: rgb(92, 92, 92) -> rgb(32, 32, 32); borderTopWidth: 0px -> 1px; borderTopColor: rgb(92, 92, 92) -> color(srgb 0.286275 0.286275 0.286275 / 0.2); transition: background-color 0.05s cubic-bezier(0.33, 0, 0.67, 1), border-color 0.05s cubic-bezier(0.33, 0, 0.67, 1), color 0.05s cubic-bezier(0.33, 0, 0.67, 1), transform 0.1s cubic-bezier(0.33, 0, 0.67, 1), box-shadow 0.05s cubic-bezier(0.33, 0, 0.67, 1) -> color 0.12s cubic-bezier(0, 0, 0, 1), background-color 0.12s cubic-bezier(0, 0, 0, 1), border-color 0.12s cubic-bezier(0, 0, 0, 1), transform 0.12s cubic-bezier(0, 0, 0, 1)
+  tab3: w: 78 -> 72; h: 32 -> 36; width: 78px -> 72px; height: 32px -> 36px; paddingTop: 0px -> 5px; paddingRight: 14px -> 12px; paddingBottom: 0px -> 5px; paddingLeft: 14px -> 12px; fontSize: 14px -> 13px; fontWeight: 600 -> 500; lineHeight: 17.5px -> 16.9px; color: rgb(92, 92, 92) -> rgb(32, 32, 32); borderTopWidth: 0px -> 1px; borderTopColor: rgb(92, 92, 92) -> color(srgb 0.286275 0.286275 0.286275 / 0.2); transition: background-color 0.05s cubic-bezier(0.33, 0, 0.67, 1), border-color 0.05s cubic-bezier(0.33, 0, 0.67, 1), color 0.05s cubic-bezier(0.33, 0, 0.67, 1), transform 0.1s cubic-bezier(0.33, 0, 0.67, 1), box-shadow 0.05s cubic-bezier(0.33, 0, 0.67, 1) -> color 0.12s cubic-bezier(0, 0, 0, 1), background-color 0.12s cubic-bezier(0, 0, 0, 1), border-color 0.12s cubic-bezier(0, 0, 0, 1), transform 0.12s cubic-bezier(0, 0, 0, 1)
+  tab4: w: 78 -> 72; h: 32 -> 36; width: 78px -> 72px; height: 32px -> 36px; paddingTop: 0px -> 5px; paddingRight: 14px -> 12px; paddingBottom: 0px -> 5px; paddingLeft: 14px -> 12px; fontSize: 14px -> 13px; fontWeight: 600 -> 500; lineHeight: 17.5px -> 16.9px; color: rgb(53, 53, 53) -> rgb(0, 113, 6); backgroundColor: rgb(237, 237, 237) -> rgb(242, 255, 242); borderTopWidth: 0px -> 1px; borderTopColor: rgb(53, 53, 53) -> rgba(0, 0, 0, 0); boxShadow: none -> color(srgb 0 0.443137 0.0235294 / 0.22) 0px 0px 0px 1px inset; transition: background-color 0.05s cubic-bezier(0.33, 0, 0.67, 1), border-color 0.05s cubic-bezier(0.33, 0, 0.67, 1), color 0.05s cubic-bezier(0.33, 0, 0.67, 1), transform 0.1s cubic-bezier(0.33, 0, 0.67, 1), box-shadow 0.05s cubic-bezier(0.33, 0, 0.67, 1) -> color 0.12s cubic-bezier(0, 0, 0, 1), background-color 0.12s cubic-bezier(0, 0, 0, 1), border-color 0.12s cubic-bezier(0, 0, 0, 1), transform 0.12s cubic-bezier(0, 0, 0, 1)
+  tabIcon: w: 16 -> 14; h: 16 -> 14; width: 16px -> 14px; height: 16px -> 14px; fontSize: 14px -> 13px; fontWeight: 600 -> 500; lineHeight: 17.5px -> 16.9px; color: rgb(92, 92, 92) -> rgb(26, 116, 255); borderTopColor: rgb(92, 92, 92) -> rgb(26, 116, 255)
+  tabs: w: 326 -> 405; h: 32 -> 36; width: 326px -> 405px; height: 32px -> 36px; gap: 8px 0px -> 8px; columnGap: 0px -> 8px
+  title: w: 47.5 -> 39.6; h: 28.8 -> 25; width: 47.5312px -> 39.6094px; height: 28.7969px -> 25px; fontSize: 24px -> 20px; lineHeight: 28.8px -> 25px
+  view: h: 4963.6 -> 4899.8; height: 4963.62px -> 4899.83px
+## community-幻灯片
+  actions: top: 166.188px -> 169px; left: 202.328px -> 207.328px
+  author: w: 72 -> 68.7; width: 72.0156px -> 68.6562px
+  byline: w: 347 -> 352; width: 347px -> 352px
+  card: w: 363 -> 368; h: 252.5 -> 255.3; width: 363px -> 368px; height: 252.484px -> 255.297px
+  card2: w: 363 -> 368; h: 252.5 -> 255.3; width: 363px -> 368px; height: 252.484px -> 255.297px
+  cardTitle: w: 347 -> 352; width: 347px -> 352px
+  empty: demo=missing ours=missing
+  emptyMark: demo=missing ours=missing
+  emptyTitle: demo=missing ours=missing
+  filters: w: 1129 -> 1144; h: 32 -> 36; width: 1129px -> 1144px; height: 32px -> 36px
+  foot: w: 363 -> 368; width: 363px -> 368px
+  grid: w: 1129 -> 1144; h: 7337.1 -> 7413; width: 1129px -> 1144px; height: 7337.08px -> 7413.02px
+  header: w: 1129 -> 1144; width: 1129px -> 1144px
+  hero: w: 1129 -> 1144; h: 28.8 -> 25; width: 1129px -> 1144px; height: 28.7969px -> 25px
+  media: w: 361 -> 366; h: 202.2 -> 205; width: 361px -> 366px; height: 202.188px -> 205px
+  meta: w: 247 -> 255.3; width: 246.984px -> 255.344px
+  plate: w: 363 -> 368; h: 204.2 -> 207; width: 363px -> 368px; height: 204.188px -> 207px
+  preview: w: 363 -> 368; h: 204.2 -> 207; width: 363px -> 368px; height: 204.188px -> 207px
+  tab1: w: 78 -> 72; h: 32 -> 36; width: 78px -> 72px; height: 32px -> 36px; paddingTop: 0px -> 5px; paddingRight: 14px -> 12px; paddingBottom: 0px -> 5px; paddingLeft: 14px -> 12px; fontSize: 14px -> 13px; fontWeight: 600 -> 500; lineHeight: 17.5px -> 16.9px; color: rgb(92, 92, 92) -> rgb(32, 32, 32); borderTopWidth: 0px -> 1px; borderTopColor: rgb(92, 92, 92) -> color(srgb 0.286275 0.286275 0.286275 / 0.2); transition: background-color 0.05s cubic-bezier(0.33, 0, 0.67, 1), border-color 0.05s cubic-bezier(0.33, 0, 0.67, 1), color 0.05s cubic-bezier(0.33, 0, 0.67, 1), transform 0.1s cubic-bezier(0.33, 0, 0.67, 1), box-shadow 0.05s cubic-bezier(0.33, 0, 0.67, 1) -> color 0.12s cubic-bezier(0, 0, 0, 1), background-color 0.12s cubic-bezier(0, 0, 0, 1), border-color 0.12s cubic-bezier(0, 0, 0, 1), transform 0.12s cubic-bezier(0, 0, 0, 1)
+  tab2: w: 92 -> 85; h: 32 -> 36; width: 92px -> 85px; height: 32px -> 36px; paddingTop: 0px -> 5px; paddingRight: 14px -> 12px; paddingBottom: 0px -> 5px; paddingLeft: 14px -> 12px; fontSize: 14px -> 13px; fontWeight: 600 -> 500; lineHeight: 17.5px -> 16.9px; color: rgb(53, 53, 53) -> rgb(0, 113, 6); backgroundColor: rgb(237, 237, 237) -> rgb(242, 255, 242); borderTopWidth: 0px -> 1px; borderTopColor: rgb(53, 53, 53) -> rgba(0, 0, 0, 0); boxShadow: none -> color(srgb 0 0.443137 0.0235294 / 0.22) 0px 0px 0px 1px inset; transition: background-color 0.05s cubic-bezier(0.33, 0, 0.67, 1), border-color 0.05s cubic-bezier(0.33, 0, 0.67, 1), color 0.05s cubic-bezier(0.33, 0, 0.67, 1), transform 0.1s cubic-bezier(0.33, 0, 0.67, 1), box-shadow 0.05s cubic-bezier(0.33, 0, 0.67, 1) -> color 0.12s cubic-bezier(0, 0, 0, 1), background-color 0.12s cubic-bezier(0, 0, 0, 1), border-color 0.12s cubic-bezier(0, 0, 0, 1), transform 0.12s cubic-bezier(0, 0, 0, 1)
+  tab3: w: 78 -> 72; h: 32 -> 36; width: 78px -> 72px; height: 32px -> 36px; paddingTop: 0px -> 5px; paddingRight: 14px -> 12px; paddingBottom: 0px -> 5px; paddingLeft: 14px -> 12px; fontSize: 14px -> 13px; fontWeight: 600 -> 500; lineHeight: 17.5px -> 16.9px; color: rgb(92, 92, 92) -> rgb(32, 32, 32); borderTopWidth: 0px -> 1px; borderTopColor: rgb(92, 92, 92) -> color(srgb 0.286275 0.286275 0.286275 / 0.2); transition: background-color 0.05s cubic-bezier(0.33, 0, 0.67, 1), border-color 0.05s cubic-bezier(0.33, 0, 0.67, 1), color 0.05s cubic-bezier(0.33, 0, 0.67, 1), transform 0.1s cubic-bezier(0.33, 0, 0.67, 1), box-shadow 0.05s cubic-bezier(0.33, 0, 0.67, 1) -> color 0.12s cubic-bezier(0, 0, 0, 1), background-color 0.12s cubic-bezier(0, 0, 0, 1), border-color 0.12s cubic-bezier(0, 0, 0, 1), transform 0.12s cubic-bezier(0, 0, 0, 1)
+  tab4: w: 78 -> 72; h: 32 -> 36; width: 78px -> 72px; height: 32px -> 36px; paddingTop: 0px -> 5px; paddingRight: 14px -> 12px; paddingBottom: 0px -> 5px; paddingLeft: 14px -> 12px; fontSize: 14px -> 13px; fontWeight: 600 -> 500; lineHeight: 17.5px -> 16.9px; color: rgb(92, 92, 92) -> rgb(32, 32, 32); borderTopWidth: 0px -> 1px; borderTopColor: rgb(92, 92, 92) -> color(srgb 0.286275 0.286275 0.286275 / 0.2); transition: background-color 0.05s cubic-bezier(0.33, 0, 0.67, 1), border-color 0.05s cubic-bezier(0.33, 0, 0.67, 1), color 0.05s cubic-bezier(0.33, 0, 0.67, 1), transform 0.1s cubic-bezier(0.33, 0, 0.67, 1), box-shadow 0.05s cubic-bezier(0.33, 0, 0.67, 1) -> color 0.12s cubic-bezier(0, 0, 0, 1), background-color 0.12s cubic-bezier(0, 0, 0, 1), border-color 0.12s cubic-bezier(0, 0, 0, 1), transform 0.12s cubic-bezier(0, 0, 0, 1)
+  tabIcon: w: 16 -> 14; h: 16 -> 14; width: 16px -> 14px; height: 16px -> 14px; fontSize: 14px -> 13px; fontWeight: 600 -> 500; lineHeight: 17.5px -> 16.9px; color: rgb(92, 92, 92) -> rgb(26, 116, 255); borderTopColor: rgb(92, 92, 92) -> rgb(26, 116, 255)
+  tabs: w: 326 -> 405; h: 32 -> 36; width: 326px -> 405px; height: 32px -> 36px; gap: 8px 0px -> 8px; columnGap: 0px -> 8px
+  title: w: 47.5 -> 39.6; h: 28.8 -> 25; width: 47.5312px -> 39.6094px; height: 28.7969px -> 25px; fontSize: 24px -> 20px; lineHeight: 28.8px -> 25px
+  view: w: 1129 -> 1144; h: 7505.9 -> 7582; width: 1129px -> 1144px; height: 7505.88px -> 7582.02px
+## community-文档
+  action1: demo=missing ours=missing
+  action2: demo=missing ours=missing
+  actionIcon: demo=missing ours=missing
+  actions: demo=missing ours=missing
+  author: demo=missing ours=missing
+  avatar: demo=missing ours=missing
+  byline: demo=missing ours=missing
+  card: demo=missing ours=missing
+  card2: demo=missing ours=missing
+  cardTitle: demo=missing ours=missing
+  empty: demo=missing ours=present
+  emptyMark: demo=missing ours=present
+  emptyTitle: demo=missing ours=present
+  filters: h: 32 -> 36; height: 32px -> 36px
+  foot: demo=missing ours=missing
+  hero: h: 28.8 -> 25; height: 28.7969px -> 25px
+  media: demo=missing ours=missing
+  meta: demo=missing ours=missing
+  plate: demo=missing ours=missing
+  preview: demo=missing ours=missing
+  tab1: w: 78 -> 72; h: 32 -> 36; width: 78px -> 72px; height: 32px -> 36px; paddingTop: 0px -> 5px; paddingRight: 14px -> 12px; paddingBottom: 0px -> 5px; paddingLeft: 14px -> 12px; fontSize: 14px -> 13px; fontWeight: 600 -> 500; lineHeight: 17.5px -> 16.9px; color: rgb(92, 92, 92) -> rgb(32, 32, 32); borderTopWidth: 0px -> 1px; borderTopColor: rgb(92, 92, 92) -> color(srgb 0.286275 0.286275 0.286275 / 0.2); transition: background-color 0.05s cubic-bezier(0.33, 0, 0.67, 1), border-color 0.05s cubic-bezier(0.33, 0, 0.67, 1), color 0.05s cubic-bezier(0.33, 0, 0.67, 1), transform 0.1s cubic-bezier(0.33, 0, 0.67, 1), box-shadow 0.05s cubic-bezier(0.33, 0, 0.67, 1) -> color 0.12s cubic-bezier(0, 0, 0, 1), background-color 0.12s cubic-bezier(0, 0, 0, 1), border-color 0.12s cubic-bezier(0, 0, 0, 1), transform 0.12s cubic-bezier(0, 0, 0, 1)
+  tab2: w: 92 -> 85; h: 32 -> 36; width: 92px -> 85px; height: 32px -> 36px; paddingTop: 0px -> 5px; paddingRight: 14px -> 12px; paddingBottom: 0px -> 5px; paddingLeft: 14px -> 12px; fontSize: 14px -> 13px; fontWeight: 600 -> 500; lineHeight: 17.5px -> 16.9px; color: rgb(92, 92, 92) -> rgb(32, 32, 32); borderTopWidth: 0px -> 1px; borderTopColor: rgb(92, 92, 92) -> color(srgb 0.286275 0.286275 0.286275 / 0.2); transition: background-color 0.05s cubic-bezier(0.33, 0, 0.67, 1), border-color 0.05s cubic-bezier(0.33, 0, 0.67, 1), color 0.05s cubic-bezier(0.33, 0, 0.67, 1), transform 0.1s cubic-bezier(0.33, 0, 0.67, 1), box-shadow 0.05s cubic-bezier(0.33, 0, 0.67, 1) -> color 0.12s cubic-bezier(0, 0, 0, 1), background-color 0.12s cubic-bezier(0, 0, 0, 1), border-color 0.12s cubic-bezier(0, 0, 0, 1), transform 0.12s cubic-bezier(0, 0, 0, 1)
+  tab3: w: 78 -> 72; h: 32 -> 36; width: 78px -> 72px; height: 32px -> 36px; paddingTop: 0px -> 5px; paddingRight: 14px -> 12px; paddingBottom: 0px -> 5px; paddingLeft: 14px -> 12px; fontSize: 14px -> 13px; fontWeight: 600 -> 500; lineHeight: 17.5px -> 16.9px; color: rgb(53, 53, 53) -> rgb(0, 113, 6); backgroundColor: rgb(237, 237, 237) -> rgb(242, 255, 242); borderTopWidth: 0px -> 1px; borderTopColor: rgb(53, 53, 53) -> rgba(0, 0, 0, 0); boxShadow: none -> color(srgb 0 0.443137 0.0235294 / 0.22) 0px 0px 0px 1px inset; transition: background-color 0.05s cubic-bezier(0.33, 0, 0.67, 1), border-color 0.05s cubic-bezier(0.33, 0, 0.67, 1), color 0.05s cubic-bezier(0.33, 0, 0.67, 1), transform 0.1s cubic-bezier(0.33, 0, 0.67, 1), box-shadow 0.05s cubic-bezier(0.33, 0, 0.67, 1) -> color 0.12s cubic-bezier(0, 0, 0, 1), background-color 0.12s cubic-bezier(0, 0, 0, 1), border-color 0.12s cubic-bezier(0, 0, 0, 1), transform 0.12s cubic-bezier(0, 0, 0, 1)
+  tab4: w: 78 -> 72; h: 32 -> 36; width: 78px -> 72px; height: 32px -> 36px; paddingTop: 0px -> 5px; paddingRight: 14px -> 12px; paddingBottom: 0px -> 5px; paddingLeft: 14px -> 12px; fontSize: 14px -> 13px; fontWeight: 600 -> 500; lineHeight: 17.5px -> 16.9px; color: rgb(92, 92, 92) -> rgb(32, 32, 32); borderTopWidth: 0px -> 1px; borderTopColor: rgb(92, 92, 92) -> color(srgb 0.286275 0.286275 0.286275 / 0.2); transition: background-color 0.05s cubic-bezier(0.33, 0, 0.67, 1), border-color 0.05s cubic-bezier(0.33, 0, 0.67, 1), color 0.05s cubic-bezier(0.33, 0, 0.67, 1), transform 0.1s cubic-bezier(0.33, 0, 0.67, 1), box-shadow 0.05s cubic-bezier(0.33, 0, 0.67, 1) -> color 0.12s cubic-bezier(0, 0, 0, 1), background-color 0.12s cubic-bezier(0, 0, 0, 1), border-color 0.12s cubic-bezier(0, 0, 0, 1), transform 0.12s cubic-bezier(0, 0, 0, 1)
+  tabIcon: w: 16 -> 14; h: 16 -> 14; width: 16px -> 14px; height: 16px -> 14px; fontSize: 14px -> 13px; fontWeight: 600 -> 500; lineHeight: 17.5px -> 16.9px; color: rgb(92, 92, 92) -> rgb(26, 116, 255); borderTopColor: rgb(92, 92, 92) -> rgb(26, 116, 255)
+  tabs: w: 326 -> 405; h: 32 -> 36; width: 326px -> 405px; height: 32px -> 36px; gap: 8px 0px -> 8px; columnGap: 0px -> 8px
+  title: w: 47.5 -> 39.6; h: 28.8 -> 25; width: 47.5312px -> 39.6094px; height: 28.7969px -> 25px; fontSize: 24px -> 20px; lineHeight: 28.8px -> 25px
+  view: h: 168.8 -> 680.6; height: 168.797px -> 680.578px
+## messages-archived-shelf
+  close: w: 26 -> 32; h: 26 -> 32; width: 26px -> 32px; height: 26px -> 32px; color: rgb(92, 92, 92) -> rgb(73, 73, 73); backgroundColor: rgb(255, 255, 255) -> rgb(237, 237, 237); borderTopWidth: 0px -> 1px; borderTopColor: rgb(92, 92, 92) -> rgb(237, 237, 237); borderRadius: 999px -> 4px; transition: background-color 0.05s cubic-bezier(0.33, 0, 0.67, 1), border-color 0.05s cubic-bezier(0.33, 0, 0.67, 1), color 0.05s cubic-bezier(0.33, 0, 0.67, 1), transform 0.1s cubic-bezier(0.33, 0, 0.67, 1), box-shadow 0.05s cubic-bezier(0.33, 0, 0.67, 1) -> background 0.14s cubic-bezier(0.23, 1, 0.32, 1), border-color 0.14s cubic-bezier(0.23, 1, 0.32, 1), color 0.14s cubic-bezier(0.23, 1, 0.32, 1); position: absolute -> static; top: 8px -> auto; right: 8px -> auto; bottom: 52.1406px -> auto; left: 392px -> auto
+  cta: demo=missing ours=missing
+  footer: demo=missing ours=missing
+  header: h: 54.3 -> 64; height: 54.25px -> 64px; position: static -> relative; top: auto -> 0px; right: auto -> 0px; bottom: auto -> 0px; left: auto -> 0px
+  item2: demo=missing ours=missing
+  itemTitle: w: 378 -> 348; width: 378px -> 348px
+  list: h: 819.8 -> 810; height: 819.75px -> 810px
+  media: demo=missing ours=missing
+  subtitle: demo=missing ours=missing
+## messages-expanded
+  archive: bottom: 337.547px -> 333.141px
+  body: w: 273 -> 262.5; h: 22.5 -> 18.1; width: 273px -> 262.5px; height: 22.5312px -> 18.125px; paddingTop: 2px -> 0px; lineHeight: 20.54px -> 18.125px
+  close: w: 26 -> 32; h: 26 -> 32; width: 26px -> 32px; height: 26px -> 32px; color: rgb(92, 92, 92) -> rgb(73, 73, 73); backgroundColor: rgb(255, 255, 255) -> rgb(237, 237, 237); borderTopWidth: 0px -> 1px; borderTopColor: rgb(92, 92, 92) -> rgb(237, 237, 237); borderRadius: 999px -> 4px; transition: background-color 0.05s cubic-bezier(0.33, 0, 0.67, 1), border-color 0.05s cubic-bezier(0.33, 0, 0.67, 1), color 0.05s cubic-bezier(0.33, 0, 0.67, 1), transform 0.1s cubic-bezier(0.33, 0, 0.67, 1), box-shadow 0.05s cubic-bezier(0.33, 0, 0.67, 1) -> background 0.14s cubic-bezier(0.23, 1, 0.32, 1), border-color 0.14s cubic-bezier(0.23, 1, 0.32, 1), color 0.14s cubic-bezier(0.23, 1, 0.32, 1); position: absolute -> static; top: 8px -> auto; right: 8px -> auto; bottom: 337.547px -> auto; left: 392px -> auto
+  footer: demo=missing ours=missing
+  header: h: 54.3 -> 64; height: 54.25px -> 64px; position: static -> relative; top: auto -> 0px; right: auto -> 0px; bottom: auto -> 0px; left: auto -> 0px
+  item: h: 371.5 -> 367.1; height: 371.547px -> 367.141px
+  itemTitle: w: 378 -> 348; width: 378px -> 348px
+  list: h: 819.8 -> 810; height: 819.75px -> 810px
+  shelfToggle: demo=missing ours=missing
+  subtitle: demo=missing ours=missing
+  summary: h: 323.5 -> 319.1; height: 323.547px -> 319.141px
+## messages-hover
+  close: w: 26 -> 32; h: 26 -> 32; width: 26px -> 32px; height: 26px -> 32px; color: rgb(92, 92, 92) -> rgb(73, 73, 73); backgroundColor: rgb(255, 255, 255) -> rgb(237, 237, 237); borderTopWidth: 0px -> 1px; borderTopColor: rgb(92, 92, 92) -> rgb(237, 237, 237); borderRadius: 999px -> 4px; transition: background-color 0.05s cubic-bezier(0.33, 0, 0.67, 1), border-color 0.05s cubic-bezier(0.33, 0, 0.67, 1), color 0.05s cubic-bezier(0.33, 0, 0.67, 1), transform 0.1s cubic-bezier(0.33, 0, 0.67, 1), box-shadow 0.05s cubic-bezier(0.33, 0, 0.67, 1) -> background 0.14s cubic-bezier(0.23, 1, 0.32, 1), border-color 0.14s cubic-bezier(0.23, 1, 0.32, 1), color 0.14s cubic-bezier(0.23, 1, 0.32, 1); position: absolute -> static; top: 8px -> auto; right: 8px -> auto; bottom: 52.1406px -> auto; left: 392px -> auto
+  cta: demo=missing ours=missing
+  footer: demo=missing ours=missing
+  header: h: 54.3 -> 64; height: 54.25px -> 64px; position: static -> relative; top: auto -> 0px; right: auto -> 0px; bottom: auto -> 0px; left: auto -> 0px
+  itemTitle: w: 378 -> 348; width: 378px -> 348px
+  list: h: 819.8 -> 810; height: 819.75px -> 810px
+  media: demo=missing ours=missing
+  shelfToggle: demo=missing ours=missing
+  subtitle: demo=missing ours=missing
+## messages-list
+  close: w: 26 -> 32; h: 26 -> 32; width: 26px -> 32px; height: 26px -> 32px; color: rgb(92, 92, 92) -> rgb(73, 73, 73); backgroundColor: rgb(255, 255, 255) -> rgb(237, 237, 237); borderTopWidth: 0px -> 1px; borderTopColor: rgb(92, 92, 92) -> rgb(237, 237, 237); borderRadius: 999px -> 4px; transition: background-color 0.05s cubic-bezier(0.33, 0, 0.67, 1), border-color 0.05s cubic-bezier(0.33, 0, 0.67, 1), color 0.05s cubic-bezier(0.33, 0, 0.67, 1), transform 0.1s cubic-bezier(0.33, 0, 0.67, 1), box-shadow 0.05s cubic-bezier(0.33, 0, 0.67, 1) -> background 0.14s cubic-bezier(0.23, 1, 0.32, 1), border-color 0.14s cubic-bezier(0.23, 1, 0.32, 1), color 0.14s cubic-bezier(0.23, 1, 0.32, 1); position: absolute -> static; top: 8px -> auto; right: 8px -> auto; bottom: 52.1406px -> auto; left: 392px -> auto
+  cta: demo=missing ours=missing
+  footer: demo=missing ours=missing
+  header: h: 54.3 -> 64; height: 54.25px -> 64px; position: static -> relative; top: auto -> 0px; right: auto -> 0px; bottom: auto -> 0px; left: auto -> 0px
+  itemTitle: w: 378 -> 348; width: 378px -> 348px
+  list: h: 819.8 -> 810; height: 819.75px -> 810px
+  media: demo=missing ours=missing
+  shelfToggle: demo=missing ours=missing
+  subtitle: demo=missing ours=missing
+## preview-escape-closes: demo=True ours=True
+## preview-modal
+  foot: demo=missing ours=missing
+  headMeta: w: 167.1 -> 198.8; width: 167.141px -> 198.75px
+  headTitle: w: 167.1 -> 198.8; width: 167.141px -> 198.75px
+
+5417/6120 compared properties identical
