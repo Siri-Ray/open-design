@@ -132,6 +132,10 @@ The fork tag and self-reported `--version` string are separate identifiers.
   `6cf45efc55509138bd415cc6ad818532bc713ec1c5a58c3e1fc931aee33c0ca3`, passed
   all seven baseline/Write scenarios, including both Write abort-order checks.
   This is an unpublished development build, not an upgrade target.
+  The final PR head `28b5733f5d1b558d8966e76a094b65b74ef95e7e` adds only
+  ACP timeout/cancellation fixture tests; production source is unchanged from
+  the measured commit above. The seven-scenario result remains tied to that
+  measured binary, rather than claiming a new combined-package validation.
   The host cancellation notification companion is
   [OpenDesign #7959](https://github.com/nexu-io/open-design/pull/7959), commit
   `65fa5dced1`; it has not been included in this PR's combined-package acceptance.
