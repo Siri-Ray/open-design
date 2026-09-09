@@ -275,7 +275,8 @@ describe('prototype delivery boundaries', () => {
     const fixture = await projectFixture({
       'landing.html': '<a href="catalog.html">Catalog</a>', 'catalog.html': '<title>Catalog</title>',
     });
-    const input = { ...fixture, runStatus: 'succeeded' as const, artifactCount: 1,
+    const baseInput = { ...fixture, runStatus: 'succeeded' as const, artifactCount: 1 };
+    const input = { ...baseInput,
       touchedPaths: ['catalog.html'], baselineEntryFile: 'landing.html' };
     await expect(validateRunDeliverable({ ...input, projectMetadata: { kind: 'prototype' } }))
       .resolves.toMatchObject({ valid: true, entryFile: 'landing.html', linkedPage: 'catalog.html' });
@@ -283,9 +284,9 @@ describe('prototype delivery boundaries', () => {
       .resolves.toMatchObject({ valid: false, validation: 'entry_missing' });
     await expect(validateRunDeliverable({ ...input, artifactCount: 0, touchedPaths: [], projectMetadata: { kind: 'prototype' } }))
       .resolves.toMatchObject({ valid: false, validation: 'no_artifact' });
-    await expect(validateRunDeliverable({ ...input, baselineEntryFile: undefined, projectMetadata: { kind: 'prototype' } }))
+    await expect(validateRunDeliverable({ ...baseInput, touchedPaths: input.touchedPaths, projectMetadata: { kind: 'prototype' } }))
       .resolves.toMatchObject({ valid: false, validation: 'entry_missing' });
-    await expect(validateRunDeliverable({ ...input, touchedPaths: undefined, projectMetadata: { kind: 'prototype' } }))
+    await expect(validateRunDeliverable({ ...baseInput, baselineEntryFile: input.baselineEntryFile, projectMetadata: { kind: 'prototype' } }))
       .resolves.toMatchObject({ valid: false, validation: 'entry_missing' });
     await expect(validateRunDeliverable({ ...input, projectMetadata: { kind: 'template' } }))
       .resolves.toMatchObject({ valid: false, validation: 'entry_missing' });
