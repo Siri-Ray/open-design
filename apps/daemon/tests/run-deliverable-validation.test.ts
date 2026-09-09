@@ -4,7 +4,7 @@ import path from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { validateRunDeliverable } from '../src/run-deliverable-validation.js';
+import { inferBaselineHtmlEntry, validateRunDeliverable } from '../src/run-deliverable-validation.js';
 
 const temporaryRoots: string[] = [];
 
@@ -229,5 +229,108 @@ describe('run deliverable validation', () => {
       valid: false,
       validation: 'no_artifact',
     });
+  });
+});
+
+describe('linked prototype page delivery (OPEND-2887)', () => {
+  it('accepts a touched page reachable from the unchanged canonical entry', async () => {
+    const fixture = await projectFixture({
+      'index.html': '<a href="pages/catalog.html?edition=1#plants">Catalog</a>',
+      'pages/catalog.html': '<title>Catalog</title>',
+    });
+    await expect(validateRunDeliverable({
+      ...fixture, runStatus: 'succeeded', artifactCount: 1,
+      touchedPaths: ['pages/catalog.html'],
+      projectMetadata: { kind: 'prototype', entryFile: 'index.html' },
+    })).resolves.toMatchObject({ valid: true, entryFile: 'index.html' });
+  });
+
+  it('follows nested local navigation without accepting a disconnected page', async () => {
+    const fixture = await projectFixture({
+      'index.html': '<a href="pages/catalog.html">Catalog</a>',
+      'pages/catalog.html': '<a href="../index.html">Home</a><a href="plants.html">Plants</a>',
+      'pages/plants.html': '<title>Plants</title>',
+      'unrelated.html': '<title>Unrelated</title>',
+    });
+    const input = {
+      ...fixture, runStatus: 'succeeded' as const, artifactCount: 1,
+      projectMetadata: { kind: 'prototype' as const, entryFile: 'index.html' },
+    };
+    await expect(validateRunDeliverable({ ...input, touchedPaths: ['pages/plants.html'] }))
+      .resolves.toMatchObject({ valid: true });
+    await expect(validateRunDeliverable({ ...input, touchedPaths: ['unrelated.html'] }))
+      .resolves.toMatchObject({ valid: false, validation: 'entry_not_touched' });
+  });
+});
+
+describe('prototype delivery boundaries', () => {
+  it('binds a unique pre-run HTML entry, without guessing among existing pages', () => {
+    const root = path.resolve('fixture-project');
+    expect(inferBaselineHtmlEntry(root, [path.join(root, 'landing.html')])).toBe('landing.html');
+    expect(inferBaselineHtmlEntry(root, [path.join(root, 'landing.html'), path.join(root, 'catalog.html')])).toBeUndefined();
+    expect(inferBaselineHtmlEntry(root, [path.join(root, 'index.html'), path.join(root, 'catalog.html')])).toBe('index.html');
+  });
+
+  it('retains the observed entry when a second page is added, but cannot replace a stale declared entry', async () => {
+    const fixture = await projectFixture({
+      'landing.html': '<a href="catalog.html">Catalog</a>', 'catalog.html': '<title>Catalog</title>',
+    });
+    const input = { ...fixture, runStatus: 'succeeded' as const, artifactCount: 1,
+      touchedPaths: ['catalog.html'], baselineEntryFile: 'landing.html' };
+    await expect(validateRunDeliverable({ ...input, projectMetadata: { kind: 'prototype' } }))
+      .resolves.toMatchObject({ valid: true, entryFile: 'landing.html', linkedPage: 'catalog.html' });
+    await expect(validateRunDeliverable({ ...input, projectMetadata: { kind: 'prototype', entryFile: 'missing.html' } }))
+      .resolves.toMatchObject({ valid: false, validation: 'entry_missing' });
+    await expect(validateRunDeliverable({ ...input, artifactCount: 0, touchedPaths: [], projectMetadata: { kind: 'prototype' } }))
+      .resolves.toMatchObject({ valid: false, validation: 'no_artifact' });
+    await expect(validateRunDeliverable({ ...input, baselineEntryFile: undefined, projectMetadata: { kind: 'prototype' } }))
+      .resolves.toMatchObject({ valid: false, validation: 'entry_missing' });
+    await expect(validateRunDeliverable({ ...input, touchedPaths: undefined, projectMetadata: { kind: 'prototype' } }))
+      .resolves.toMatchObject({ valid: false, validation: 'entry_missing' });
+    await expect(validateRunDeliverable({ ...input, projectMetadata: { kind: 'template' } }))
+      .resolves.toMatchObject({ valid: false, validation: 'entry_missing' });
+  });
+
+  it.each([
+    '<a href="https://example.com/catalog.html">Remote</a>',
+    '<a href="//example.com/catalog.html">Remote</a>',
+    '<base href="https://example.com/"><a href="catalog.html">Remote base</a>',
+    '<!-- <a href="catalog.html">Comment</a> -->',
+    `<script>const html = '<a href="catalog.html">Not markup</a>';</script>`,
+  ])('does not treat external URLs or inert text as delivery: %s', async (entry) => {
+    const fixture = await projectFixture({ 'index.html': entry, 'catalog.html': '<title>Catalog</title>' });
+    await expect(validateRunDeliverable({ ...fixture, runStatus: 'succeeded', artifactCount: 1,
+      touchedPaths: ['catalog.html'], projectMetadata: { kind: 'prototype', entryFile: 'index.html' } }))
+      .resolves.toMatchObject({ valid: false, validation: 'entry_not_touched' });
+  });
+
+  it('resolves local base URLs and URL-encoded page names', async () => {
+    const fixture = await projectFixture({
+      'index.html': '<base href="/pages/"><a href="plant%20guide.html">Guide</a>',
+      'pages/plant guide.html': '<title>Guide</title>',
+    });
+    await expect(validateRunDeliverable({ ...fixture, runStatus: 'succeeded', artifactCount: 1,
+      touchedPaths: ['pages/plant guide.html'], projectMetadata: { kind: 'prototype', entryFile: 'index.html' } }))
+      .resolves.toMatchObject({ valid: true });
+  });
+
+  it('declines navigation evidence that exceeds the page read budget', async () => {
+    const fixture = await projectFixture({
+      'index.html': '<a href="catalog.html">Catalog</a>' + ' '.repeat(512 * 1024),
+      'catalog.html': '<title>Catalog</title>',
+    });
+    await expect(validateRunDeliverable({ ...fixture, runStatus: 'succeeded', artifactCount: 1,
+      touchedPaths: ['catalog.html'], projectMetadata: { kind: 'prototype', entryFile: 'index.html' } }))
+      .resolves.toMatchObject({ valid: false, validation: 'entry_not_touched' });
+  });
+
+  it.skipIf(process.platform === 'win32')('never reads a linked page through a symlink outside the project', async () => {
+    const fixture = await projectFixture({ 'index.html': '<a href="catalog.html">Catalog</a>' });
+    const external = await projectFixture({ 'outside.html': '<title>Outside</title>' });
+    await fs.symlink(path.join(external.projectsRoot, external.projectId, 'outside.html'),
+      path.join(fixture.projectsRoot, fixture.projectId, 'catalog.html'));
+    await expect(validateRunDeliverable({ ...fixture, runStatus: 'succeeded', artifactCount: 1,
+      touchedPaths: ['catalog.html'], projectMetadata: { kind: 'prototype', entryFile: 'index.html' } }))
+      .resolves.toMatchObject({ valid: false, validation: 'entry_not_touched' });
   });
 });
