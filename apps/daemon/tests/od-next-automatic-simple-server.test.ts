@@ -2213,12 +2213,16 @@ describe('OD Next automatic production through the real server', () => {
     expect(await readProjectInvocations(fixture.logPath, fixture.projectId)).toHaveLength(invocationCount);
   });
 
-  it.each([true, false])('completes a linked child-page write without Runtime State (declared entry: %s, OPEND-2887)', async (declaredEntry) => {
+  it.each([
+    { declaredEntry: true, childFile: 'plant-taxonomy-guide.html' },
+    { declaredEntry: false, childFile: 'plant-taxonomy-guide.html' },
+    { declaredEntry: false, childFile: 'index.html' },
+  ])('completes a linked $childFile write without Runtime State (declared entry: $declaredEntry, OPEND-2887)', async ({ declaredEntry, childFile }) => {
     const fixture = await createFixture('repair');
     const entryFile = 'plant-science-landing.html';
     const upload = await fetch(`${started!.url}/api/projects/${fixture.projectId}/files`, {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name: entryFile, content: '<!doctype html><a href="plant-taxonomy-guide.html">分类导览</a>' }),
+      body: JSON.stringify({ name: entryFile, content: `<!doctype html><a href="${childFile}">分类导览</a>` }),
     });
     expect(upload.ok).toBe(true);
     if (declaredEntry) {
@@ -2228,7 +2232,7 @@ describe('OD Next automatic production through the real server', () => {
       });
       expect(update.ok).toBe(true);
     }
-    await writeFile(`${fixture.logPath}.linked-page`, '1');
+    await writeFile(`${fixture.logPath}.linked-page`, childFile);
     queueFixtureIds(fixture);
     const created = await postRun(started!.url, createRunRequest(fixture, 'Build the taxonomy page linked from the existing landing page.'));
     const terminal = await waitForRunTerminal(started!.url, created.runId as string);
@@ -3096,11 +3100,12 @@ function finish() {
   }
   let text;
   if (fs.existsSync(logPath + '.linked-page')) {
+    const childFile = fs.readFileSync(logPath + '.linked-page', 'utf8');
     const edited = fs.existsSync(logPath + '.linked-page-edit');
-    if (edited || !fs.existsSync(path.join(process.cwd(), 'plant-taxonomy-guide.html'))) {
-      fs.writeFileSync(path.join(process.cwd(), 'plant-taxonomy-guide.html'), '<!doctype html><title>Taxonomy</title><a href="plant-science-landing.html">Home</a>' + (edited ? '<p>Updated taxonomy</p>' : ''));
+    if (edited || !fs.existsSync(path.join(process.cwd(), childFile))) {
+      fs.writeFileSync(path.join(process.cwd(), childFile), '<!doctype html><title>Taxonomy</title><a href="plant-science-landing.html">Home</a>' + (edited ? '<p>Updated taxonomy</p>' : ''));
     }
-    text = '已交付 plant-taxonomy-guide.html。';
+    text = '已交付 ' + childFile + '。';
   } else if (mode === 'direct') {
     fs.writeFileSync(path.join(process.cwd(), 'index.html'), '<!doctype html><title>Direct</title>');
     text = ${JSON.stringify(direct)};

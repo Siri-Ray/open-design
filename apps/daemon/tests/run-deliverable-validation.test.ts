@@ -264,6 +264,21 @@ describe('linked prototype page delivery (OPEND-2887)', () => {
 });
 
 describe('prototype delivery boundaries', () => {
+  it('keeps the pre-run homepage when a linked index.html is created', async () => {
+    const fixture = await projectFixture({
+      'landing.html': '<a href="index.html">Catalog</a>',
+      'index.html': '<title>Catalog</title>',
+    });
+    const input = {
+      ...fixture, runStatus: 'succeeded' as const, artifactCount: 1,
+      touchedPaths: ['index.html'], baselineEntryFile: 'landing.html',
+    };
+    await expect(validateRunDeliverable({ ...input, projectMetadata: { kind: 'prototype' } }))
+      .resolves.toMatchObject({ valid: true, entryFile: 'landing.html', linkedPage: 'index.html' });
+    await expect(validateRunDeliverable({ ...input, projectMetadata: { kind: 'prototype', entryFile: 'index.html' } }))
+      .resolves.toEqual({ valid: true, validation: 'valid', entryFile: 'index.html', artifactKind: 'html' });
+  });
+
   it('binds a unique pre-run HTML entry, without guessing among existing pages', () => {
     const root = path.resolve('fixture-project');
     expect(inferBaselineHtmlEntry(root, [path.join(root, 'landing.html')])).toBe('landing.html');

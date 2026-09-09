@@ -204,8 +204,8 @@ export async function validateRunDeliverable(
     : null;
   const selected = declared
     ? files.find((file) => filePath(file) === declared) ?? null
-    : inferredEntry(files, acceptedKinds)
-      ?? (baselineEntry ? files.find((file) => filePath(file) === baselineEntry) ?? null : null);
+    : (baselineEntry ? files.find((file) => filePath(file) === baselineEntry) ?? null : null)
+      ?? inferredEntry(files, acceptedKinds);
   if (!selected) {
     return { valid: false, validation: 'entry_missing' };
   }
