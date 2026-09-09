@@ -145,7 +145,7 @@ import {
 } from './CommunityTemplatePreview';
 import { SkillDetailsModal } from './SkillDetailsModal';
 import type { PluginLoopSubmit } from './PluginLoopHome';
-import { localizePluginTitle } from './plugins-home/localization';
+import { localizeHomePresetTitle, localizePluginTitle } from './plugins-home/localization';
 import type { PluginUseAction } from './plugins-home/useActions';
 import { examplePresetSeedPrompt } from './plugins-home/presetSeedPrompt';
 import { localizePluginDescription } from './plugins-home/localization';
@@ -1256,7 +1256,7 @@ export function HomeView({
       }
     }
     return {
-      title: localizePluginTitle(locale, active.record),
+      title: localizeHomePresetTitle(locale, active.record),
       isExplicitPlugin: true,
     };
   }, [active, locale, t]);
