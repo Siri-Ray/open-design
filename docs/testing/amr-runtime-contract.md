@@ -132,6 +132,9 @@ The fork tag and self-reported `--version` string are separate identifiers.
   `6cf45efc55509138bd415cc6ad818532bc713ec1c5a58c3e1fc931aee33c0ca3`, passed
   all seven baseline/Write scenarios, including both Write abort-order checks.
   This is an unpublished development build, not an upgrade target.
+  The host cancellation notification companion is
+  [OpenDesign #7959](https://github.com/nexu-io/open-design/pull/7959), commit
+  `65fa5dced1`; it has not been included in this PR's combined-package acceptance.
 - [Vela PR #1952](https://github.com/powerformer/vela/pull/1952), commit
   `1acdf79feaf88837763eb3afeb291421603ab76f`: locally built `0.0.1-test`, SHA-256
   `487a9cb1882aa0cc9badb170a51ecf7a86f14c40e0de19694ac57e665cf95cc1`, passed
