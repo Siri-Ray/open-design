@@ -1340,8 +1340,8 @@ export function EntryTopRightCluster({
                       return;
                     }
                     trackAccountAction('credits');
-                    if (billingConsoleUrl) {
-                      window.open(billingConsoleUrl, '_blank', 'noopener,noreferrer');
+                    if (accountBillingUrl) {
+                      window.open(accountBillingUrl, '_blank', 'noopener,noreferrer');
                     }
                   }}
                 >
@@ -1415,8 +1415,8 @@ export function EntryTopRightCluster({
                       onClick={() => {
                         trackAccountAction('credits');
                         setCreditsPanelOpen(false);
-                        if (billingConsoleUrl) {
-                          window.open(billingConsoleUrl, '_blank', 'noopener,noreferrer');
+                        if (accountBillingUrl) {
+                          window.open(accountBillingUrl, '_blank', 'noopener,noreferrer');
                         }
                       }}
                     >
