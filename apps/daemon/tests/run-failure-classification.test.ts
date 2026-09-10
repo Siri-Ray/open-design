@@ -2134,7 +2134,7 @@ describe('classifyRunFailure — AMR/vela reclassification out of execution_fail
     // enter the automatic transient retry allowlist, even before side effects.
     for (const sideEffects of [{}, { toolCallSeen: true }, { artifactWriteSeen: true }]) {
       expect(decideSafeRunRetry({
-        result: 'failed', attemptCount: 0, failure: result, sideEffects,
+        result: 'failed', attemptCount: 0, failure: result!, sideEffects,
       })).toMatchObject({ shouldRetry: false, retrySuppressedReason: 'non_retryable_category' });
     }
   });
