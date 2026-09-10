@@ -84,8 +84,10 @@ describe('EntryNavRail message-center openers', () => {
     renderRail(teamContext());
     const accountTrigger = screen.getByTestId('entry-nav-account');
 
-    fireEvent.click(accountTrigger);
-    fireEvent.click(screen.getByTestId('account-menu-message-center'));
+    // The message centre is a peer of the identity chip now, not a row behind
+    // the account menu — so it opens in one click. Focus still returns to the
+    // account trigger (EntryNavRail's `returnFocusRef`).
+    fireEvent.click(screen.getByTestId('entry-nav-account-message-center'));
     await waitFor(() => expect(screen.getByTestId('message-center-dialog')).toBeTruthy());
 
     fireEvent.click(screen.getByRole('button', { name: '关闭消息中心' }));
@@ -98,8 +100,9 @@ describe('EntryNavRail message-center openers', () => {
     renderRail(teamContext());
     const accountTrigger = screen.getByTestId('entry-nav-account');
 
-    fireEvent.click(accountTrigger);
-    fireEvent.click(screen.getByTestId('account-menu-message-center'));
+    // Same one-click opener as above; the backdrop path must hand focus back
+    // to the same trigger.
+    fireEvent.click(screen.getByTestId('entry-nav-account-message-center'));
     const dialog = await waitFor(() => screen.getByTestId('message-center-dialog'));
 
     fireEvent.mouseDown(screen.getByTestId('message-center-backdrop'));
@@ -132,9 +135,8 @@ describe('EntryNavRail message-center openers', () => {
     signedOut.unmount();
 
     renderRail(teamContext());
-    fireEvent.click(screen.getByTestId('entry-nav-account'));
-    const menuRow = screen.getByTestId('account-menu-message-center');
-    expect(menuRow.getAttribute('aria-haspopup')).toBe('dialog');
-    expect(menuRow.getAttribute('aria-expanded')).toBe('false');
+    const accountBell = screen.getByTestId('entry-nav-account-message-center');
+    expect(accountBell.getAttribute('aria-haspopup')).toBe('dialog');
+    expect(accountBell.getAttribute('aria-expanded')).toBe('false');
   });
 });
