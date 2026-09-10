@@ -30,6 +30,7 @@
 import {
   useCallback,
   useEffect,
+  useId,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -1053,9 +1054,11 @@ export function EntryTopRightCluster({
   }, [accountOpen, analytics.track, page, workspaceDimensions.workspace_key]);
   // The billing card hangs off the top-right 升级 / balance pill (per product:
   // 黑色卡片在右上角的升级下边显示), no longer inside the account menu.
-  // Hover-opened, mirroring the account row's own gesture; the pill's CLICK is
-  // untouched — for a free member that pill IS the upgrade CTA.
+  // Opens on hover or focus; clicking the pill still opens the upgrade flow
+  // for a free member.
   const [creditsPanelOpen, setCreditsPanelOpen] = useState(false);
+  const creditsPanelId = useId();
+  const creditsAnchorRef = useRef<HTMLDivElement | null>(null);
   const creditsCloseTimer = useRef<number | null>(null);
   const openCreditsPanel = () => {
     if (creditsCloseTimer.current !== null) {
@@ -1066,7 +1069,13 @@ export function EntryTopRightCluster({
   };
   const scheduleCreditsPanelClose = () => {
     if (creditsCloseTimer.current !== null) window.clearTimeout(creditsCloseTimer.current);
-    creditsCloseTimer.current = window.setTimeout(() => setCreditsPanelOpen(false), 180);
+    creditsCloseTimer.current = window.setTimeout(() => {
+      creditsCloseTimer.current = null;
+      // Pointer exit must not unmount actions a keyboard user is navigating.
+      if (!creditsAnchorRef.current?.contains(document.activeElement)) {
+        setCreditsPanelOpen(false);
+      }
+    }, 180);
   };
   useEffect(
     () => () => {
@@ -1078,9 +1087,7 @@ export function EntryTopRightCluster({
   // its unread count, which drives the red dot on that bell.
   const [messageCenterOpen, setMessageCenterOpen] = useState(false);
   const [messageUnreadCount, setMessageUnreadCount] = useState(0);
-  // Where the message-center panel returns keyboard focus on close: the
-  // account trigger is the stable control next to the bell that opened it.
-  const accountTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const messageCenterBellRef = useRef<HTMLButtonElement | null>(null);
   // Sign-out confirm gate (recvqgMWpJZqhL): the menu item only ARMS the
   // confirmation dialog; the real logout chain runs on explicit confirm.
   const [confirmSignOut, setConfirmSignOut] = useState(false);
@@ -1302,9 +1309,14 @@ export function EntryTopRightCluster({
               it never leaves the anchor and never arms the close. */}
           {context && showCreditsPill ? (
             <div
+              ref={creditsAnchorRef}
               className="entry-top-right-credits-anchor"
               onPointerEnter={openCreditsPanel}
               onPointerLeave={scheduleCreditsPanelClose}
+              onFocus={openCreditsPanel}
+              onBlur={(event) => {
+                if (!event.currentTarget.contains(event.relatedTarget)) scheduleCreditsPanelClose();
+              }}
             >
               <div
                 className={`entry-top-right-account-pill${isFreePlan ? ' entry-top-right-account-pill--upgrade' : ''}`}
@@ -1313,6 +1325,9 @@ export function EntryTopRightCluster({
                   type="button"
                   className="entry-top-right-credits"
                   data-testid="entry-top-right-credits"
+                  aria-haspopup="dialog"
+                  aria-expanded={creditsPanelOpen}
+                  aria-controls={creditsPanelOpen ? creditsPanelId : undefined}
                   aria-label={isFreePlan ? t('entry.creditsUpgrade') : t('entry.credits')}
                   onClick={() => {
                     // The free pill IS the upgrade CTA, so it opens the upgrade
@@ -1364,6 +1379,9 @@ export function EntryTopRightCluster({
                   dollars here. */}
               {creditsPanelOpen ? (
                 <div
+                  id={creditsPanelId}
+                  role="dialog"
+                  aria-label={t('entry.credits')}
                   className="entry-top-right-credits-panel"
                   data-testid="entry-top-right-credits-panel"
                 >
@@ -1448,7 +1466,6 @@ export function EntryTopRightCluster({
                 onMouseLeave={scheduleAccountClose}
               >
                 <button
-                  ref={accountTriggerRef}
                   type="button"
                   className="entry-nav-rail__account-trigger"
                   onClick={() => {
@@ -1488,6 +1505,7 @@ export function EntryTopRightCluster({
                     away. */}
                 <button
                   type="button"
+                  ref={messageCenterBellRef}
                   className="entry-nav-rail__account-bell"
                   aria-haspopup="dialog"
                   aria-expanded={messageCenterOpen}
@@ -1651,7 +1669,7 @@ export function EntryTopRightCluster({
       {context ? (
         <MessageCenter
           hideTrigger
-          returnFocusRef={accountTriggerRef}
+          returnFocusRef={messageCenterBellRef}
           open={messageCenterOpen}
           onOpenChange={setMessageCenterOpen}
           onUnreadCountChange={setMessageUnreadCount}

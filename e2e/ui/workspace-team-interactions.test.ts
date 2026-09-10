@@ -979,7 +979,14 @@ test('[P1] visible workspace allowance refreshes in place without reloading the 
 }) => {
   const workspaceMocks = await wireWorkspaceMocks(page, TEAM_OWNER, [TEAM_OWNER]);
   await gotoHome(page);
-  await openAccountMenu(page);
+  const pill = page.getByTestId('entry-top-right-credits');
+  await pill.focus();
+  const billingPanel = page.getByTestId('entry-top-right-credits-panel');
+  await expect(billingPanel).toBeVisible();
+  await page.keyboard.press('Tab');
+  await expect(billingPanel.getByRole('button', { name: 'Upgrade', exact: true })).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(page.getByTestId('entry-nav-credits-row')).toBeFocused();
   const credits = page.getByTestId('entry-nav-credits-row');
   await expect(credits).toContainText('$0.00');
   const documentMarker = await page.evaluate(() => {
