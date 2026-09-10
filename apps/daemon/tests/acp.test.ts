@@ -11,6 +11,7 @@ import {
   acpToolName,
   isAcpPartialRedactToolName,
 } from '../src/agent-protocol/acp/updates.js';
+import { runtimeEmissionCountsAsAgentProgress, runtimeStdoutCountsAsAgentProgress } from '../src/runtimes/chat-run-lifecycle.js';
 import { countNewArtifacts } from '../src/runtimes/run-artifacts.js';
 import { excludeAcpImagePathsAlreadyDeliveredAsResources } from '../src/runtimes/chat-prompt-inputs.js';
 
@@ -4014,4 +4015,96 @@ test('Write diagnostics reject foreign sessions and unknown versions without raw
     events.some((e) => e.name?.startsWith('write_progress') || e.label === 'write_progress'),
   ).toBe(false);
   expect(JSON.stringify(events)).not.toContain('SECRET');
+});
+
+
+test.each(['execution_returned', 'result_observed'])(
+  'Write close flush retains an unterminated %s frame', (phase) => {
+    vi.useFakeTimers();
+    try {
+      const child = new FakeAcpChild();
+      const events: any[] = [];
+      attachAcpSession({
+        child: child as never,
+        prompt: 'hi',
+        modelUnavailableErrorCode: 'AMR_MODEL_UNAVAILABLE',
+        send: (_, payload) => events.push(payload),
+      });
+      writeAcpResult(child, 1, {});
+      writeAcpResult(child, 2, { sessionId: 'session' });
+      const frame = (phase: string) => JSON.stringify({
+        method: 'session/update',
+        params: { sessionId: 'session', update: {
+          sessionUpdate: 'write_progress', version: 1, phase, atMs: 100,
+          callID: 'write', messageID: 'assistant',
+        } },
+      });
+      child.stdout.write(frame('execution_started') + '\n');
+      child.stdout.write(frame(phase));
+      child.emit('close', 1, null);
+      expect(events).toContainEqual(expect.objectContaining({ name: 'write_progress', phase }));
+      const snapshots = events.filter((e) => e.reason === 'session_closed');
+      if (phase === 'result_observed') expect(snapshots).toHaveLength(0);
+      else expect(snapshots).toEqual([expect.objectContaining({ executionSettled: true })]);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  },
+);
+
+test('Write diagnostics do not refresh the progress clock or outer inactivity timer', async () => {
+  vi.useFakeTimers();
+  try {
+    const child = new FakeAcpChild();
+    let lastAgentActivityAt = Date.now();
+    let inactivityTimer: ReturnType<typeof setTimeout>;
+    const timedOut = vi.fn();
+    const noteAgentActivity = () => {
+      lastAgentActivityAt = Date.now();
+      clearTimeout(inactivityTimer);
+      inactivityTimer = setTimeout(timedOut, 1000);
+    };
+    child.stdout.on('data', () => {
+      if (runtimeStdoutCountsAsAgentProgress('acp-json-rpc')) noteAgentActivity();
+    });
+    const session = attachAcpSession({
+      child: child as never,
+      prompt: 'hi',
+      stageTimeoutMs: 0,
+      modelUnavailableErrorCode: 'AMR_MODEL_UNAVAILABLE',
+      onAgentActivity: noteAgentActivity,
+      send: (event, _payload, meta) => {
+        if (runtimeEmissionCountsAsAgentProgress(event, meta)) noteAgentActivity();
+      },
+    });
+    writeAcpResult(child, 1, {});
+    writeAcpResult(child, 2, { sessionId: 'session' });
+    await vi.advanceTimersByTimeAsync(100);
+    // Even an ordinary RPC without a projected agent event is activity.
+    child.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: 999, result: {} }) + '\n');
+    const lastProgress = Date.now();
+    expect(lastAgentActivityAt).toBe(lastProgress);
+    for (let i = 0; i < 4; i++) {
+      await vi.advanceTimersByTimeAsync(200);
+      const frame = JSON.stringify({ method: 'session/update', params: {
+        sessionId: 'session', update: { sessionUpdate: 'write_progress', version: 1,
+          phase: 'input_progress', atMs: Date.now(), callID: 'write', messageID: 'assistant', inputBytes: i },
+      } }) + '\n';
+      // Chunk boundaries cannot turn private diagnostics into activity.
+      child.stdout.write(frame.slice(0, 25));
+      child.stdout.write(frame.slice(25));
+      expect(lastAgentActivityAt).toBe(lastProgress);
+    }
+    await vi.advanceTimersByTimeAsync(199);
+    expect(timedOut).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(timedOut).toHaveBeenCalledOnce();
+    expect(session.hasFatalError()).toBe(false);
+    session.abort();
+    expect(lastAgentActivityAt).toBe(lastProgress);
+    expect(vi.getTimerCount()).toBe(0);
+  } finally {
+    vi.useRealTimers();
+  }
 });
