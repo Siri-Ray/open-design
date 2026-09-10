@@ -7,6 +7,7 @@
  * connectionTest.ts and server.ts (via the acp/ barrel).
  */
 import path from 'node:path';
+import { createWriteProgressObserver } from './write-progress.js';
 import type { ExecutionProfile } from '@open-design/contracts';
 import {
   createDsmlArtifactTextSuppressor,
@@ -208,6 +209,9 @@ export function attachAcpSession({
   onTerminal,
 }: AttachAcpSessionOptions) {
   const runStartedAt = Date.now();
+  const writeProgress = createWriteProgressObserver((payload, hostSynthesized) =>
+    send('agent', payload, hostSynthesized ? { hostSynthesized: true } : undefined),
+  );
   const toolExecutionLifecycleDeduper = createToolExecutionLifecycleDeduper();
   const effectiveCwd = path.resolve(cwd || process.cwd());
   if (!child.stdin || !child.stdout) {
@@ -511,6 +515,7 @@ export function attachAcpSession({
   };
 
   const clearStageTimer = () => {
+    writeProgress.close();
     if (stageTimer) clearTimeout(stageTimer);
     stageTimer = null;
   };
@@ -991,8 +996,19 @@ export function attachAcpSession({
 
   const parser = createJsonLineStream((raw, rawLine) => {
     if (aborted || finished) return;
+    const candidate = asObject(raw);
+    const diagnosticParams = asObject(candidate?.params);
+    const diagnosticUpdate = asObject(diagnosticParams?.update);
+    if (candidate?.method === 'session/update' && diagnosticUpdate?.sessionUpdate === 'write_progress') {
+      if (modelUnavailableErrorCode && promptRequestId !== null && sessionId && diagnosticParams?.sessionId === sessionId) {
+        writeProgress.observe(diagnosticUpdate);
+      }
+      // Even rejected diagnostics must not reset the response watchdog or leak
+      // through generic status projection. These are evidence, not liveness.
+      return;
+    }
     resetStageTimer('response');
-    const obj = asObject(raw);
+    const obj = candidate;
     if (!obj) return;
     // First well-formed ACP JSON-RPC message = CLI ready (#3408 §4). Caller
     // dedupes, so re-notifying on later messages is harmless.
