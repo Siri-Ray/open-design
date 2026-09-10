@@ -16,7 +16,7 @@ import type {
   InstalledPluginRecord,
   WorkspaceCollabContext,
 } from '@open-design/contracts';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useT } from '../i18n';
 import type { Dict, Locale } from '../i18n/types';
@@ -238,19 +238,40 @@ export function TemplatePreviewModal({
   busy?: boolean;
 }) {
   const t = useT();
-  // Esc closes it. The overlay is portalled to <body> and holds no focus of its
-  // own, so the listener goes on the document rather than the panel — a click
-  // that lands on the iframe inside would otherwise move focus out of any
-  // element a keydown handler could see. Captured on `keydown` (not `keyup`)
-  // so it beats anything the previewed page does with the same key.
+  const panelRef = useRef<HTMLElement>(null);
+  const frameRef = useRef<HTMLIFrameElement>(null);
+  useEffect(() => {
+    panelRef.current?.focus();
+  }, []);
+  // Keyboard events do not bubble out of an iframe. Listen in both documents
+  // and rebind when a same-origin preview finishes loading or navigates.
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent): void {
       if (event.key !== 'Escape') return;
+      event.preventDefault();
       event.stopPropagation();
       onClose();
     }
-    document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
+    const frame = frameRef.current;
+    let frameDocument: Document | null = null;
+    function bindFrame(): void {
+      frameDocument?.removeEventListener('keydown', onKeyDown, true);
+      frameDocument = null;
+      try {
+        frameDocument = frame?.contentDocument ?? null;
+        frameDocument?.addEventListener('keydown', onKeyDown, true);
+      } catch {
+        // Cross-origin previews cannot be observed by the host document.
+      }
+    }
+    document.addEventListener('keydown', onKeyDown, true);
+    frame?.addEventListener('load', bindFrame);
+    bindFrame();
+    return () => {
+      document.removeEventListener('keydown', onKeyDown, true);
+      frame?.removeEventListener('load', bindFrame);
+      frameDocument?.removeEventListener('keydown', onKeyDown, true);
+    };
   }, [onClose]);
   // The overlay is `position: fixed; inset: 0`, so it must render as a direct
   // child of <body> (the PluginDetailsModal convention). Left inline, any host
@@ -261,6 +282,8 @@ export function TemplatePreviewModal({
   const overlay = (
     <div className="community-template-preview" role="presentation" onMouseDown={onClose}>
       <section
+        ref={panelRef}
+        tabIndex={-1}
         className="community-template-preview__panel"
         role="dialog"
         aria-modal="true"
@@ -277,6 +300,7 @@ export function TemplatePreviewModal({
           </button>
         </header>
         <iframe
+          ref={frameRef}
           title={`${template.title} preview`}
           className="community-template-preview__frame"
           // Html-preview plugins load their real daemon-served page; media
