@@ -1,3 +1,9 @@
+ apps/web/src/App.tsx                               |  18 +-
+ apps/web/src/components/AssistantMessage.tsx       | 696 +--------------------
+ apps/web/src/components/ChatComposer.tsx           | 212 +++----
+ apps/web/src/components/ComposerPlusMenu.tsx       | 472 +++++++++++---
+ apps/web/src/components/DesignFilesPanel.tsx       |   9 +-
+ apps/web/src/components/EntryNavRail.tsx           |   5 +-
  apps/web/src/components/HomeHero.tsx               |  79 ++-
  apps/web/src/components/HomeView.tsx               |   3 +
  apps/web/src/components/Icon.tsx                   |   8 -
@@ -49,6 +55,7 @@
  .../w93-2585-pending-surface-attachments.test.tsx  |  12 +-
  apps/web/tests/styles/entry-materials.test.ts      |   2 +-
  .../tests/styles/font-weight-normalization.test.ts |  14 +-
+ e2e/tests/dialog/run-list-survives-restart.test.ts |  10 +
  e2e/ui/app-design-files.test.ts                    |   8 -
  e2e/ui/composer-toolbar-alignment.test.ts          |   7 -
  e2e/ui/entry-chrome-flows.test.ts                  |  10 +-
@@ -57,4 +64,4 @@
  e2e/ui/real-daemon-run.test.ts                     |  12 -
  packages/components/src/button.module.css          |   5 -
  packages/components/src/dialog.module.css          |  10 -
- 65 files changed, 1414 insertions(+), 2257 deletions(-)
+ 66 files changed, 1424 insertions(+), 2257 deletions(-)

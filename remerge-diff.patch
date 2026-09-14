@@ -1,4 +1,4 @@
-commit ac298e367e71dd46ec46d975dd859a706484e09d
+commit 792d130108a10cac75ff440182d98cd922f298b1
 Merge: edae1ada2a 7abe49c858
 Author: Siri-Ray <2667192167@qq.com>
 Date:   Mon Sep 14 15:14:26 2026 +0800
@@ -5373,6 +5373,34 @@ index 0c15da3025..d134b7b044 100644
      );
    });
  });
+diff --git a/e2e/tests/dialog/run-list-survives-restart.test.ts b/e2e/tests/dialog/run-list-survives-restart.test.ts
+index bd72cd3760..e848df2e98 100644
+--- a/e2e/tests/dialog/run-list-survives-restart.test.ts
++++ b/e2e/tests/dialog/run-list-survives-restart.test.ts
+@@ -127,6 +127,11 @@ describe('project run list survives daemon restart', () => {
+           retriedProjectId,
+           succeededRunId,
+         });
++      }, {
++        // The fake codex emits generic artifact output, not OD Next protocol
++        // blocks; OD Next is the default route since #7876, so pin the classic
++        // route or every fake turn is blocked as an invalid deliverable.
++        env: { OD_NEXT_STRATEGY_ROLLOUT: 'off' },
+       });
+ 
+       // Full restart over the same persisted data. Nothing in memory survives
+@@ -143,6 +148,11 @@ describe('project run list survives daemon restart', () => {
+           retriedProjectId,
+           succeededRunId,
+         });
++      }, {
++        // The fake codex emits generic artifact output, not OD Next protocol
++        // blocks; OD Next is the default route since #7876, so pin the classic
++        // route or every fake turn is blocked as an invalid deliverable.
++        env: { OD_NEXT_STRATEGY_ROLLOUT: 'off' },
+       });
+     } finally {
+       await rm(externalRoot, { force: true, recursive: true });
 diff --git a/e2e/ui/app-design-files.test.ts b/e2e/ui/app-design-files.test.ts
 remerge CONFLICT (content): Merge conflict in e2e/ui/app-design-files.test.ts
 index a870623e8e..eb30fe40cc 100644
