@@ -3440,22 +3440,23 @@ describe('projectSplitClassName', () => {
     // custom properties — no more concatenated `gridTemplateColumns` string.
     expect(projectSplitStyle(false, 512, 'minmax(420px, 1fr)')).toEqual({
       '--project-chat-panel-width': '512px',
-      '--project-chat-handle-width': '8px',
+      '--project-chat-handle-width': '4px',
       '--project-workspace-panel-track': 'minmax(420px, 1fr)',
     });
     expect(projectSplitStyle(true, 512, 'minmax(420px, 1fr)')).toBeUndefined();
   });
 
   it('starts an uncustomized wide project at an equal chat/preview split', () => {
-    // 1600 total − the 8px handle = two 796px content columns. This must not
-    // regress to the old fixed 460px default or its former 720px ceiling.
-    expect(defaultChatPanelWidthForSplit(1600)).toBe(796);
+    // 1600 total − the 4px handle (Demo, OPEND-2553 S6) = two 798px content
+    // columns. This must not regress to the old fixed 460px default or its
+    // former 720px ceiling.
+    expect(defaultChatPanelWidthForSplit(1600)).toBe(798);
   });
 
   it('keeps the workspace minimum when the viewport is too narrow for 1:1', () => {
     // At this width an exact half would leave the preview below its existing
-    // 400px minimum, so the established drag boundary wins.
-    expect(defaultChatPanelWidthForSplit(760)).toBe(352);
+    // 400px minimum, so the established drag boundary wins (760 − 4 − 400).
+    expect(defaultChatPanelWidthForSplit(760)).toBe(356);
   });
 });
 

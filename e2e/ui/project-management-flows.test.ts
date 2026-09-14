@@ -32,7 +32,7 @@ const STORAGE_KEY = 'open-design:config';
 function projectDesignSystemTrigger(page: Page): Locator {
   return page
     .getByTestId('chat-composer')
-    .getByTestId('composer-design-system-trigger');
+    .getByTestId('home-hero-design-system-trigger');
 }
 const AGENTS = [
   {
@@ -624,7 +624,7 @@ test('[P1] project detail composer design system picker switches the active proj
   await expectWorkspaceReady(page);
 
   const trigger = projectDesignSystemTrigger(page);
-  await expect(trigger).toHaveAccessibleName(/No design system/i);
+  await expect(trigger).toHaveAccessibleName(/^Design system$/i);
 
   await trigger.click();
   const popover = page.getByTestId('project-ds-picker-popover');
@@ -686,7 +686,7 @@ test('[P0] @critical project detail composer design system switch carries into t
   await expectWorkspaceReady(page);
 
   const trigger = projectDesignSystemTrigger(page);
-  await expect(trigger).toHaveAccessibleName(/No design system/i);
+  await expect(trigger).toHaveAccessibleName(/^Design system$/i);
   await trigger.click();
   await page.getByTestId('project-ds-picker-search').fill('editorial');
   const editorialOption = page.getByRole('option', { name: /^Editorial Noir$/ });
@@ -720,8 +720,8 @@ test('[P1] project detail design system picker stays inside the composer control
 
   const composer = page.getByTestId('chat-composer');
   await expect(
-    composer.getByTestId('composer-design-system-trigger'),
-  ).toHaveAccessibleName(/No design system/i);
+    composer.getByTestId('home-hero-design-system-trigger'),
+  ).toHaveAccessibleName(/^Design system$/i);
 });
 
 test('[P1] project detail composer working directory picker opens without leaving chat', async ({ page }) => {
@@ -839,7 +839,7 @@ test('[P1] project detail composer plus menu opens project, local code, Figma he
   await expect(page.getByTestId('composer-plus-figma-help')).toHaveCount(0);
 
   await page.keyboard.press('Escape');
-  await composer.getByTestId('composer-design-system-trigger').click();
+  await composer.getByTestId('home-hero-design-system-trigger').click();
   await expect(page.getByTestId('project-ds-picker-popover')).toBeVisible();
 });
 
@@ -2004,7 +2004,7 @@ test('[P0] clearing the project design system removes designSystemId from the ne
   await expectWorkspaceReady(page);
 
   const trigger = projectDesignSystemTrigger(page);
-  await expect(trigger).toHaveAccessibleName(/No design system/i);
+  await expect(trigger).toHaveAccessibleName(/^Design system$/i);
   await trigger.click();
   await page.getByTestId('project-ds-picker-search').fill('editorial');
   const editorialOption = page.getByRole('option', { name: /^Editorial Noir$/ });
@@ -2014,7 +2014,7 @@ test('[P0] clearing the project design system removes designSystemId from the ne
 
   await trigger.click();
   await page.locator('.project-ds-picker-option').first().click();
-  await expect(trigger).toHaveAccessibleName(/No design system/i);
+  await expect(trigger).toHaveAccessibleName(/^Design system$/i);
 
   expect(patchBodies.some((body) => Object.prototype.hasOwnProperty.call(body, 'designSystemId') && body.designSystemId === null)).toBe(true);
 
