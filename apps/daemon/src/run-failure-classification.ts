@@ -198,7 +198,12 @@ function collectFailureText(input: RunFailureClassificationInput): string {
   return parts.join('\n');
 }
 
-function isHardQuotaText(text: string): boolean {
+function isHardQuotaText(text: string, agentId: string | null | undefined): boolean {
+  // Antigravity's per-model quota log may expose only the status code when
+  // its explanatory phrase is truncated or arrives separately. This signal
+  // is provider-specific: Cursor also uses it for ambiguous resource errors.
+  if (agentId === 'antigravity' && /\bRESOURCE_EXHAUSTED\b/i.test(text)) return true;
+
   // Standalone `\bquota\b` is intentionally absent: advisory phrases such as
   // "checking quota" in the daemon's own empty-output fallback message would
   // otherwise match, misclassifying a retryable empty_output run as a
@@ -1338,7 +1343,7 @@ function classifyRunFailureBase(
     );
   }
 
-  if (errorCode === 'RATE_LIMITED' || serviceFailure === 'RATE_LIMITED' || isHardQuotaText(text) || isRateLimitText(text)) {
+  if (errorCode === 'RATE_LIMITED' || serviceFailure === 'RATE_LIMITED' || isHardQuotaText(text, input.agentId) || isRateLimitText(text)) {
     // Checked BEFORE the hard-quota reading: vela phrases its rolling per-model
     // window as "…usage limit…", which `isHardQuotaText` matches, so without
     // this branch a self-resetting window is reported as an exhausted quota —
@@ -1352,7 +1357,7 @@ function classifyRunFailureBase(
         'retry',
       );
     }
-    const hardQuota = isHardQuotaText(text);
+    const hardQuota = isHardQuotaText(text, input.agentId);
     const workspaceCredits = isWorkspaceCreditsText(text);
     const retryable = hardQuota ? false : (retryableHint ?? true);
     return classification(

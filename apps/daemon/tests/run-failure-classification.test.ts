@@ -2085,8 +2085,8 @@ describe('classifyRunFailure — AMR/vela reclassification out of execution_fail
   // Refs mrcfps blocking comment on PR #7248.  Antigravity emits:
   //   RESOURCE_EXHAUSTED (code 429): Individual quota reached. Contact your
   //   administrator to enable overages. Resets in <H>h<M>m<S>s.
-  // to its log file. The explicit quota phrase remains exhaustion evidence;
-  // the status code alone does not identify which resource was exhausted.
+  // to its log file. The status code alone is quota evidence only when the
+  // runtime is Antigravity; other providers need an explicit quota phrase.
   it('classifies Antigravity "RESOURCE_EXHAUSTED: Individual quota reached" as hard_quota', () => {
     const result = classify(
       'RATE_LIMITED',
@@ -2107,14 +2107,33 @@ describe('classifyRunFailure — AMR/vela reclassification out of execution_fail
     expect(result?.retryable).toBe(false);
   });
 
-  it('preserves a structured rate limit without inferring hard quota from RESOURCE_EXHAUSTED', () => {
-    const result = classify('RATE_LIMITED', 'RESOURCE_EXHAUSTED');
+  it.each(['RATE_LIMITED', 'AGENT_EXECUTION_FAILED'])(
+    'suppresses retries for Antigravity status-only quota exhaustion with %s',
+    (code) => {
+      const result = classifyForAgent('antigravity', code, 'RESOURCE_EXHAUSTED');
+      expect(result).toMatchObject({
+        failure_category: 'rate_limit',
+        failure_detail: 'hard_quota',
+        retryable: false,
+        user_action: 'none',
+      });
+      expect(decideSafeRunRetry({
+        result: 'failed', attemptCount: 0, failure: result!, sideEffects: {},
+      })).toMatchObject({ shouldRetry: false, retrySuppressedReason: 'hard_quota' });
+    },
+  );
+
+  it.each(['claude', 'cursor-agent'])('preserves %s structured rate limits without inferring hard quota from RESOURCE_EXHAUSTED', (agentId) => {
+    const result = classifyForAgent(agentId, 'RATE_LIMITED', 'RESOURCE_EXHAUSTED');
     expect(result).toMatchObject({
       failure_category: 'rate_limit',
       failure_detail: 'rate_limit_429',
       retryable: true,
       user_action: 'retry',
     });
+    expect(decideSafeRunRetry({
+      result: 'failed', attemptCount: 0, failure: result!, sideEffects: {},
+    })).toMatchObject({ shouldRetry: true });
   });
 
   it('keeps the Cursor resource error recoverable without automatically replaying it', () => {
