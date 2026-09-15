@@ -784,17 +784,6 @@
   /* Tracks the label tone above — one ink for the whole row. */
   color: inherit;
 }
-/* Unread marker on a rail item's icon — same 6px red dot as the account
-   menu's `__menu-item-dot`, pinned to the glyph's top-right corner. */
-.entry-nav-rail__btn-dot {
-  position: absolute;
-  top: -2px;
-  right: -2px;
-  width: 6px;
-  height: 6px;
-  border-radius: 999px;
-  background: var(--red);
-}
 .entry-nav-rail__btn-icon > svg {
   width: 18px;
   height: 18px;
@@ -6264,6 +6253,30 @@
   top: 5px;
   right: 5px;
   margin-left: 0;
+}
+/* Local account dock (OPEND-3140): the signed-out rail renders the same dock
+   in its FOOTER, under the sign-in card, so the identity row is the rail's
+   last line on both branches. The footer centres its children at
+   `calc(100% - 18px)`; the dock takes that width and its rows stretch to it. */
+.entry-nav-rail__footer .entry-nav-rail__account-dock {
+  order: 3;
+  width: calc(100% - 18px);
+  margin: 0 auto;
+}
+.entry-nav-rail__footer .entry-nav-rail__account-dock .entry-nav-rail__account {
+  width: auto;
+}
+/* The local identity has no initial to show: a quiet terminal glyph on the
+   panel tint, the same 25px rounded square the avatar occupies. Doubled
+   class so it outranks the avatar's own gradient, declared later. */
+.entry-nav-rail__account-avatar.entry-nav-rail__account-avatar--local {
+  background: var(--bg-subtle);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  box-sizing: border-box;
+}
+.entry-nav-rail__account-trigger:hover .entry-nav-rail__account-avatar--local {
+  color: var(--text-strong);
 }
 /* Update-ready slot: an independent top-right cluster item immediately AFTER
    the credits/avatar capsule when present. Signed-out shells keep the same

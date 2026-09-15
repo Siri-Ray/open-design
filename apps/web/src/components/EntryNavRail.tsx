@@ -2007,9 +2007,10 @@ export function EntryNavRail({
   const canAccessInviteFlow = canAccessWorkspaceInviteFlow(context);
   const workspaceSettingsUrl = context?.workspaceSettingsUrl?.trim() || null;
 
-  // Message-center panel for the SIGNED-OUT shell only (its rail item under
-  // 设置 is the one opener there). The signed-in panel — plus the unread badge
-  // on the avatar — lives inside `EntryTopRightCluster` with the account menu.
+  // Message-center panel for the SIGNED-OUT shell only (the bell on the local
+  // account dock in the footer is the one opener there). The signed-in panel —
+  // plus the unread badge on its dock bell — lives inside
+  // `EntryTopRightCluster` with the account menu.
   const [messageCenterOpen, setMessageCenterOpen] = useState(false);
   const [messageUnreadCount, setMessageUnreadCount] = useState(0);
   const messageCenterRailRef = useRef<HTMLButtonElement | null>(null);
@@ -2634,23 +2635,9 @@ export function EntryNavRail({
               analyticsPage={analyticsPage}
               label={t('recentProjects.title')}
             />
-            {/* Signed-out has no account menu (where the 消息中心 row lives when
-                signed in), which left the message panel with no opener at all.
-                It rides here as the rail item under 设置. */}
-            <NavButton
-              ariaLabel={t('messageCenter.title')}
-              label={t('messageCenter.title')}
-              onClick={() => setMessageCenterOpen(true)}
-              testId="entry-nav-message-center"
-              buttonRef={messageCenterRailRef}
-              ariaHasPopup="dialog"
-              ariaExpanded={messageCenterOpen}
-            >
-              <Icon name="bell" size={16} />
-              {messageUnreadCount > 0 ? (
-                <span className="entry-nav-rail__btn-dot" aria-hidden />
-              ) : null}
-            </NavButton>
+            {/* No message-centre item here any more: signed out, the bell
+                rides the local account dock in the footer below (OPEND-3140),
+                the same slot the signed-in dock gives it. */}
           </div>
         )}
         {/* Bottom of the nav column: the host `EntryTopRightCluster` portals
@@ -2662,20 +2649,82 @@ export function EntryNavRail({
       {/* Signed in, the social links ride the account dock above the identity
           row (see `EntryTopRightCluster`), so the footer only renders when it
           has a notice to show — an empty shell here read as a dead white
-          strip under the account row. Signed out keeps the social row down
-          here so the rail's bottom strip carries something. */}
+          strip under the account row. Signed out renders the local twin of
+          that dock down here, under the sign-in card. */}
       {context ? (
         footerNotice ? <div className="entry-nav-rail__footer">{footerNotice}</div> : null
       ) : (
         <div className="entry-nav-rail__footer">
           {footerNotice}
-          <RailSocialRow page={analyticsPage} dimensions={workspaceDimensions} />
+          {/* Local account dock (OPEND-3140): the signed-out twin of the dock
+              `EntryTopRightCluster` portals into the rail foot when signed in
+              — social links above an identity row whose trailing slot is the
+              message-centre bell. The identity here is the local mode itself
+              (there is no account to name), and opening it lands in Settings,
+              where the local CLI / BYOK configuration lives. It sits UNDER the
+              sign-in card so the identity row stays the rail's last line on
+              both branches, and the card keeps its own slot as the one
+              sign-in entry. */}
+          <div
+            className="entry-nav-rail__account-dock entry-nav-rail__account-dock--local"
+            data-testid="entry-nav-local-account-dock"
+          >
+            <RailSocialRow page={analyticsPage} dimensions={workspaceDimensions} variant="dock" />
+            <div className="entry-nav-rail__account">
+              <button
+                type="button"
+                className="entry-nav-rail__account-trigger"
+                aria-label={t('entry.accountSettings')}
+                title={t('entry.accountSettings')}
+                data-testid="entry-nav-local-account"
+                onClick={() => {
+                  trackAccountMenuClick(analytics.track, {
+                    page_name: analyticsPage,
+                    area: 'account_menu',
+                    element: 'settings',
+                  });
+                  onOpenSettings?.();
+                }}
+              >
+                <span
+                  className="entry-nav-rail__account-avatar entry-nav-rail__account-avatar--local"
+                  aria-hidden
+                >
+                  <Icon name="terminal" size={14} />
+                </span>
+                <span className="entry-nav-rail__account-name">{t('entry.localAccountName')}</span>
+              </button>
+              <button
+                type="button"
+                ref={messageCenterRailRef}
+                className="entry-nav-rail__account-bell"
+                aria-haspopup="dialog"
+                aria-expanded={messageCenterOpen}
+                aria-label={t('messageCenter.title')}
+                title={t('messageCenter.title')}
+                data-testid="entry-nav-message-center"
+                onClick={() => {
+                  trackAccountMenuClick(analytics.track, {
+                    page_name: analyticsPage,
+                    area: 'account_menu',
+                    element: 'message_center',
+                  });
+                  setMessageCenterOpen(true);
+                }}
+              >
+                <Icon name="bell" size={15} />
+                {messageUnreadCount > 0 ? (
+                  <span className="entry-nav-rail__menu-item-dot" aria-hidden />
+                ) : null}
+              </button>
+            </div>
+          </div>
         </div>
       )}
       </div>
 
-      {/* Signed-out message-center panel + unread polling (the rail's bell
-          item above is its opener). Signed-in mounts move into
+      {/* Signed-out message-center panel + unread polling (the local dock's
+          bell above is its opener). Signed-in mounts move into
           `EntryTopRightCluster` — context-gating both sides is what keeps
           exactly one panel (and one unread poller) alive. */}
       {context ? null : (
