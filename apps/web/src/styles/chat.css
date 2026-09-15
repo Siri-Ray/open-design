@@ -1364,6 +1364,11 @@
   position: fixed;
   z-index: 45;
   pointer-events: none;
+}
+/* OPEND-2170: the pane underneath the creation hand-off card is hidden; its
+   body-portaled composer layer has to follow (see ChatPane `composerLayerHidden`). */
+.chat-composer-fixed-layer[data-composer-layer-hidden] {
+  visibility: hidden;
   /* `contain: paint` would clip the composer "+" menu, which pops UP and out of
      this fixed layer's box — the overflow got cut and revealed the chat log
      behind it. Keep layout/style containment but drop paint so the menu draws
