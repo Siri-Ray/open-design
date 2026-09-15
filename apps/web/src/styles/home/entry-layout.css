@@ -196,10 +196,11 @@
 
    Two structural facts drive the selectors, and both have drifted before —
    revisit them when the rail's tree changes again:
-   • the signed-in tree nests 个人项目…设置 inside .entry-nav-rail__team-wrap's
-     sibling .entry-nav-rail__team-section, so those rows fade INDIVIDUALLY
-     (the wrapper itself must not also fade, or the block would double-fade
-     and pop out of order);
+   • both trees nest 项目…设置 (and 最近项目) inside .entry-nav-rail__team-section
+     — signed in it follows .entry-nav-rail__team-wrap, signed out it follows
+     社区 directly (OPEND-3140) — so those rows fade INDIVIDUALLY (the wrapper
+     itself must not also fade, or the block would double-fade and pop out of
+     order);
    • the search box sits inside .entry-nav-rail__search-row (search +
      collapse control), so the ROW is the faded unit, not the box. */
 .entry-nav-rail__group > *,
@@ -216,8 +217,8 @@
   transform: translateY(-4px);
 }
 /* Per-row stagger — applied only while collapsing so the cascade runs
-   top→bottom. Direct group rows first (signed-in: switcher, search row, 首页,
-   社区; signed-out: the full flat button list)… */
+   top→bottom. Direct group rows first (signed-in: switcher, 首页, 社区;
+   signed-out: 首页, 社区), then the section's rows… */
 .entry:not(.entry--rail-open) .entry-nav-rail__group > *:nth-child(1) { transition-delay: 0ms; }
 .entry:not(.entry--rail-open) .entry-nav-rail__group > *:nth-child(2) { transition-delay: 15ms; }
 .entry:not(.entry--rail-open) .entry-nav-rail__group > *:nth-child(3) { transition-delay: 30ms; }

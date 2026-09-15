@@ -89,8 +89,9 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
-// Drafts / All-projects are workspace-only views: EntryShell redirects them
-// back to Home once the workspace-context read resolves with nothing. Give
+// All-projects is a workspace-only view: EntryShell redirects it back to Home
+// once the workspace-context read resolves with nothing (Drafts stays, as the
+// local project list, since OPEND-3140). Give
 // every test a resolved team context up front — the real bug reproduces
 // inside a team workspace ("OD Feature Team" in the live acceptance check) —
 // so the empty-state CTA renders deterministically instead of racing a

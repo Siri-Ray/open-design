@@ -2556,7 +2556,25 @@ export function EntryNavRail({
             ) : null}
           </div>
         ) : (
-          <>
+          /* Same section wrapper as the signed-in branch (OPEND-3140): it
+             draws the divider under 社区 and carries the collapse stagger, so
+             the two destination lists read the same. The name is historical —
+             nothing in it is team-specific. */
+          <div className="entry-nav-rail__team-section">
+            {/* 项目 is a destination on BOTH branches (OPEND-3140): the local
+                shell's project list is the same page the signed-in 项目 item
+                opens — 草稿 folds to the whole local catalog without a
+                workspace — so the destination list reads the same either way.
+                No 团队项目 here: that grid is team-scoped. */}
+            <NavButton
+              active={view === 'drafts'}
+              ariaLabel={t('entry.navDrafts')}
+              label={t('workspaceSwitcher.draftsTooltip')}
+              onClick={() => selectView('drafts')}
+              testId="entry-nav-drafts"
+            >
+              <Icon name="file" size={16} />
+            </NavButton>
             <NavButton
               active={view === 'design-systems'}
               ariaLabel={t('entry.navDesignSystems')}
@@ -2633,7 +2651,7 @@ export function EntryNavRail({
                 <span className="entry-nav-rail__btn-dot" aria-hidden />
               ) : null}
             </NavButton>
-          </>
+          </div>
         )}
         {/* Bottom of the nav column: the host `EntryTopRightCluster` portals
             the account module into. `display: contents` keeps the account
