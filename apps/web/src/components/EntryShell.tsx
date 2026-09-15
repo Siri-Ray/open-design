@@ -1838,10 +1838,6 @@ export function EntryShell({
               <HomeView
                 {...homeViewProps}
                 isActive={view === 'home'}
-                onViewAllProjects={() => changeView('projects')}
-                onDeleteProject={onDeleteProject}
-                onDuplicateProject={onDuplicateProject}
-                onRenameProject={onRenameProject}
                 /* Home is the one composer in the shell and consumes the page
                    handoff. The community view used to dock a second HomeView
                    (`variant="dock"`) with a handoff of its own; that mount
