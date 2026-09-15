@@ -38,7 +38,10 @@ export function MarqueeLabel({
       // scrollWidth — not its box — carries the full string's width.
       const overflow = Math.round(inner.scrollWidth - slot.clientWidth);
       if (overflow > 1) {
-        slot.style.setProperty('--marquee-shift', `${-overflow}px`);
+        // The expanded text starts at the slot's inline start: RTL must move
+        // right to reveal its left-hand tail, while LTR moves left.
+        const shift = getComputedStyle(slot).direction === 'rtl' ? overflow : -overflow;
+        slot.style.setProperty('--marquee-shift', `${shift}px`);
         // ~38px/s, floored so a two-character overhang still reads as motion
         // rather than a twitch.
         slot.style.setProperty(

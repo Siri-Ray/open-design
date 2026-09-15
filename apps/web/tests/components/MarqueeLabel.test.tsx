@@ -52,13 +52,20 @@ describe('MarqueeLabel (OPEND-3112)', () => {
     expect(slot?.querySelector('.od-marquee__text')?.textContent).toBe("Ada's workspace");
   });
 
-  it('arms the marquee with the overflow distance when the name is wider than its slot', () => {
+  it.each([
+    { direction: 'ltr', shift: '-80px' },
+    { direction: 'rtl', shift: '80px' },
+  ])('reveals the hidden tail in a $direction row', ({ direction, shift }) => {
     restore = stubWidths({ slotClientWidth: 120, textScrollWidth: 200 });
-    const { container } = render(<MarqueeLabel text="Leon Wang's very long personal workspace" />);
+    const { container } = render(
+      <div dir={direction}>
+        <MarqueeLabel text="Leon Wang's very long personal workspace" />
+      </div>,
+    );
     const slot = container.querySelector<HTMLElement>('.od-marquee');
     expect(slot?.dataset.marquee).toBe('on');
-    // Travels exactly the hidden part, leftwards.
-    expect(slot?.style.getPropertyValue('--marquee-shift')).toBe('-80px');
+    // The row's layout direction, not the name's script, determines travel.
+    expect(slot?.style.getPropertyValue('--marquee-shift')).toBe(shift);
     // ~26ms per px, floored at 650ms so a short overhang still reads as motion.
     expect(slot?.style.getPropertyValue('--marquee-duration')).toBe('2080ms');
   });
