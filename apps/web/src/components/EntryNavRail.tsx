@@ -283,8 +283,10 @@ interface Props {
   /** Projects for the rail's 最近浏览过 section (per product: 在插件下边新增一个
    *  类型). The SAME catalog and the SAME order 全部项目's 最近浏览过 tab shows —
    *  EntryShell hands over the one it already feeds that grid, so the two can
-   *  never drift; this list only takes the head of it. Empty (or absent) hides
-   *  the section entirely. */
+   *  never drift; this list only takes the head of it. Without a cloud
+   *  identity it is the local project list (OPEND-3140), so the local shell
+   *  lists its projects here too. Empty (or absent) hides the section
+   *  entirely. */
   recentProjects?: Project[];
   /** Row actions for the 最近项目 list's ⋮ menu (重命名 / 复制 / 转入团队空间 /
    *  删除 — OPEND-2686, OPEND-2794). Omit one to drop its item. They are the
@@ -2596,6 +2598,24 @@ export function EntryNavRail({
             >
               <Icon name="settings" size={16} />
             </NavButton>
+            {/* 最近项目 under 设置, exactly as on the signed-in branch
+                (OPEND-3140). Without a cloud identity the catalog EntryShell
+                hands over IS the local project list, so the local shell gets
+                the same rows, the same run-status feed (the daemon answers a
+                headerless read for an unbound project) and the same ✓-spending
+                — and Home no longer needs a grid of its own. No team plane
+                here: the row menu's 转入团队空间 gates itself off a null
+                context, leaving 重命名 / 复制 / 删除. */}
+            <RailRecentSection
+              projects={recentProjects ?? []}
+              onOpen={onOpenRecentProject}
+              onRename={onRenameRecentProject}
+              onDelete={onDeleteRecentProject}
+              onDuplicate={onDuplicateRecentProject}
+              workspaceContext={null}
+              analyticsPage={analyticsPage}
+              label={t('recentProjects.title')}
+            />
             {/* Signed-out has no account menu (where the 消息中心 row lives when
                 signed in), which left the message panel with no opener at all.
                 It rides here as the rail item under 设置. */}
