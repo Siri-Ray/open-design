@@ -151,11 +151,27 @@ export function useProjectHoverCover(
 
 const HIDDEN_UNTIL_LOADED = { visibility: 'hidden' } as const;
 
+/** Render the successful GET's document, with the same relative URLs as
+ * a navigation to that document (including any authored preview capability). */
+async function loadHtmlCover(src: string, signal: AbortSignal): Promise<string> {
+  const response = await fetch(src, { signal });
+  if (!response.ok) throw new Error(`Failed to load project cover: ${response.status}`);
+  const html = await response.text();
+  const parsed = new DOMParser().parseFromString(html, 'text/html');
+  const documentUrl = new URL(response.url || src, document.baseURI);
+  const existingBase = parsed.querySelector('base[href]');
+  const base = existingBase ?? parsed.createElement('base');
+  base.setAttribute('href', new URL(base.getAttribute('href') ?? '', documentUrl).href);
+  if (!existingBase) parsed.head.prepend(base);
+  const doctype = parsed.doctype ? new XMLSerializer().serializeToString(parsed.doctype) : '';
+  return `${doctype}${parsed.documentElement.outerHTML}`;
+}
+
 /**
- * An HTML cover inside the plate, rendered the way the projects grid renders
- * it: a plain page loads straight into a sandboxed frame (already HEAD-probed
- * by the pipeline), a deck collapses to its cover slide (`srcDoc`, scripts
- * stripped — the same document the grid's `DeckCoverThumb` shows).
+ * An HTML cover inside the plate: a plain page is fetched and HTTP-validated
+ * before mounting its srcDoc, since iframe load also fires for HTTP errors.
+ * A deck collapses to its cover slide (scripts stripped — the same document
+ * the grid's `DeckCoverThumb` shows).
  *
  * The frame stays hidden — the glyph keeps the plate — until its document
  * has actually loaded, so the first hover shows tint → cover in one step
@@ -189,13 +205,12 @@ function HoverHtmlCover({
   useEffect(() => {
     setLoaded(false);
     setFailed(false);
-    setSrcDoc(deck ? getCachedDeckCover(src) ?? null : null);
-  }, [deck, src]);
-
-  useEffect(() => {
-    if (!deck || srcDoc !== null) return;
+    const cached = deck ? getCachedDeckCover(src) ?? null : null;
+    setSrcDoc(cached);
+    if (cached !== null) return;
     let cancelled = false;
-    loadDeckCover(src)
+    const controller = new AbortController();
+    (deck ? loadDeckCover(src) : loadHtmlCover(src, controller.signal))
       .then((next) => {
         if (!cancelled) setSrcDoc(next);
       })
@@ -204,11 +219,12 @@ function HoverHtmlCover({
       });
     return () => {
       cancelled = true;
+      controller.abort();
     };
-  }, [deck, src, srcDoc]);
+  }, [deck, src]);
 
   if (failed) return <>{glyph}</>;
-  const ready = deck ? srcDoc !== null : true;
+  const ready = srcDoc !== null;
   const holdingGlyph = !ready || !loaded;
   return (
     <>
@@ -216,7 +232,8 @@ function HoverHtmlCover({
       {ready ? (
         <iframe
           className={`entry-nav-rail__recent-preview-frame${deck ? ' is-deck' : ''}`}
-          {...(deck ? { srcDoc: srcDoc ?? '', sandbox: '' } : { src, sandbox: 'allow-scripts' })}
+          srcDoc={srcDoc ?? ''}
+          sandbox={deck ? '' : 'allow-scripts'}
           title=""
           tabIndex={-1}
           style={holdingGlyph ? HIDDEN_UNTIL_LOADED : undefined}

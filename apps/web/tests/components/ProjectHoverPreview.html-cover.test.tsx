@@ -9,7 +9,7 @@
 // slide), the glyph stays up until that frame has loaded, and image / video
 // covers keep painting as they did.
 
-import { act, cleanup, fireEvent, render } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { useEffect } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -46,7 +46,7 @@ const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => 
   if (url.includes('deck.html')) {
     return { ok: true, status: 200, statusText: 'OK', text: async () => DECK_HTML } as Response;
   }
-  return { ok: false, status: 404, statusText: 'Not Found', text: async () => '' } as Response;
+  return new Response('<!doctype html><html><head><title>Prototype</title></head><body><img src="assets/cover.png"><script>window.prototype = 1;</script></body></html>');
 });
 
 function file(path: string, kind: ProjectFile['kind'], mtime = 1_700_000_000_000): ProjectFile {
@@ -100,7 +100,7 @@ describe('ProjectHoverPreview — HTML and deck covers (OPEND-2766)', () => {
   beforeEach(() => {
     resetProjectCoverSnapshots();
     filesByProject.clear();
-    fetchMock.mockClear();
+    fetchMock.mockReset();
     vi.mocked(fetchProjectFiles).mockClear();
     vi.stubGlobal('fetch', fetchMock);
   });
@@ -112,6 +112,11 @@ describe('ProjectHoverPreview — HTML and deck covers (OPEND-2766)', () => {
 
   it('renders a prototype\'s index.html in a sandboxed frame, keeping the glyph until it loads', async () => {
     filesByProject.set('proto', [file('index.html', 'html'), file('notes.md', 'text' as ProjectFile['kind'])]);
+    let finishGet!: (response: Response) => void;
+    const pendingGet = new Promise<Response>((resolve) => { finishGet = resolve; });
+    fetchMock.mockImplementation(async (_input, init) => init?.method === 'HEAD'
+      ? new Response(null)
+      : pendingGet);
     const { container } = render(<Preview project={project('proto')} />);
 
     // Before the cover resolves: the tinted glyph, nothing else.
@@ -119,17 +124,72 @@ describe('ProjectHoverPreview — HTML and deck covers (OPEND-2766)', () => {
     expect(plate(container).querySelector('iframe')).toBeNull();
 
     await flush();
+    expect(plate(container).querySelector('iframe')).toBeNull();
+    expect(plate(container).querySelector('.entry-nav-rail__recent-preview-glyph')).not.toBeNull();
+    await act(async () => {
+      finishGet(new Response('<!doctype html><html><head></head><body><img src="assets/cover.png"><script>window.prototype = 1;</script></body></html>'));
+    });
+    // jsdom dispatches srcDoc load itself; wait for the component to reveal it.
+    await waitFor(() => expect(plate(container).querySelector('.entry-nav-rail__recent-preview-glyph')).toBeNull());
 
     const frame = plate(container).querySelector('iframe');
     expect(frame).not.toBeNull();
-    expect(frame?.getAttribute('src')).toContain('/api/projects/proto/files/index.html');
+    expect(frame?.getAttribute('src')).toBeNull();
+    const document = new DOMParser().parseFromString(frame?.getAttribute('srcdoc') ?? '', 'text/html');
+    expect(document.querySelector('base')?.href).toContain('/api/projects/proto/files/index.html');
+    expect(document.querySelector('img')?.src).toContain('/api/projects/proto/files/assets/cover.png');
+    expect(document.querySelector('script')?.textContent).toBe('window.prototype = 1;');
     expect(frame?.getAttribute('sandbox')).toBe('allow-scripts');
-    // The document has not painted yet: the glyph is still the face of the card.
-    expect(plate(container).querySelector('.entry-nav-rail__recent-preview-glyph')).not.toBeNull();
-
-    fireEvent.load(frame!);
     expect(plate(container).querySelector('.entry-nav-rail__recent-preview-glyph')).toBeNull();
     expect(plate(container).querySelector('iframe')).toBe(frame);
+  });
+
+  it.each([
+    { status: 404, imported: false },
+    { status: 500, imported: false },
+    { status: 404, imported: true },
+    { status: 500, imported: true },
+  ])('keeps the glyph for a $status HTML GET (imported: $imported)', async ({ status, imported }) => {
+    filesByProject.set('failed', [file('index.html', 'html')]);
+    fetchMock.mockImplementation(async (_input, init) => new Response(
+      init?.method === 'HEAD' ? null : '<html><body>Document unavailable</body></html>',
+      { status: init?.method === 'HEAD' ? 200 : status },
+    ));
+    const subject = project('failed', imported ? { kind: 'prototype', entryFile: 'index.html' } : undefined);
+    const { container } = render(<Preview project={subject} />);
+    await flush();
+
+    // A browser fires load even for an HTTP error document. It must never
+    // replace the glyph with those bytes, including after a successful HEAD.
+    const frame = plate(container).querySelector('iframe');
+    if (frame) fireEvent.load(frame);
+    expect(plate(container).querySelector('.entry-nav-rail__recent-preview-glyph')).not.toBeNull();
+    expect(plate(container).querySelector('iframe')).toBeNull();
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'HEAD')).toHaveLength(imported ? 0 : 1);
+  });
+
+  it('preserves an existing relative base against the final response URL', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      url: 'https://preview.example/api/projects/imported/raw/pages/index.html',
+      text: async () => '<!doctype html><html><head><base href="../assets/"></head><body><img src="cover.png"></body></html>',
+    } as Response);
+    const { container } = render(<Preview project={project('imported', { kind: 'prototype', entryFile: 'pages/index.html' })} />);
+    await flush();
+
+    const frame = plate(container).querySelector('iframe');
+    const document = new DOMParser().parseFromString(frame?.getAttribute('srcdoc') ?? '', 'text/html');
+    expect(document.querySelectorAll('base')).toHaveLength(1);
+    expect(document.querySelector('img')?.src).toBe('https://preview.example/api/projects/imported/raw/assets/cover.png');
+    expect(frame?.getAttribute('srcdoc')).toMatch(/^<!DOCTYPE html>/i);
+  });
+
+  it('keeps the glyph when the HTML GET rejects', async () => {
+    fetchMock.mockRejectedValue(new TypeError('Network unavailable'));
+    const { container } = render(<Preview project={project('offline', { kind: 'prototype', entryFile: 'index.html' })} />);
+    await flush();
+    expect(plate(container).querySelector('.entry-nav-rail__recent-preview-glyph')).not.toBeNull();
+    expect(plate(container).querySelector('iframe')).toBeNull();
   });
 
   it('collapses a deck to its cover slide, the way the projects grid does', async () => {
