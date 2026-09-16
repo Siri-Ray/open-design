@@ -1,0 +1,39 @@
+pair	baseline	s7	diff_px	diff_pct	note
+home-type-row-rest-light	ok	ok	42406	0.82	
+home-type-row-more-open-light	ok	ok	61762	1.19	
+home-type-row-more-open-clip-light	ok	ok	20918	3.52	size 1768x336 vs 1768x340
+home-composer-selected-prototype-light	ok	ok	3252	0.40	
+home-composer-selected-deck-light	ok	ok	4579	0.57	
+home-composer-selected-document-light	ok	ok	3978	0.49	
+community-filter-row-rest-light	ok	ok	2214995	42.73	
+community-document-tab-light	ok	ok	358303	6.91	
+community-filter-row-prototype-active-clip-light	ok	ok	13030	10.89	size 748x160 vs 906x168
+home-type-row-rest-dark	ok	ok	132575	2.56	
+home-type-row-more-open-dark	ok	ok	259839	5.01	
+home-type-row-more-open-clip-dark	ok	ok	129152	21.74	size 1768x336 vs 1768x340
+home-composer-selected-prototype-dark	ok	ok	2477	0.31	
+home-composer-selected-deck-dark	ok	ok	3094	0.38	
+home-composer-selected-document-dark	ok	ok	3301	0.41	
+community-filter-row-rest-dark	ok	ok	2150087	41.48	
+community-document-tab-dark	ok	ok	1750154	33.76	
+community-filter-row-prototype-active-clip-dark	ok	ok	21059	17.60	size 748x160 vs 906x168
+projects-personal-drafts-recent-light	ok	ok	1971613	38.03	
+projects-personal-drafts-personal-light	ok	ok	1971573	38.03	
+projects-personal-drafts-team-light	ok	ok	106517	2.05	
+projects-personal-drafts-head-light	ok	ok	0	0.00	
+projects-personal-filter-open-light	ok	ok	1820134	35.11	
+projects-personal-filter-open-clip-light	ok	ok	679966	41.16	size 2314x714 vs 2314x1034
+projects-personal-cards-row-light	ok	ok	1863535	65.45	size 2274x1252 vs 2274x1298
+projects-personal-cards-row-1180-light	ok	ok	1077290	59.40	size 1754x1034 vs 1754x1122
+projects-personal-project-page-light	ok	ok	65003	1.25	
+projects-personal-project-top-light	ok	ok	10777	1.36	
+projects-team-drafts-recent-light	ok	ok	2164936	41.76	
+projects-team-drafts-personal-light	ok	ok	1921835	37.07	
+projects-team-drafts-team-light	ok	ok	436014	8.41	
+projects-team-drafts-head-light	ok	ok	0	0.00	
+projects-team-filter-open-light	ok	ok	2013319	38.84	
+projects-team-filter-open-clip-light	ok	ok	675901	40.91	size 2314x714 vs 2314x1034
+projects-team-cards-row-light	ok	ok	677205	73.35	size 2274x406 vs 2274x1464
+projects-team-cards-row-1180-light	ok	ok	395711	67.55	size 1754x334 vs 1754x1464
+projects-team-project-page-light	ok	ok	76114	1.47	
+projects-team-project-top-light	ok	ok	16343	2.07	
