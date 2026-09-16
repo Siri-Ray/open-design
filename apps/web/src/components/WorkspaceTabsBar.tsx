@@ -1181,7 +1181,7 @@ export function WorkspaceTabsBar({
   // move into AND the right to share. A personal workspace hides the item.
   const moveToTeamAvailable =
     workspaceContextHasTeamIdentity(workspaceContext)
-    && workspaceContext?.permissions.canShareProjects === true;
+    && workspaceContext?.permissions?.canShareProjects === true;
   // Shared / foreign rows are decided from the same evidence the rail uses —
   // the team hub's catalog — read once per dropdown open (coalesced and cached
   // by the catalog module, so this is not a second poll) rather than through
