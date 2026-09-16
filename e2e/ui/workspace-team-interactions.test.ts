@@ -1149,7 +1149,10 @@ test('[P0] project card moves into team space and back with scoped requests and 
   await gotoHome(page);
   await ensureRailOpen(page);
 
+  // 全部项目 opens on 最近浏览过, which spans both sides of the share; the
+  // 个人项目 tab is where a move must take the card away from (OPEND-3108).
   await page.getByTestId('entry-nav-drafts').click();
+  await page.getByTestId('recent-projects-collection-personalProjects').click();
   const card = projectCard(page);
   await expect(card).toBeVisible();
 
@@ -1187,7 +1190,7 @@ test('[P0] project card moves into team space and back with scoped requests and 
   ]);
   await expect(sharedCard).toHaveCount(0);
 
-  await page.getByTestId('entry-nav-drafts').click();
+  await page.getByTestId('recent-projects-collection-personalProjects').click();
   await expect(projectCard(page)).toBeVisible();
   await expect(projectCard(page).getByText('Shared', { exact: true })).toHaveCount(0);
 });
@@ -1264,7 +1267,10 @@ test('[P0] failed first-open materialization releases the shared-project card fo
   await expect.poll(() => pullAttempts).toBe(1);
   await expect(openButton).not.toHaveAttribute('aria-busy', 'true');
   await expect(card).toBeVisible();
-  await expect(page).toHaveURL(/\/all-projects$/);
+  // A failed pull leaves the user on the 团队项目 tab of 全部项目 (OPEND-3108:
+  // the page is `/drafts`; the old `/all-projects` grid is this tab now).
+  await expect(page).toHaveURL(/\/drafts$/);
+  await expect(page.getByTestId('recent-projects-collection-teamProjects')).toHaveAttribute('aria-checked', 'true');
 
   await openButton.click();
   await expect.poll(() => pullAttempts).toBe(2);

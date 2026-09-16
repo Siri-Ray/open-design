@@ -1019,7 +1019,11 @@ export function EntryShell({
   // tab the user last picked.
   const [projectsCollection, setProjectsCollection] = useState<ProjectCollectionScope>('recent');
   useEffect(() => {
+    // Entering the page from the rail opens 最近浏览过 (the Demo's strip
+    // remounts on every visit, so it never carries a tab over); the legacy
+    // `/all-projects` view is the one deep link that lands on 团队项目.
     if (view === 'all-projects') setProjectsCollection('teamProjects');
+    else if (view === 'drafts') setProjectsCollection('recent');
   }, [view]);
   async function handleOpenAllProjects(id: string): Promise<boolean> {
     // The grid already reconciled the local row with the authoritative team
