@@ -198,7 +198,7 @@ export function ProductionCampaignModal({
 	const testDecision = testRuntime?.decisions.get(PLACEMENT);
 	// Test follows the production rule: one automatic presentation per account,
 	// activity and device. Only the presentation already open may continue (its
-	// own visibility record, lease renewal, redeployment or locale swap); any new
+	// own visibility record, lease renewal or locale swap); any new
 	// offer of a recorded activity stays closed, as does a dismissed one.
 	const [dismissedTestCampaigns, setDismissedTestCampaigns] = useState<ReadonlySet<string>>(() => new Set());
 	// The open presentation's claim: which campaign, under which deployment.
@@ -210,7 +210,8 @@ export function ProductionCampaignModal({
 	const testClosed =
 		testCampaignKey === null ||
 		dismissedTestCampaigns.has(testCampaignKey) ||
-		(openTestCampaign.current?.key !== testCampaignKey &&
+		((openTestCampaign.current?.key !== testCampaignKey ||
+			openTestCampaign.current?.deploymentId !== testRuntime?.deployment.id) &&
 			!!sessionSubject &&
 			!!testActivityId &&
 			wasDisplayed(sessionSubject, testActivityId));
