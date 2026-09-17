@@ -201,7 +201,8 @@ export function ProductionCampaignModal({
 	// own visibility record, lease renewal, redeployment or locale swap); any new
 	// offer of a recorded activity stays closed, as does a dismissed one.
 	const [dismissedTestCampaigns, setDismissedTestCampaigns] = useState<ReadonlySet<string>>(() => new Set());
-	const openTestCampaign = useRef<string | null>(null);
+	// The open presentation's claim: which campaign, under which deployment.
+	const openTestCampaign = useRef<{ key: string; deploymentId: string } | null>(null);
 	const testActivityId = testDecision?.activityId;
 	const testCampaignKey = testDecision
 		? JSON.stringify([sessionSubject, testActivityId])
@@ -209,12 +210,30 @@ export function ProductionCampaignModal({
 	const testClosed =
 		testCampaignKey === null ||
 		dismissedTestCampaigns.has(testCampaignKey) ||
-		(openTestCampaign.current !== testCampaignKey &&
+		(openTestCampaign.current?.key !== testCampaignKey &&
 			!!sessionSubject &&
 			!!testActivityId &&
 			wasDisplayed(sessionSubject, testActivityId));
-	openTestCampaign.current =
-		authenticated && testRuntime && !testClosed ? testCampaignKey : null;
+	// The runtime republishes with NO decision while it reloads the SAME
+	// deployment (a locale swap or lease renewal revokes the old lease before
+	// the new one lands). That window is not a new offer: the presentation that
+	// was open keeps its claim through it. Dropping the claim there used to
+	// turn every language switch of a recorded activity into a permanent close.
+	// A different deployment, a dismissal, or the runtime going away releases
+	// the claim, so a redeployment of a recorded activity still stays closed.
+	if (authenticated && testRuntime && !testClosed && testCampaignKey !== null) {
+		openTestCampaign.current = {
+			key: testCampaignKey,
+			deploymentId: testRuntime.deployment.id,
+		};
+	} else if (
+		!authenticated ||
+		!testRuntime ||
+		testCampaignKey !== null ||
+		openTestCampaign.current?.deploymentId !== testRuntime.deployment.id
+	) {
+		openTestCampaign.current = null;
+	}
 	const closeTestModal = useCallback(() => {
 		if (testCampaignKey !== null) {
 			setDismissedTestCampaigns(previous => new Set([...previous, testCampaignKey]));
