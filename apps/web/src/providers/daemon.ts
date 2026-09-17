@@ -1303,6 +1303,20 @@ export function formatVelaBalanceUsd(raw?: string | null): string | null {
   return `${sign}$${Math.abs(amount).toFixed(2)}`;
 }
 
+/**
+ * Format a raw wallet `balanceUsd` string into the bare amount (e.g. "12.30")
+ * for surfaces that already name the currency some other way — the top-right
+ * credits pill leads with the plan wordmark and shows the number beside it.
+ * Same null contract as `formatVelaBalanceUsd`.
+ */
+export function formatVelaBalanceAmount(raw?: string | null): string | null {
+  if (raw == null || raw === '') return null;
+  const amount = Number(raw);
+  if (!Number.isFinite(amount)) return null;
+  const sign = amount < 0 ? '-' : '';
+  return `${sign}${Math.abs(amount).toFixed(2)}`;
+}
+
 /** Top subscription tier — no upgrade affordance is shown at/above this. */
 export const VELA_TOP_PLAN_TIER = 'max';
 
@@ -1682,6 +1696,47 @@ export async function listProjectRuns(
   }
 }
 
+/**
+ * One project's runs plus the awaiting-input flag the run bodies cannot carry.
+ *
+ * Scoped to a single project ON PURPOSE. The catalogue-wide `listProjectRuns`
+ * above 400s (`PROJECT_SCOPE_REQUIRED`) the moment any run belongs to a
+ * workspace-bound project — which, in a workspace session, is all of them — so
+ * it silently returns `[]` there. Asking per project id takes the route's
+ * authorized branch instead and actually works.
+ *
+ * Without a workspace context the request carries no Workspace headers: that
+ * is the local CLI / BYOK shell asking about an unbound local project, which
+ * the route serves through its headerless branch (OPEND-3140). A bound
+ * project asked about headerlessly is filtered to its non-AMR runs by the
+ * daemon, never refused, so a local row can only under-report, not error.
+ *
+ * Returns `null` when the project is unreadable or the daemon is unreachable,
+ * so a caller can tell "no runs" apart from "could not ask".
+ */
+export async function listRunsForProject(
+  projectId: string,
+  workspaceContext?: WorkspaceCollabContext | null,
+): Promise<{ runs: ChatRunStatusResponse[]; awaitingInputProjectIds: string[] } | null> {
+  try {
+    const resp = await fetch(`/api/runs?projectId=${encodeURIComponent(projectId)}`, {
+      ...(workspaceContext
+        ? { headers: workspaceProjectHeaders(workspaceContext) }
+        : {}),
+    });
+    if (!resp.ok) return null;
+    const body = (await resp.json()) as ChatRunListResponse;
+    return {
+      runs: body.runs ?? [],
+      // Absent on daemons older than this field; treat as "no pending
+      // question" rather than failing the whole read.
+      awaitingInputProjectIds: body.awaitingInputProjectIds ?? [],
+    };
+  } catch {
+    return null;
+  }
+}
+
 interface DaemonPhysicalRunResult {
   nextRunId?: string;
   strategyTask?: StrategyTaskProjectionV2;
@@ -1991,7 +2046,12 @@ async function consumeDaemonPhysicalRun({
           }
           if (parsed.kind !== 'event') continue;
           sawStreamProgress = true;
-          sawRunEvent = true;
+          if (!sawRunEvent) {
+            sawRunEvent = true;
+            // A resumed run event proves transport recovery while the reader
+            // may stay open. Keepalive comments above do not clear the UI.
+            clearReconnect();
+          }
           trackRunProgress(runId);
           /*
            * S12 的静默计时就认这一刻 —— **上游给过我们东西**的唯一如实证据。
@@ -2259,11 +2319,39 @@ async function consumeDaemonPhysicalRun({
         // The strategy contract is explicit that a post-claim failure keeps the
         // current Run's own result rather than inventing a new one, so only a
         // Run that did NOT succeed-and-deliver falls through to the failure
-        // branch. `deliverableValid` is filesystem-backed (entry resolved, this
-        // Run touched it, kind matches) — never the agent's own assertion — and
-        // an unreachable daemon fails closed to the previous behaviour.
-        const deliveredDespiteBlock = endStatus === 'succeeded'
-          && (await fetchChatRunStatus(runId, workspaceContext))?.deliverableValid === true;
+        // branch. Both fields are filesystem-backed — never the agent's own
+        // assertion — and an unreachable daemon fails closed to the previous
+        // behaviour.
+        //
+        // `projectDeliverableValid` is the one that answers the question this
+        // branch is actually asking. `deliverableValid` asks "did THIS run
+        // write the entry", which the strategy contract needs for accepting a
+        // completion claim but which is `false` for the most ordinary shape of
+        // this failure: the user says "继续", the agent re-checks work an
+        // earlier turn already finished, correctly rewrites nothing, and the
+        // turn is refused over a machine-block defect. That put a red card over
+        // a finished 16-page deck the user could see rendered beside it. The
+        // OR keeps the stricter field meaningful on its own — a run that did
+        // deliver has obviously delivered.
+        //
+        // The looser field additionally requires that this turn actually SAID
+        // something. It credits a file an EARLIER turn wrote, and that only
+        // means "nothing was lost here" if the user got a reply to go with it.
+        // Without the guard, a turn that returned a bare newline into a project
+        // that already holds a prototype would go silent too — which is the
+        // false-success half of this same conflation (#7564), and swapping one
+        // wrong answer for the other is not a fix. The stricter field keeps its
+        // existing behaviour: a run that wrote the entry delivered, prose or no
+        // prose.
+        const blockedRunStatus = endStatus === 'succeeded'
+          ? await fetchChatRunStatus(runId, workspaceContext)
+          : null;
+        const deliveredDespiteBlock = blockedRunStatus !== null
+          && (
+            (blockedRunStatus.projectDeliverableValid === true
+              && acc.trim().length > 0)
+            || blockedRunStatus.deliverableValid === true
+          );
         // A block the agent declared on itself is not a failure to report.
         // Asked for a prototype with nothing to build on, the agent answers in
         // the chat — "the requirement was skipped, so there is no runnable plan

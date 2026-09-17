@@ -2741,7 +2741,7 @@ test('attachAcpSession preserves literal artifact prose before any write echo is
   assert.deepEqual(textDeltas, [literal]);
 });
 
-test('attachAcpSession exposes abort and sends session cancel after session creation', () => {
+test('attachAcpSession abort sends one session/cancel notification after session creation', () => {
   const child = new FakeAcpChild();
   const writes: string[] = [];
   child.stdin.on('data', (chunk) => writes.push(String(chunk)));
@@ -2767,6 +2767,8 @@ test('attachAcpSession exposes abort and sends session cancel after session crea
   assert.equal(cancelRequests.length, 1);
   const cancelRequest = cancelRequests[0];
   assert.ok(cancelRequest);
+  // ACP cancellation is a notification. Vela rejects an id-bearing request.
+  assert.equal(Object.hasOwn(cancelRequest, 'id'), false);
   assert.deepEqual(cancelRequest.params, { sessionId: 'session-1' });
 });
 

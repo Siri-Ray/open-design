@@ -39,7 +39,9 @@ import type {
   ImageRow,
   TurnBlock,
 } from './contract';
-import { computeSkipRanges, rangeContains } from '../../artifacts/markdown-context';
+import { maskChatProtocolPayloads } from '../../artifacts/chat-protocol-context';
+import { createArtifactParser } from '../../artifacts/parser';
+import { readQuestionFormPayloadAt } from '../../artifacts/question-form';
 import { UNKNOWN_ELAPSED_BELOW_MS, diffStat } from './format';
 import {
   commandFile,
@@ -155,25 +157,59 @@ function pendingTagTail(text: string): number {
   return 0;
 }
 
-/**
- * 标记在**代码里**时不算信号。
- *
- * 围栏代码块和行内代码是 agent 展示标记本身的地方 —— 「这个标记写作 `<done/>`」、
- * 「例子:```html <artifact …> ```」。把它们当信号,后面的正文会被整段甩到壳外,
- * 而正文本来该跟着当前那条 todo 走。
- *
- * 用的是产物剥离器一直在用的那套跳过区间(`artifacts/markdown-context`),
- * 不另写一份 —— 两处要跳过的东西是同一批,规则分家迟早对不上。
- */
-function findMarkerOutsideCode(re: RegExp, text: string): RegExpExecArray | null {
-  const { ranges } = computeSkipRanges(text);
-  const scan = new RegExp(re.source, re.flags.includes('g') ? re.flags : `${re.flags}g`);
-  let m: RegExpExecArray | null;
-  while ((m = scan.exec(text)) !== null) {
-    if (!rangeContains(ranges, m.index)) return m;
-    if (m.index === scan.lastIndex) scan.lastIndex += 1;
+/** Scan each physical run's text once, preserving every original event boundary. */
+function markerSearchViews(events: readonly PersistedAgentEvent[]): Map<PersistedAgentEvent, string> {
+  const views = new Map<PersistedAgentEvent, string>();
+  let runKey = readRunDoneKey(events);
+  let textEvents: Extract<PersistedAgentEvent, { kind: 'text' }>[] = [];
+  const flush = () => {
+    if (textEvents.length === 0) return;
+    const text = textEvents.map((event) => event.text ?? '').join('');
+    const formStarts = new Set<number>();
+    const maskedPayloads = maskChatProtocolPayloads(text, (input, start) => {
+      const payload = readQuestionFormPayloadAt(input, start);
+      if (payload) formStarts.add(start);
+      return payload;
+    });
+    let masked = maskedPayloads;
+    if (stripKeyedDone(text, runKey, maskedPayloads).doneAt !== null) {
+      // Bound candidates to a complete, quote-aware opener before asking the
+      // real artifact parser, rather than reparsing the whole remaining run.
+      const artifactStarts = new Set<number>();
+      for (const match of maskedPayloads.matchAll(/<artifact\s+(?:"[^"]*"|'[^']*'|[^'">])*>/g)) {
+        const first = createArtifactParser().feed(match[0]).next();
+        if (!first.done && first.value.type === 'artifact:start') artifactStarts.add(match.index);
+      }
+      // A literal opener must not preempt an authenticated boundary. Change
+      // only the search view, before restoring event boundaries; original text
+      // stays intact and forms spanning deltas are validated as one payload.
+      masked = maskedPayloads.replace(/<(?:question-form|artifact)\b/gi, (opener, start: number) =>
+        formStarts.has(start) || artifactStarts.has(start) ? opener : ' '.repeat(opener.length));
+    }
+    // Without an authenticated marker, keep the existing implicit-done path,
+    // including partially streamed forms, and the historical legacy fallback.
+    let offset = 0;
+    for (const event of textEvents) {
+      const length = (event.text ?? '').length;
+      views.set(event, masked.slice(offset, offset + length));
+      offset += length;
+    }
+    textEvents = [];
+  };
+  for (const event of events) {
+    if (event.kind === 'done_key') {
+      const key = typeof event.key === 'string' ? event.key.trim() : '';
+      // Match the physical-run boundary in the block builder. Replayed timing
+      // metadata for this key (or empty metadata) does not end a card/code span.
+      if (key && key !== runKey) {
+        flush();
+        runKey = key;
+      }
+    }
+    if (event.kind === 'text') textEvents.push(event);
   }
-  return null;
+  flush();
+  return views;
 }
 
 /** 这一轮的 key —— 整段事件里的第一条 `done_key`。没有就是历史消息 / 旧链路 */
@@ -187,6 +223,8 @@ function readRunDoneKey(events: readonly PersistedAgentEvent[]): string | null {
 }
 
 interface MarkerScan {
+  /** Equal-length marker search view; card/code payloads remain opaque. */
+  searchText: string;
   /** 剥掉协议噪音之后,真正要落到界面上的文字 */
   text: string;
   /** done 落在 `text` 的哪个下标;没有就是 null */
@@ -209,29 +247,28 @@ interface MarkerScan {
  * 跳过区间(`artifacts/markdown-context`),不另写一份:两处要跳过的东西是同一批,
  * 规则分家迟早对不上。
  */
-function stripKeyedDone(text: string, runKey: string | null): { text: string; doneAt: number | null } {
-  if (!/<od-done/i.test(text)) return { text, doneAt: null };
-  const { ranges } = computeSkipRanges(text);
+function stripKeyedDone(text: string, runKey: string | null, searchText: string): { text: string; searchText: string; doneAt: number | null } {
+  if (!/<od-done/i.test(searchText)) return { text, searchText, doneAt: null };
   const scan = new RegExp(OD_DONE_TAG_RE.source, OD_DONE_TAG_RE.flags);
   let out = '';
+  let searchOut = '';
   let cursor = 0;
   let doneAt: number | null = null;
   let m: RegExpExecArray | null;
-  while ((m = scan.exec(text)) !== null) {
-    if (rangeContains(ranges, m.index)) continue; // 代码里的原样保留
+  while ((m = scan.exec(searchText)) !== null) {
     out += text.slice(cursor, m.index);
+    searchOut += searchText.slice(cursor, m.index);
     if (doneAt == null && runKey) {
       const key = OD_DONE_KEY_ATTR_RE.exec(m[0])?.[1];
       if (key === runKey) doneAt = out.length;
     }
     cursor = m.index + m[0].length;
   }
-  return { text: cursor > 0 ? out + text.slice(cursor) : text, doneAt };
-}
-
-/** done 已经定了之后只吃噪音,不再判信号 */
-function stripKeyedDoneMarkers(text: string): string {
-  return stripKeyedDone(text, null).text;
+  return {
+    text: cursor > 0 ? out + text.slice(cursor) : text,
+    searchText: cursor > 0 ? searchOut + searchText.slice(cursor) : searchText,
+    doneAt,
+  };
 }
 
 /**
@@ -259,29 +296,29 @@ function keyedDoneTagTail(text: string): number {
  *     而真信号已经有了不可伪造的形式,没有理由再给伪造留一条路。
  *  3. `<question-form>` / `<artifact>` 一直算**隐式** done —— 它们是交给用户看的东西。
  */
-function scanTurnMarkers(raw: string, runKey: string | null): MarkerScan {
+function scanTurnMarkers(raw: string, runKey: string | null, searchText: string): MarkerScan {
   // ① 先吃掉协议噪音,顺手记下第一枚 key 对得上的标记落在哪儿。
   //    先剥再扫,后面两条判据的下标就直接是剥完之后的下标,不用来回换算。
-  const stripped = stripKeyedDone(raw, runKey);
+  const stripped = stripKeyedDone(raw, runKey, searchText);
   let text = stripped.text;
   let doneAt: number | null = stripped.doneAt;
   let doneLength = 0;
 
-  // ② 密钥标记已经定了位置就用它;否则回落到老判据
-  if (doneAt == null) {
-    const legacy = runKey ? null : findMarkerOutsideCode(LEGACY_DONE_RE, text);
-    const implicit = findMarkerOutsideCode(IMPLICIT_DONE_RE, text);
-    if (legacy && (!implicit || legacy.index <= implicit.index)) {
-      doneAt = legacy.index;
-      doneLength = legacy[0].length;
-    } else if (implicit) {
-      // 隐式:标签本身要留给后面的正文,由消息层去剥成卡片,所以长度记 0
-      doneAt = implicit.index;
-      doneLength = 0;
-    }
+  // ② 在已剥离噪音的同一下标空间里取最早边界。持久化会合并相邻 text,
+  // 所以后到的显式 done 不能盖过前面的真实表单 / 产物。
+  const legacy = runKey ? null : LEGACY_DONE_RE.exec(stripped.searchText);
+  const implicit = IMPLICIT_DONE_RE.exec(stripped.searchText);
+  if (legacy && (doneAt == null || legacy.index < doneAt)) {
+    doneAt = legacy.index;
+    doneLength = legacy[0].length;
+  }
+  if (implicit && (doneAt == null || implicit.index < doneAt)) {
+    // 隐式:标签本身要留给后面的正文,由消息层去剥成卡片,所以长度记 0
+    doneAt = implicit.index;
+    doneLength = 0;
   }
 
-  return { text, doneAt, doneLength };
+  return { text, searchText: stripped.searchText, doneAt, doneLength };
 }
 
 /**
@@ -423,6 +460,7 @@ function stripTheaterGrammarFromEvents(
 
 export function buildTurnBlocks(input: BuildTurnInput): TurnBlock[] {
   const events = stripTheaterGrammarFromEvents(input.events ?? []);
+  const searchViews = markerSearchViews(events);
   /*
    * D10:**跑起来那一刻就该有壳**,不等 agent 的第一条事件。
    * 原来 `ensureShell()` 只挂在事件上,于是第二、三轮每次都要空等一会儿
@@ -573,6 +611,7 @@ export function buildTurnBlocks(input: BuildTurnInput): TurnBlock[] {
   let openProse: ProseBlock | null = null;
   let doneSeen = false;
   let markerBuf = '';
+  let markerSearchBuf = '';
   let firstStartedAt: number | null = null;
   let lastEndedAt: number | null = null;
   /**
@@ -959,11 +998,14 @@ export function buildTurnBlocks(input: BuildTurnInput): TurnBlock[] {
       const shell = activeShell();
       stopThinking(shell); // 开口说话就不再是「思考中」
       let text = event.text ?? '';
+      let searchText = markerSearchBuf + (searchViews.get(event) ?? text);
+      markerSearchBuf = '';
 
       if (!doneSeen) {
-        const scan = scanTurnMarkers(markerBuf + text, runKey);
+        const scan = scanTurnMarkers(markerBuf + text, runKey, searchText);
         markerBuf = '';
         text = scan.text;
+        searchText = scan.searchText;
         if (scan.doneAt != null) {
           const head = text.slice(0, scan.doneAt);
           if (head) routeInside(head);
@@ -984,9 +1026,10 @@ export function buildTurnBlocks(input: BuildTurnInput): TurnBlock[] {
           text = text.slice(scan.doneAt + scan.doneLength);
           if (!text) continue;
         } else {
-          const hold = pendingTagTail(text);
+          const hold = pendingTagTail(searchText);
           if (hold) {
             markerBuf = text.slice(text.length - hold);
+            markerSearchBuf = searchText.slice(searchText.length - hold);
             text = text.slice(0, text.length - hold);
           }
           if (text) routeInside(text);
@@ -1004,10 +1047,13 @@ export function buildTurnBlocks(input: BuildTurnInput): TurnBlock[] {
          */
         const carried = markerBuf + text;
         markerBuf = '';
-        text = stripKeyedDoneMarkers(carried);
-        const hold = keyedDoneTagTail(text);
+        const stripped = stripKeyedDone(carried, null, searchText);
+        text = stripped.text;
+        searchText = stripped.searchText;
+        const hold = keyedDoneTagTail(searchText);
         if (hold) {
           markerBuf = text.slice(text.length - hold);
+          markerSearchBuf = searchText.slice(searchText.length - hold);
           text = text.slice(0, text.length - hold);
         }
         if (!text) continue;
@@ -1441,6 +1487,7 @@ export function buildTurnBlocks(input: BuildTurnInput): TurnBlock[] {
     openText = null;
     openProse = null;
     markerBuf = '';
+    markerSearchBuf = '';
     current = null;
     todoCard = null;
     top = null;
@@ -2124,6 +2171,16 @@ function failureReason(failed: boolean, content: string | undefined): string | n
   return text || null;
 }
 
+/** Keep only supplied, valid request parameters; never infer a returned range. */
+function readRequestRange(input: unknown): ToolRow['readRange'] {
+  if (!input || typeof input !== 'object') return undefined;
+  const { offset, limit } = input as Record<string, unknown>;
+  const range: NonNullable<ToolRow['readRange']> = {};
+  if (typeof offset === 'number' && Number.isSafeInteger(offset) && offset >= 0) range.offset = offset;
+  if (typeof limit === 'number' && Number.isSafeInteger(limit) && limit > 0) range.limit = limit;
+  return range.offset != null || range.limit != null ? range : undefined;
+}
+
 function buildToolRow(
   event: Extract<PersistedAgentEvent, { kind: 'tool_use' }>,
   result: Extract<PersistedAgentEvent, { kind: 'tool_result' }> | undefined,
@@ -2155,6 +2212,7 @@ function buildToolRow(
     title: toolTitle(event.name, event.input),
     rawTitle: isRawCommandTitle(event.name, event.input),
     file,
+    ...(kind === 'read' && file ? { readRange: readRequestRange(event.input) } : {}),
     pattern: kind === 'search' ? searchPattern(event.name, event.input) : null,
     hits,
     delta: diffStat(event.name, event.input),
