@@ -228,8 +228,15 @@ test('[P0] the assistant status row shows one label with one class set from the 
     .join('\n');
   expect(log.length, `no status row was sampled:\n${readable}`).toBeGreaterThan(0);
   const texts = Array.from(new Set(log.map((entry) => entry.text)));
-  const classSets = Array.from(new Set(log.map((entry) => entry.className)));
   expect(texts, `the status label changed across the hand-off:\n${readable}`).toHaveLength(1);
-  expect(classSets, `the status row's class set changed across the hand-off:\n${readable}`).toHaveLength(1);
   expect(texts[0], `the only status label must be the running one:\n${readable}`).toMatch(/^(Working|进行中)$/);
+  // The same head is more than one element (the record's shimmer span and
+  // its summary wrapper both carry the text); what must hold is that the
+  // hand-off frame and the real view draw the SAME set of them.
+  const signature = (where: 'handoff' | 'view') =>
+    Array.from(new Set(log.filter((entry) => entry.where === where).map((entry) => `${entry.text}|${entry.className}`))).sort();
+  const handoff = signature('handoff');
+  const view = signature('view');
+  expect(handoff.length, `the hand-off frame drew no status row:\n${readable}`).toBeGreaterThan(0);
+  expect(view, `the status row's elements changed across the hand-off:\n${readable}`).toEqual(handoff);
 });
