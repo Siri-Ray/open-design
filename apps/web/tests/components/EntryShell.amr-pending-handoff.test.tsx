@@ -393,3 +393,104 @@ describe('OPEND-3300 · an empty in-memory wallet blocks on Home before the hand
     expect(h.rollback).not.toHaveBeenCalled();
   });
 });
+
+describe('OPEND-3300 · local Team authority on a $0 Home send', () => {
+  const originalFetch = globalThis.fetch;
+  const originalResizeObserver = globalThis.ResizeObserver;
+
+  beforeEach(() => {
+    globalThis.ResizeObserver = ResizeObserverMock as typeof ResizeObserver;
+    window.sessionStorage.clear();
+    window.history.replaceState(null, '', '/');
+    resetWorkspaceContextCache();
+    resetWorkspaceBillingCache();
+    resetTeamProjectsCache();
+  });
+
+  afterEach(() => {
+    cleanup();
+    globalThis.fetch = originalFetch;
+    globalThis.ResizeObserver = originalResizeObserver;
+    mockedCheckAmrBalanceGate.mockReset();
+    resetWorkspaceContextCache();
+    resetWorkspaceBillingCache();
+    resetTeamProjectsCache();
+  });
+
+  it.each(['member', 'admin'] as const)(
+    'shows the owner top-up dialog for a Team %s with $0 on Home',
+    async (role) => {
+      const workspace: WorkspaceCollabContext = {
+        workspaceId: 'ws-team-3300',
+        workspaceType: 'team',
+        workspaceMemberId: 'wm-team-3300',
+        role,
+        memberStatus: 'active',
+        lifecycleState: 'active',
+        billingState: 'active',
+        planId: 'team_pro',
+        providerMode: 'platform_credits',
+        seatSummary: buildWorkspaceSeatSummary({ seatLimit: 5, usedSeats: 2 }),
+        permissions: buildWorkspacePermissions({ role, lifecycleState: 'active' }),
+        teamId: 'ws-team-3300',
+        teamName: 'Acme Design',
+        workspaceName: 'Acme Design',
+      };
+      let billingReads = 0;
+      globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith('/api/workspace/directory')) {
+          return jsonResponse(workspaceDirectoryFixture([workspace]));
+        }
+        if (url.endsWith('/api/workspace/context')) {
+          // The local daemon derives authority from explicit headers. Without
+          // the type assertion it defaults this membership to personal.
+          const headers = new Headers(init?.headers);
+          const workspaceType = headers.get('x-od-workspace-type') === 'team'
+            ? 'team'
+            : 'personal';
+          return jsonResponse({ context: {
+            ...workspace,
+            workspaceType,
+            role: headers.get('x-od-workspace-role') === 'admin' ? 'admin' : 'member',
+          } });
+        }
+        if (url.includes('/api/workspace/billing?')) {
+          billingReads += 1;
+          return jsonResponse({
+            summary: null,
+            workspaceBalance: {
+              workspaceId: workspace.workspaceId,
+              workspaceMemberId: workspace.workspaceMemberId,
+              balanceUsd: '0.00',
+              billingScopeVersion: 2,
+              expiresAt: null,
+              updatedAt: '2026-09-18T00:00:00.000Z',
+            },
+          });
+        }
+        if (url.endsWith('/api/workspace/projects/team')) return jsonResponse({ projects: [] });
+        if (url.endsWith('/api/plugins')) return jsonResponse({ plugins: [] });
+        if (url.endsWith('/api/mcp/servers')) return jsonResponse({ servers: [] });
+        if (url.endsWith('/api/community/discord')) return jsonResponse({ stale: true });
+        if (url.endsWith('/api/github/open-design')) return jsonResponse({ stale: true });
+        return jsonResponse({});
+      }) as typeof fetch;
+
+      const h = harness('amr');
+      h.setGate({ kind: 'hard', reason: 'insufficient', snapshot: emptyWallet() });
+      await waitFor(() => expect(billingReads).toBeGreaterThan(0));
+      await new Promise((resolve) => { setTimeout(resolve, 0); });
+      await submitHome('Design the onboarding flow.');
+      await screen.findByTestId('amr-balance-owner-dialog');
+      expect(screen.queryByTestId('amr-balance-dialog')).toBeNull();
+      expect(h.onBeginProjectCreation).not.toHaveBeenCalled();
+      const contextCall = vi.mocked(globalThis.fetch).mock.calls.find(
+        ([input]) => String(input).endsWith('/api/workspace/context'),
+      );
+      const headers = new Headers(contextCall?.[1]?.headers);
+      expect(headers.get('x-od-workspace-type')).toBe('team');
+      expect(headers.get('x-od-workspace-role')).toBe(role);
+    },
+  );
+});
