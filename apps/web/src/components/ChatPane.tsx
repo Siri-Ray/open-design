@@ -174,6 +174,7 @@ import {
   type ChatSendOutcome,
   type ChatSendMeta,
 } from './ChatComposer';
+import { attachmentLocalPreviewUrl } from '../runtime/chat/creation-handoff';
 import type { PendingUpload } from '../runtime/chat/staged-attachment';
 import type { PlaceholderScenario } from './home-hero/placeholderScenarios';
 import { listDesignArtifactCandidates } from './design-files/designArtifacts';
@@ -972,15 +973,15 @@ interface Props {
   // switcher above the card (OPEND-3128 / OPEND-3258). Otherwise the control
   // renders in a title-less row at the top of the card.
   historyPortalTarget?: HTMLElement | null;
-  /**
-   * The pane is laid out but parked out of sight under the creation hand-off
-   * card (ProjectView `creationHandoff`, OPEND-2170). The composer normally
-   * portals into a body-level fixed layer that `visibility: hidden` on the
-   * pane cannot reach, so the layer hides itself on this flag.
-   */
-  composerLayerHidden?: boolean;
   designSystemPicker?: ReactNode;
   config?: AppConfig;
+  /**
+   * The pane is drawn before its project exists (the Home send's pending
+   * frame, OPEND-3334): it looks exactly like the live pane but nothing in it
+   * can act. The pane root and the body-portaled composer layer are `inert`;
+   * the pane root carries `data-testid="project-creation-pending-chat"`.
+   */
+  detached?: boolean;
 }
 
 const AMR_PROFILE_ENV_KEY = 'OPEN_DESIGN_AMR_PROFILE';
@@ -1289,6 +1290,15 @@ function NewSessionGlyph(): ReactElement {
   );
 }
 
+/**
+ * React 18's DOM runtime drops the boolean `inert` attribute even though the
+ * typings expose it; set the standards-based attribute on the node so keyboard
+ * focus is blocked as well as pointer interaction.
+ */
+function markInert(node: HTMLElement | null): void {
+  node?.setAttribute('inert', '');
+}
+
 export function ChatPane({
   messages,
   streaming,
@@ -1427,9 +1437,9 @@ export function ChatPane({
   collapseControlLifted,
   backLabel,
   historyPortalTarget,
-  composerLayerHidden = false,
   designSystemPicker,
   config,
+  detached = false,
 }: Props) {
   const { workspaceContext } = useProjectCollabContext();
   const { t, locale } = useI18n();
@@ -1594,6 +1604,10 @@ export function ChatPane({
   const composerRef = useRef<ChatComposerHandle | null>(null);
   const composerSlotRef = useRef<HTMLDivElement | null>(null);
   const composerLayerRef = useRef<HTMLDivElement | null>(null);
+  const inertComposerLayerRef = useCallback((node: HTMLDivElement | null) => {
+    composerLayerRef.current = node;
+    markInert(node);
+  }, []);
   const queuedSendStripRef = useRef<HTMLDivElement | null>(null);
   /** The queued-send stack is spread open over the transcript (see `QueuedSendStack.onExpandedChange`). */
   const [queuedSendExpanded, setQueuedSendExpanded] = useState(false);
@@ -1963,7 +1977,14 @@ export function ChatPane({
   const [scrolledFromBottom, setScrolledFromBottom] = useState(false);
   // SDF liquid-glass refraction on the jump pill (frosted fallback via CSS).
   const jumpBtnGlassRef = useLiquidGlass<HTMLButtonElement>({ strength: 0.2 });
-  const [composerPortalTarget, setComposerPortalTarget] = useState<HTMLElement | null>(null);
+  // Resolved in the initializer, not in an effect: with the target known at
+  // mount, the layout effects below measure the slot and portal the composer
+  // before the first paint. Resolving it after paint drew the composer in-flow
+  // for one frame first — 12px lower and with the in-flow send button — on
+  // every mount of this pane (OPEND-3334).
+  const [composerPortalTarget] = useState<HTMLElement | null>(() =>
+    typeof document === 'undefined' ? null : document.body,
+  );
   const [composerPortalRect, setComposerPortalRect] = useState<{
     left: number;
     width: number;
@@ -3928,11 +3949,6 @@ export function ChatPane({
     syncFollowState();
   }
 
-  useEffect(() => {
-    if (typeof document === 'undefined') return;
-    setComposerPortalTarget(document.body);
-  }, []);
-
   useLayoutEffect(() => {
     if (tab !== 'chat') {
       setComposerPortalRect(null);
@@ -4241,7 +4257,11 @@ export function ChatPane({
        页面上像是没渲染,而单测一条都不会红。
        抹在 .pane 自己身上、**不另外包一层**:包一层会打断 `.split-chat-slot > .pane`
        这类子选择器(全仓 11 条),聊天卡的圆角 / 白底 / backdrop-filter 会集体失效。 */
-    <div {...chatSeam('pane')}>
+    <div
+      {...chatSeam('pane')}
+      ref={detached ? markInert : undefined}
+      data-testid={detached ? 'project-creation-pending-chat' : undefined}
+    >
         {historyPortalTarget ? (
           /* The dock host lives outside the chat tree, so the portal
              re-applies the --chat-* seam for the control's own styles. No
@@ -4718,8 +4738,7 @@ export function ChatPane({
                    */
                   <div
                     {...chatSeam('chat-composer-fixed-layer')}
-                    data-composer-layer-hidden={composerLayerHidden ? '' : undefined}
-                    ref={composerLayerRef}
+                    ref={detached ? inertComposerLayerRef : composerLayerRef}
                     data-chat-panel-top={composerPortalRect.top}
                     style={{
                       left: composerPortalRect.left,
@@ -6877,7 +6896,9 @@ const UserMessage = memo(UserMessageImpl);
           const openable = !!onRequestOpenFile;
           const handleOpen = openable ? () => onRequestOpenFile?.(openName) : undefined;
           const label = openable ? t('chat.openFile', { name: baseName }) : a.path;
-          return a.kind === 'image' && projectId ? (
+          // A staged file that is not in the project yet previews itself.
+          const localPreviewUrl = attachmentLocalPreviewUrl(a);
+          return a.kind === 'image' && (projectId || localPreviewUrl) ? (
             <button
               type="button"
               key={a.path}
@@ -6890,7 +6911,7 @@ const UserMessage = memo(UserMessageImpl);
               <span className="msg-att-ph">
                 <img
                   className="msg-att-mini"
-                  src={projectRawUrl(projectId, a.path, workspaceContext)}
+                  src={localPreviewUrl ?? projectRawUrl(projectId ?? '', a.path, workspaceContext)}
                   alt=""
                 />
               </span>

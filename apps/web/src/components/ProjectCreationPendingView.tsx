@@ -1,24 +1,16 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 import type { DesignSystemSummary } from '@open-design/contracts';
 
-import { AgentIcon } from './AgentIcon';
-import { assistantRoleNameForAgent } from './AssistantMessage';
+import { selectedAssistantIdentity } from './agentModelSelection';
 import { AvatarMenu } from './AvatarMenu';
-import { ChatComposer } from './ChatComposer';
+import { ChatPane } from './ChatPane';
 import { DesignSystemPicker } from './DesignSystemPicker';
 import { Icon } from './Icon';
-import { ChatHistoryGlyph } from './chat/ChatHistoryGlyph';
-import { chatSeam } from './chat/ChatRoot';
 import historyDockStyles from './chat/ConversationHistoryDock.module.css';
-import { ExecutionShell } from './chat/ExecutionShell';
 import { useWorkspaceTabsDockRef } from './workspaceTabsDock';
 import { useI18n } from '../i18n';
-import { formatAttachmentSize, splitFileName } from '../runtime/chat/attachment';
-import type { ExecutionShell as ExecutionShellData } from '../runtime/chat/contract';
-import { looksLikeImageName } from '../runtime/chat/staged-attachment';
 import type { AgentInfo, AppConfig } from '../types';
-import { agentIconId } from '../utils/agentLabels';
 import {
   projectSplitStyle,
   readSavedChatPanelWidth,
@@ -26,6 +18,7 @@ import {
   workspacePanelTrackForMinWidth,
   writeProjectSplitLayout,
 } from './project-split-layout';
+import { useCreationHandoffMessages } from './useCreationHandoffMessages';
 import styles from './ProjectCreationPendingView.module.css';
 
 /**
@@ -53,246 +46,16 @@ interface Props extends PendingChromeInputs {
   agentId?: string | null;
 }
 
-/**
- * The execution-record shell of a turn that has started and produced nothing
- * yet — exactly what the first real frame draws for the auto-sent first
- * message (`build-turn-blocks` opens a running shell with no items). The frame
- * renders the real `ExecutionShell` on it so the "Working" head, its orb and
- * its geometry are the component's own, not a copy.
- */
-const PENDING_SHELL: ExecutionShellData = {
-  kind: 'shell',
-  id: 'creation-pending',
-  status: 'running',
-  stopped: false,
-  thinking: false,
-  elapsedMs: null,
-  quietMs: null,
-  items: [],
-  segments: [],
-};
-
 const noop = () => undefined;
-
-/** One staged file, resolved to everything the card needs without a request. */
-interface PendingAttachmentCard {
-  key: string;
-  base: string;
-  ext: string;
-  size: string | null;
-  kind: 'image' | 'file';
-}
-
 const ensureNoPendingProject = () => Promise.resolve(null);
-const ignorePendingComposerAction = () => undefined;
-const makePendingComposerInert = (node: HTMLElement | null) => {
+const NO_CONVERSATIONS: never[] = [];
+const NO_FILES: never[] = [];
+const makePendingSurfaceInert = (node: HTMLElement | null) => {
   // React 18's DOM runtime drops the boolean `inert` attribute even though
   // current React typings expose it. Set the standards-based attribute on the
   // node so keyboard focus is blocked as well as pointer interaction.
   node?.setAttribute('inert', '');
 };
-
-/** Object URL for an image card, or null where unavailable (e.g. jsdom). */
-function createPreviewUrl(file: File): string | null {
-  try {
-    if (typeof URL === 'undefined' || typeof URL.createObjectURL !== 'function') return null;
-    return URL.createObjectURL(file);
-  } catch {
-    // Hardened/older contexts: fall back to the doc card's grey plate.
-    return null;
-  }
-}
-
-function revokePreviewUrl(url: string): void {
-  try {
-    URL.revokeObjectURL?.(url);
-  } catch {
-    // Already revoked, or unsupported — nothing to clean up.
-  }
-}
-
-interface ChatProps extends PendingChromeInputs {
-  projectName: string;
-  prompt: string;
-  /** The files the user staged on Home. Still local `File` objects here. */
-  files?: readonly File[];
-  agentId?: string | null;
-}
-
-/**
- * The hand-off's chat card: the project title, the prompt the user just
- * typed (with its staged files), the assistant row the real view draws first
- * (role + a running execution record, "Working"), and the real ChatComposer
- * made inert. `ProjectCreationPendingView` draws it as
- * the chat column of the whole pending frame; ProjectView draws the very same
- * card on top of its chat column while the first transcript settles
- * (`creationHandoff`, OPEND-2170), so the column never switches to another
- * loading form between the create answering and the auto-sent turn painting.
- *
- * Read-free like the frame around it: everything here is already in this tab.
- */
-export function ProjectCreationPendingChat({
-  projectName,
-  prompt,
-  files,
-  agentId,
-  agentName: agentNameInput,
-  config,
-  agents,
-  daemonLive = false,
-  designSystems,
-  designSystemId,
-}: ChatProps) {
-  const { t } = useI18n();
-  // Same resolution the real role row uses (`assistantRoleName`), fed the
-  // agent's catalogue name, so "Mock Agent" is "Mock Agent" on both sides.
-  const agentName = assistantRoleNameForAgent(agentNameInput, agentId) ?? t('assistant.role');
-  const iconId = agentIconId(agentId, agentNameInput ?? undefined);
-
-  const cards = useMemo<PendingAttachmentCard[]>(() => {
-    const staged = files ?? [];
-    return staged.map((file, index) => {
-      const { base, ext } = splitFileName(file.name);
-      return {
-        key: `${index}:${file.name}`,
-        base,
-        ext,
-        size: formatAttachmentSize(file.size),
-        kind: looksLikeImageName(file.name, file.type) ? 'image' as const : 'file' as const,
-      };
-    });
-  }, [files]);
-
-  // Image cards preview the staged file itself; the upload has not happened
-  // yet, so there is no project raw URL to point at. Creation and revocation
-  // are paired inside one `files`-keyed effect (the StrictMode-safe shape from
-  // DesignSystemAssetDropzone): the cleanup revokes exactly the URLs its own
-  // setup created, so StrictMode's simulated unmount cannot leave a memoized
-  // list of dead blob: links for the remount to hand to <img>.
-  const [previewUrls, setPreviewUrls] = useState<ReadonlyArray<string | null>>([]);
-  useEffect(() => {
-    const next = (files ?? []).map((file) =>
-      looksLikeImageName(file.name, file.type) ? createPreviewUrl(file) : null,
-    );
-    setPreviewUrls(next);
-    return () => {
-      for (const url of next) if (url) revokePreviewUrl(url);
-    };
-  }, [files]);
-
-  return (
-    <div
-      className={`pane ${styles.chatPane}`}
-      data-testid="project-creation-pending-chat"
-      data-creation-handoff=""
-    >
-      {/* No project-name header: the name is shown once, in the switcher
-          docked above this card, exactly as the real chat card it hands off
-          to (OPEND-3128). */}
-      <div className="chat-log-wrap">
-        <div className="chat-log" aria-busy="true">
-          {prompt || cards.length > 0 ? (
-            <div className="msg user">
-              {/* Attachments above, bubble below, right edges aligned —
-                  the same `.msg-stack` the transcript uses. */}
-              <div className="msg-stack">
-                {cards.length > 0 ? (
-                  <div className="msg-att-wrap">
-                    <div
-                      className="user-attachments msg-att"
-                      data-testid="pending-attachment-row"
-                    >
-                      {cards.map((card, index) => (card.kind === 'image' && previewUrls[index] ? (
-                        <span key={card.key} className="msg-att-img">
-                          <span className="msg-att-ph">
-                            <img className="msg-att-mini" src={previewUrls[index] ?? undefined} alt="" />
-                          </span>
-                        </span>
-                      ) : (
-                        <span key={card.key} className="msg-att-doc">
-                          <Icon name="file" size={15} className="msg-att-fi" />
-                          <span className="msg-att-tx">
-                            <span className="msg-att-nm">
-                              <span className="msg-att-base">{card.base}</span>
-                              {card.ext ? (
-                                <span className="msg-att-ext">{card.ext}</span>
-                              ) : null}
-                            </span>
-                            <span className="msg-att-meta">{card.size ?? ''}</span>
-                          </span>
-                        </span>
-                      )))}
-                    </div>
-                  </div>
-                ) : null}
-                {prompt ? (
-                  <div className="user-text-wrap">
-                    <div className="user-text user-bubble">{prompt}</div>
-                  </div>
-                ) : null}
-              </div>
-            </div>
-          ) : null}
-          <div className="msg assistant" data-continuation="false">
-            <div className="role" data-testid="assistant-role">
-              <AgentIcon id={iconId} size={20} className="role-agent-icon" />
-              <span className="role-name">{agentName}</span>
-            </div>
-            <div className="assistant-flow" data-testid="assistant-flow">
-              {/* The real view's first frame: an execution record that is
-                  running and has nothing to show yet. Same component, so the
-                  hand-off swaps like for like (OPEND-3334). */}
-              <ExecutionShell shell={PENDING_SHELL} />
-            </div>
-          </div>
-        </div>
-      </div>
-      <div
-        className={`chat-composer-slot ${styles.pendingComposer}`}
-        data-testid="pending-chat-composer-shell"
-        ref={makePendingComposerInert}
-        aria-disabled="true"
-      >
-        <ChatComposer
-          projectId={null}
-          projectFiles={[]}
-          streaming={false}
-          sendDisabled
-          inputDisabled
-          composerPlaceholder={t('chat.composerPlaceholder')}
-          onEnsureProject={ensureNoPendingProject}
-          onSend={ignorePendingComposerAction}
-          onStop={ignorePendingComposerAction}
-          /* The two accessories ProjectView hands its composer: the palette
-             (design-system picker) and the agent/model menu. Rendered with
-             the same components so the row has the real geometry; the whole
-             slot is inert, so none of them can act. */
-          designSystemPicker={designSystems ? (
-            <DesignSystemPicker
-              variant="home"
-              designSystems={designSystems as DesignSystemSummary[]}
-              selectedId={designSystemId ?? null}
-              disabled
-              onChange={noop}
-            />
-          ) : undefined}
-          footerAccessory={config && agents ? (
-            <AvatarMenu
-              config={config}
-              agents={agents as AgentInfo[]}
-              daemonLive={daemonLive}
-              onModeChange={noop}
-              onAgentChange={noop}
-              onAgentModelChange={noop}
-              onOpenSettings={noop}
-              onRefreshAgents={() => agents as AgentInfo[]}
-            />
-          ) : undefined}
-        />
-      </div>
-    </div>
-  );
-}
 
 /**
  * Immediate, read-free handoff shown while POST /api/projects is still
@@ -307,15 +70,14 @@ export function ProjectCreationPendingChat({
  * files — which are `File` objects the picker handed us, so their thumbnails
  * come from `URL.createObjectURL`, not from `/api/projects/:id/raw`.
  *
- * The layout is copied from the frame that replaces it (ProjectView's split,
- * ChatPane's header and user message, DesignFilesPanel's empty state) so the
- * hand-off does not re-flow the page. Where a control cannot work yet it is
- * rendered disabled rather than omitted — an omitted control moves everything
- * next to it, which is exactly the jump this frame is here to avoid.
- *
- * The composer at the bottom is the real ChatComposer made inert: the frame
- * already looks like the project the user is about to land in, and
- * ProjectView's own composer takes over in place once the id is confirmed.
+ * The chat column is the real `ChatPane`, detached: no project id, no
+ * conversations, no-op handlers, and the optimistic first turn as its
+ * messages (`useCreationHandoffMessages`). ProjectView hands the same turn to
+ * its own ChatPane until the auto-sent turn paints, so both sides of the
+ * hand-off are drawn by the same component from the same data (OPEND-3334).
+ * The workspace column is still a copy (ProjectView's split, DesignFilesPanel's
+ * empty state); where a control cannot work yet it is kept and made inert
+ * rather than omitted, because an omitted control moves everything next to it.
  */
 export function ProjectCreationPendingView({
   projectName,
@@ -325,6 +87,22 @@ export function ProjectCreationPendingView({
   ...chrome
 }: Props) {
   const { t } = useI18n();
+  const { config, agents, daemonLive = false, designSystems, designSystemId } = chrome;
+  const identity = useMemo(
+    () => (config
+      ? selectedAssistantIdentity(config, agents ?? [])
+      : { agentId: agentId ?? undefined, agentName: chrome.agentName ?? undefined }),
+    [agentId, agents, chrome.agentName, config],
+  );
+  const handoff = useMemo(() => ({ prompt, files }), [files, prompt]);
+  const messages = useCreationHandoffMessages(handoff, identity);
+  // ChatPane portals its conversation-history control into the tabs dock,
+  // exactly as it does under ProjectView.
+  const [historyPortalTarget, setHistoryPortalTarget] = useState<HTMLDivElement | null>(null);
+  const historyDockRef = useCallback((node: HTMLDivElement | null) => {
+    makePendingSurfaceInert(node);
+    setHistoryPortalTarget(node);
+  }, []);
   // Same registry ProjectView uses, so WorkspaceTabsBar portals the real strip
   // above the chat card here too and the chrome row stays collapsed across the
   // hand-off instead of rising for one frame.
@@ -373,6 +151,7 @@ export function ProjectCreationPendingView({
           ),
         )}
         data-testid="project-creation-pending-view"
+        data-creation-handoff=""
       >
         <div className="split-chat-slot">
           {/* Workspace tab-strip dock, identical to ProjectView's. */}
@@ -381,24 +160,11 @@ export function ProjectCreationPendingView({
             data-testid="workspace-tabs-dock"
             ref={tabsDockRef}
           >
-            {/* The conversation-history control ChatPane portals here once it
-                mounts; the frame draws its footprint so the row does not gain a
-                button at the hand-off. */}
-            <div className={historyDockStyles.dock} data-testid="pending-chat-history-dock">
-              <div {...chatSeam()}>
-                <div className="chat-history-wrap chat-session-switcher">
-                  <button
-                    type="button"
-                    className="chat-session-trigger icon-only"
-                    disabled
-                    tabIndex={-1}
-                    aria-hidden="true"
-                  >
-                    <ChatHistoryGlyph />
-                  </button>
-                </div>
-              </div>
-            </div>
+            <div
+              className={historyDockStyles.dock}
+              data-testid="pending-chat-history-dock"
+              ref={historyDockRef}
+            />
             <button
               type="button"
               className="split-chat-collapse"
@@ -409,12 +175,44 @@ export function ProjectCreationPendingView({
               <Icon name="panel-left" size={16} />
             </button>
           </div>
-          <ProjectCreationPendingChat
-            projectName={projectName}
-            prompt={prompt}
-            files={files}
-            agentId={agentId}
-            {...chrome}
+          <ChatPane
+            detached
+            historyPortalTarget={historyPortalTarget}
+            messages={messages}
+            streaming
+            error={null}
+            projectId={null}
+            projectFiles={NO_FILES}
+            onEnsureProject={ensureNoPendingProject}
+            onSend={noop}
+            onStop={noop}
+            conversations={NO_CONVERSATIONS}
+            activeConversationId={null}
+            onSelectConversation={noop}
+            onDeleteConversation={noop}
+            config={config ?? undefined}
+            currentDesignSystemId={designSystemId ?? null}
+            collapseControlLifted
+            composerFooterAccessory={config && agents ? (
+              <AvatarMenu
+                config={config}
+                agents={agents as AgentInfo[]}
+                daemonLive={daemonLive}
+                onModeChange={noop}
+                onAgentChange={noop}
+                onAgentModelChange={noop}
+                onOpenSettings={noop}
+                onRefreshAgents={() => agents as AgentInfo[]}
+              />
+            ) : undefined}
+            designSystemPicker={designSystems ? (
+              <DesignSystemPicker
+                variant="home"
+                designSystems={designSystems as DesignSystemSummary[]}
+                selectedId={designSystemId ?? null}
+                onChange={noop}
+              />
+            ) : undefined}
           />
         </div>
         <div className="split-resize-handle" aria-hidden="true" />
@@ -423,7 +221,7 @@ export function ProjectCreationPendingView({
         <section
           className={`workspace ${styles.workspace}`}
           aria-label={t('designFiles.title')}
-          ref={makePendingComposerInert}
+          ref={makePendingSurfaceInert}
         >
           <div className="ws-tabs-shell">
             <div className="ws-tabs-bar" role="tablist" aria-label={t('designFiles.title')}>
