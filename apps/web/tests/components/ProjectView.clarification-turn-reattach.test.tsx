@@ -343,7 +343,12 @@ describe('OPEND-3230 a finished OD Next turn whose task waits on the user', () =
   it('does not clear and replay the clarification turn after its own live stream ends', async () => {
     mockProjectShell();
     saveMessage.mockResolvedValue(undefined);
-    listMessages.mockResolvedValue([]);
+    // The transcript read settles well after the first render, as it does on
+    // a slow runner; the send below must wait for it instead of racing it.
+    listMessages.mockImplementation(async () => {
+      await sleep(200);
+      return [];
+    });
     let sendOptions: any = null;
     const liveStream = deferred<void>();
     streamViaDaemon.mockImplementation(async (options: any) => {
