@@ -13952,6 +13952,12 @@ export function ProjectView({
               prompt={creationHandoff.prompt}
               files={creationHandoff.files}
               agentId={config.agentId}
+              agentName={agentsById.get(config.agentId ?? '')?.name ?? null}
+              config={config}
+              agents={agents}
+              daemonLive={daemonLive}
+              designSystems={designSystems}
+              designSystemId={projectDesignSystemId ?? null}
             />
           ) : null}
         </div>

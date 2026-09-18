@@ -1,13 +1,24 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
+import type { DesignSystemSummary } from '@open-design/contracts';
+
 import { AgentIcon } from './AgentIcon';
+import { assistantRoleNameForAgent } from './AssistantMessage';
+import { AvatarMenu } from './AvatarMenu';
 import { ChatComposer } from './ChatComposer';
+import { DesignSystemPicker } from './DesignSystemPicker';
 import { Icon } from './Icon';
+import { ChatHistoryGlyph } from './chat/ChatHistoryGlyph';
+import { chatSeam } from './chat/ChatRoot';
+import historyDockStyles from './chat/ConversationHistoryDock.module.css';
+import { ExecutionShell } from './chat/ExecutionShell';
 import { useWorkspaceTabsDockRef } from './workspaceTabsDock';
 import { useI18n } from '../i18n';
 import { formatAttachmentSize, splitFileName } from '../runtime/chat/attachment';
+import type { ExecutionShell as ExecutionShellData } from '../runtime/chat/contract';
 import { looksLikeImageName } from '../runtime/chat/staged-attachment';
-import { agentDisplayName, agentIconId } from '../utils/agentLabels';
+import type { AgentInfo, AppConfig } from '../types';
+import { agentIconId } from '../utils/agentLabels';
 import {
   projectSplitStyle,
   readSavedChatPanelWidth,
@@ -17,13 +28,51 @@ import {
 } from './project-split-layout';
 import styles from './ProjectCreationPendingView.module.css';
 
-interface Props {
+/**
+ * What the frame needs to draw the SAME chrome ProjectView will draw
+ * (OPEND-3334): the agent's display name for the role row, and the inputs of
+ * the two composer accessories — the agent/model menu and the design-system
+ * picker — so the inert composer has the real one's geometry. Everything is
+ * optional so a caller that lacks it still gets a frame; it then differs from
+ * the real view exactly where the input was missing.
+ */
+export interface PendingChromeInputs {
+  agentName?: string | null;
+  config?: AppConfig | null;
+  agents?: readonly AgentInfo[];
+  daemonLive?: boolean;
+  designSystems?: readonly DesignSystemSummary[];
+  designSystemId?: string | null;
+}
+
+interface Props extends PendingChromeInputs {
   projectName: string;
   prompt: string;
   /** The files the user staged on Home. Still local `File` objects here. */
   files?: readonly File[];
   agentId?: string | null;
 }
+
+/**
+ * The execution-record shell of a turn that has started and produced nothing
+ * yet — exactly what the first real frame draws for the auto-sent first
+ * message (`build-turn-blocks` opens a running shell with no items). The frame
+ * renders the real `ExecutionShell` on it so the "Working" head, its orb and
+ * its geometry are the component's own, not a copy.
+ */
+const PENDING_SHELL: ExecutionShellData = {
+  kind: 'shell',
+  id: 'creation-pending',
+  status: 'running',
+  stopped: false,
+  thinking: false,
+  elapsedMs: null,
+  quietMs: null,
+  items: [],
+  segments: [],
+};
+
+const noop = () => undefined;
 
 /** One staged file, resolved to everything the card needs without a request. */
 interface PendingAttachmentCard {
@@ -36,7 +85,7 @@ interface PendingAttachmentCard {
 
 const ensureNoPendingProject = () => Promise.resolve(null);
 const ignorePendingComposerAction = () => undefined;
-const makePendingComposerInert = (node: HTMLDivElement | null) => {
+const makePendingComposerInert = (node: HTMLElement | null) => {
   // React 18's DOM runtime drops the boolean `inert` attribute even though
   // current React typings expose it. Set the standards-based attribute on the
   // node so keyboard focus is blocked as well as pointer interaction.
@@ -62,7 +111,7 @@ function revokePreviewUrl(url: string): void {
   }
 }
 
-interface ChatProps {
+interface ChatProps extends PendingChromeInputs {
   projectName: string;
   prompt: string;
   /** The files the user staged on Home. Still local `File` objects here. */
@@ -72,8 +121,9 @@ interface ChatProps {
 
 /**
  * The hand-off's chat card: the project title, the prompt the user just
- * typed (with its staged files), an assistant row that says "Preparing…", and
- * the real ChatComposer made inert. `ProjectCreationPendingView` draws it as
+ * typed (with its staged files), the assistant row the real view draws first
+ * (role + a running execution record, "Working"), and the real ChatComposer
+ * made inert. `ProjectCreationPendingView` draws it as
  * the chat column of the whole pending frame; ProjectView draws the very same
  * card on top of its chat column while the first transcript settles
  * (`creationHandoff`, OPEND-2170), so the column never switches to another
@@ -86,10 +136,18 @@ export function ProjectCreationPendingChat({
   prompt,
   files,
   agentId,
+  agentName: agentNameInput,
+  config,
+  agents,
+  daemonLive = false,
+  designSystems,
+  designSystemId,
 }: ChatProps) {
   const { t } = useI18n();
-  const agentName = agentDisplayName(agentId) ?? t('assistant.role');
-  const iconId = agentIconId(agentId);
+  // Same resolution the real role row uses (`assistantRoleName`), fed the
+  // agent's catalogue name, so "Mock Agent" is "Mock Agent" on both sides.
+  const agentName = assistantRoleNameForAgent(agentNameInput, agentId) ?? t('assistant.role');
+  const iconId = agentIconId(agentId, agentNameInput ?? undefined);
 
   const cards = useMemo<PendingAttachmentCard[]>(() => {
     const staged = files ?? [];
@@ -175,22 +233,16 @@ export function ProjectCreationPendingChat({
               </div>
             </div>
           ) : null}
-          <div className="msg assistant">
-            <div className="role">
+          <div className="msg assistant" data-continuation="false">
+            <div className="role" data-testid="assistant-role">
               <AgentIcon id={iconId} size={20} className="role-agent-icon" />
               <span className="role-name">{agentName}</span>
             </div>
-            <div className="assistant-flow">
-              <div
-                className="assistant-footer"
-                data-streaming="true"
-                data-last="true"
-              >
-                <span className="dot" data-active="true" />
-                <span className="assistant-label shimmer-text shimmer-prepare">
-                  {t('assistant.statusPreparing')}
-                </span>
-              </div>
+            <div className="assistant-flow" data-testid="assistant-flow">
+              {/* The real view's first frame: an execution record that is
+                  running and has nothing to show yet. Same component, so the
+                  hand-off swaps like for like (OPEND-3334). */}
+              <ExecutionShell shell={PENDING_SHELL} />
             </div>
           </div>
         </div>
@@ -211,6 +263,31 @@ export function ProjectCreationPendingChat({
           onEnsureProject={ensureNoPendingProject}
           onSend={ignorePendingComposerAction}
           onStop={ignorePendingComposerAction}
+          /* The two accessories ProjectView hands its composer: the palette
+             (design-system picker) and the agent/model menu. Rendered with
+             the same components so the row has the real geometry; the whole
+             slot is inert, so none of them can act. */
+          designSystemPicker={designSystems ? (
+            <DesignSystemPicker
+              variant="home"
+              designSystems={designSystems as DesignSystemSummary[]}
+              selectedId={designSystemId ?? null}
+              disabled
+              onChange={noop}
+            />
+          ) : undefined}
+          footerAccessory={config && agents ? (
+            <AvatarMenu
+              config={config}
+              agents={agents as AgentInfo[]}
+              daemonLive={daemonLive}
+              onModeChange={noop}
+              onAgentChange={noop}
+              onAgentModelChange={noop}
+              onOpenSettings={noop}
+              onRefreshAgents={() => agents as AgentInfo[]}
+            />
+          ) : undefined}
         />
       </div>
     </div>
@@ -245,6 +322,7 @@ export function ProjectCreationPendingView({
   prompt,
   files,
   agentId,
+  ...chrome
 }: Props) {
   const { t } = useI18n();
   // Same registry ProjectView uses, so WorkspaceTabsBar portals the real strip
@@ -303,6 +381,24 @@ export function ProjectCreationPendingView({
             data-testid="workspace-tabs-dock"
             ref={tabsDockRef}
           >
+            {/* The conversation-history control ChatPane portals here once it
+                mounts; the frame draws its footprint so the row does not gain a
+                button at the hand-off. */}
+            <div className={historyDockStyles.dock} data-testid="pending-chat-history-dock">
+              <div {...chatSeam()}>
+                <div className="chat-history-wrap chat-session-switcher">
+                  <button
+                    type="button"
+                    className="chat-session-trigger icon-only"
+                    disabled
+                    tabIndex={-1}
+                    aria-hidden="true"
+                  >
+                    <ChatHistoryGlyph />
+                  </button>
+                </div>
+              </div>
+            </div>
             <button
               type="button"
               className="split-chat-collapse"
@@ -318,10 +414,17 @@ export function ProjectCreationPendingView({
             prompt={prompt}
             files={files}
             agentId={agentId}
+            {...chrome}
           />
         </div>
         <div className="split-resize-handle" aria-hidden="true" />
-        <section className={`workspace ${styles.workspace}`} aria-label={t('designFiles.title')}>
+        {/* Inert, not disabled: DesignFilesPanel draws these pills live, and a
+            disabled look would flip to live at the hand-off (OPEND-3334). */}
+        <section
+          className={`workspace ${styles.workspace}`}
+          aria-label={t('designFiles.title')}
+          ref={makePendingComposerInert}
+        >
           <div className="ws-tabs-shell">
             <div className="ws-tabs-bar" role="tablist" aria-label={t('designFiles.title')}>
               <div
@@ -356,23 +459,23 @@ export function ProjectCreationPendingView({
                   <div className="df-empty-pill">
                     <span className="df-empty-title">{t('designFiles.empty')}</span>
                     <div className="df-empty-actions">
-                      <button type="button" className="df-empty-cta df-empty-cta-primary" disabled>
+                      <button type="button" className="df-empty-cta df-empty-cta-primary" tabIndex={-1}>
                         <Icon name="pencil" size={13} />
                         <span>{t('designFiles.newSketch')}</span>
                       </button>
-                      <button type="button" className="df-empty-cta df-empty-cta-doc" disabled>
+                      <button type="button" className="df-empty-cta df-empty-cta-doc" tabIndex={-1}>
                         <Icon name="file" size={13} />
                         <span>{t('designFiles.newDocument')}</span>
                       </button>
-                      <button type="button" className="df-empty-cta df-empty-cta-upload" disabled>
+                      <button type="button" className="df-empty-cta df-empty-cta-upload" tabIndex={-1}>
                         <Icon name="upload" size={13} />
                         <span>{t('designFiles.upload.label')}</span>
                       </button>
-                      <button type="button" className="df-empty-cta df-empty-cta-secondary" disabled>
+                      <button type="button" className="df-empty-cta df-empty-cta-secondary" tabIndex={-1}>
                         <Icon name="globe" size={13} />
                         <span>{t('workspace.newBrowser')}</span>
                       </button>
-                      <button type="button" className="df-empty-cta df-empty-cta-tertiary" disabled>
+                      <button type="button" className="df-empty-cta df-empty-cta-tertiary" tabIndex={-1}>
                         <Icon name="blocks" size={14} />
                         <span>{t('dsManager.createTitle')}</span>
                       </button>

@@ -1318,7 +1318,7 @@ describe('App project creation routing', () => {
     expect(requestedProjectId).toBeTruthy();
     expect(window.location.pathname).toBe(`/projects/${requestedProjectId}`);
     expect(screen.getByText('Build the retained artifact prompt')).toBeTruthy();
-    expect(screen.getByText('Preparing...')).toBeTruthy();
+    expect(screen.getByText('Working')).toBeTruthy();
     expect(screen.queryByTestId('entry-home-surface')).toBeNull();
     expect(screen.queryByTestId('project-view')).toBeNull();
 

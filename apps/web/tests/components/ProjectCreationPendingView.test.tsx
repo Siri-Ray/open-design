@@ -71,6 +71,21 @@ describe('ProjectCreationPendingView', () => {
     }
   });
 
+  it('draws the history control footprint and live-looking empty-state pills, all inert', () => {
+    renderPending();
+    // The dock carries the footprint of the history trigger ChatPane portals
+    // in later, so the row does not gain a button at the hand-off.
+    const dock = screen.getByTestId('pending-chat-history-dock');
+    expect(dock.querySelector('.chat-session-trigger')).toBeTruthy();
+    // The workspace column is inert as a whole; its pills keep the live look
+    // DesignFilesPanel gives them instead of a disabled one.
+    const workspace = document.querySelector('section.workspace') as HTMLElement;
+    expect(workspace.hasAttribute('inert')).toBe(true);
+    const ctas = Array.from(workspace.querySelectorAll('.df-empty-cta')) as HTMLButtonElement[];
+    expect(ctas.length).toBeGreaterThan(0);
+    expect(ctas.every((cta) => !cta.disabled)).toBe(true);
+  });
+
   it('shows the sent prompt from the creation record alone, with no project-name header row', () => {
     renderPending();
 
@@ -78,7 +93,11 @@ describe('ProjectCreationPendingView', () => {
     expect(screen.queryByTestId('pending-project-title')).toBeNull();
     expect(document.querySelector('.chat-project-header')).toBeNull();
     expect(screen.getByText('Make a landing page for a coffee shop')).toBeTruthy();
-    expect(screen.getByText('Preparing...')).toBeTruthy();
+    // OPEND-3334: the assistant row is the real view's first frame — a running
+    // execution record that says "Working" — not a copy of the old footer.
+    expect(screen.getByText('Working')).toBeTruthy();
+    expect(screen.queryByText('Preparing...')).toBeNull();
+    expect(document.querySelector('.assistant-footer')).toBeNull();
   });
 
   it('lists staged attachments as user-message cards in send order', () => {
