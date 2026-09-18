@@ -236,9 +236,13 @@ export function ProjectCreationPendingView({
                 <span className="ws-tab-label">{t('designFiles.title')}</span>
               </div>
             </div>
-            <span className={styles.addIcon} aria-hidden="true">
-              <Icon name="plus" size={16} />
-            </span>
+            {/* FileWorkspace's own add-tab control, so the "+" sits where it
+                will; the whole section is inert. */}
+            <div className="ws-add-tab">
+              <button type="button" className="icon-only ws-tab-add" tabIndex={-1} aria-hidden="true">
+                <Icon name="plus" size={15} />
+              </button>
+            </div>
           </div>
           {/* DesignFilesPanel's own shell and empty pill, so the sentence sits
               in the same place before and after the hand-off. */}
@@ -250,7 +254,23 @@ export function ProjectCreationPendingView({
                     <span className="df-breadcrumb-current">{t('designFiles.crumbs')}</span>
                   </nav>
                 </div>
-                <div className="df-topbar-right" />
+                {/* The project menu trigger sets the top bar's height; without
+                    it the bar is shorter and everything below moves at the
+                    hand-off. */}
+                <div className="df-topbar-right">
+                  <div className="df-actions">
+                    <div className="df-project-menu-anchor">
+                      <button
+                        type="button"
+                        className="df-project-menu-trigger"
+                        tabIndex={-1}
+                        aria-hidden="true"
+                      >
+                        <Icon name="more-horizontal" size={14} />
+                      </button>
+                    </div>
+                  </div>
+                </div>
               </div>
               <div className="df-body">
                 <div className="df-empty" data-testid="pending-design-files-empty">

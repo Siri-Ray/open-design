@@ -6,13 +6,6 @@
   grid-column: 3;
 }
 
-.addIcon {
-  display: inline-flex;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-muted);
-}
 
 /* The design-files column now renders DesignFilesPanel's own `.df-panel` /
    `.df-empty` shell (global styles) so the empty pill sits in the same place
