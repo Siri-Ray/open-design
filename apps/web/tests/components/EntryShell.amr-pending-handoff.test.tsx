@@ -11,7 +11,7 @@
 // behaviour (pending frame within one animation frame of the click); this
 // file pins the contract between EntryShell and App that makes it possible.
 
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ComponentProps } from 'react';
 import {
   buildWorkspacePermissions,
@@ -523,12 +523,22 @@ describe('OPEND-3300 · a Team member at $0 is asked to find the owner on Home',
   it('identity read that never settles: the send returns to Home with the balance notice and gates nothing', async () => {
     installFetch(teamMemberContext(), { holdIdentity: true });
     const h = harness('amr');
-    await submitHome('Design the onboarding flow.');
-    await waitFor(() => expect(h.onBeginProjectCreation).toHaveBeenCalledTimes(1));
+    await screen.findByTestId('home-hero-input');
+    setHomeHeroPrompt('Design the onboarding flow.');
+    // Capture the polling timer from its creation at Send, not midway through
+    // a real-time wait whose pending callback fake timers cannot advance.
     vi.useFakeTimers();
-    await vi.advanceTimersByTimeAsync(HOME_AMR_GATE_CONTEXT_SETTLE_MS + 200);
-    vi.useRealTimers();
-    await waitFor(() => expect(h.rollback).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByTestId('home-hero-submit'));
+    expect(h.onBeginProjectCreation).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(HOME_AMR_GATE_CONTEXT_SETTLE_MS - 1);
+    });
+    expect(h.rollback).not.toHaveBeenCalled();
+    expect(mockedCheckAmrBalanceGate).not.toHaveBeenCalled();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(h.rollback).toHaveBeenCalledTimes(1);
     expect(h.rollback).toHaveBeenCalledWith({
       notice: 'Couldn\'t confirm your OpenDesign Cloud balance. Try sending again.',
     });

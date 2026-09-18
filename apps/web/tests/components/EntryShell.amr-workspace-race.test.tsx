@@ -135,7 +135,7 @@ describe('EntryShell AMR workspace precheck race', () => {
   });
 
   it.each(['get', 'set'] as const)(
-    'starts the team gate from in-memory directory identity when sessionStorage %sItem fails',
+    'waits for the team identity before gating when sessionStorage %sItem fails',
     async (blockedOperation) => {
       window.history.replaceState(null, '', '/');
       if (blockedOperation === 'get') {
@@ -228,7 +228,18 @@ describe('EntryShell AMR workspace precheck race', () => {
       setHomeHeroPrompt('Create a launch poster without waiting for account chrome.');
       fireEvent.click(await screen.findByTestId('home-hero-submit'));
 
-      await waitFor(() => expect(mockedCheckAmrBalanceGate).toHaveBeenCalled());
+      // Without a session selection the directory alone cannot publish an
+      // exact read identity. Do not fall back to gating the personal wallet.
+      expect(mockedCheckAmrBalanceGate).not.toHaveBeenCalled();
+      expect(onCreateProject).not.toHaveBeenCalled();
+      await act(async () => {
+        contextRead.resolve(jsonResponse({ context: workspace }));
+      });
+      await waitFor(() => expect(mockedCheckAmrBalanceGate).toHaveBeenCalledWith({
+        workspaceType: 'team',
+        workspaceId: workspace.workspaceId,
+        workspaceMemberId: workspace.workspaceMemberId,
+      }, 'glm-5'));
       await waitFor(() => expect(onCreateProject).toHaveBeenCalledTimes(1));
       expect(directoryReads).toBe(1);
     },
