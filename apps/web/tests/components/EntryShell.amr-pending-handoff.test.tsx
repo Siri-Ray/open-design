@@ -11,7 +11,7 @@
 // behaviour (pending frame within one animation frame of the click); this
 // file pins the contract between EntryShell and App that makes it possible.
 
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ComponentProps } from 'react';
 import {
   buildWorkspacePermissions,
@@ -32,7 +32,6 @@ import type {
 } from '../../src/components/EntryShell';
 import { I18nProvider } from '../../src/i18n';
 import { checkAmrBalanceGate } from '../../src/runtime/amr-balance-gate';
-import { HOME_AMR_GATE_CONTEXT_SETTLE_MS } from '../../src/runtime/home-amr-gate-context';
 import type { AgentInfo, AppConfig } from '../../src/types';
 import { EntryShellWithGateHost } from '../helpers/entry-shell-gate-host';
 import { setHomeHeroPrompt } from '../helpers/home-hero-lexical';
@@ -392,159 +391,5 @@ describe('OPEND-3300 · an empty in-memory wallet blocks on Home before the hand
       optimisticProjectId: 'optimistic-2614',
     });
     expect(h.rollback).not.toHaveBeenCalled();
-  });
-});
-
-/**
- * OPEND-3300 follow-up · a Team member with no billing permission at $0 is
- * told to ask the workspace owner — on Home exactly as in the project. A
- * tester (member, `canManageBilling=false`, Team wallet $0) got the personal
- * upgrade dialog instead: with the shell's workspace identity read still in
- * flight at the click, the gate had no scope, read the ACCOUNT wallet and
- * named the owner audience. The send now waits for the read the shell already
- * has in flight (`awaitHomeAmrGateWorkspaceContext`) and never gates the
- * account wallet while it is.
- */
-describe('OPEND-3300 · a Team member at $0 is asked to find the owner on Home', () => {
-  function teamMemberContext(): WorkspaceCollabContext {
-    const role = 'member' as const;
-    const lifecycleState = 'active' as const;
-    return {
-      workspaceId: 'ws-team-3300',
-      workspaceType: 'team',
-      workspaceMemberId: 'wm-team-3300-member',
-      role,
-      memberStatus: 'active',
-      lifecycleState,
-      billingState: 'active',
-      planId: 'team_pro',
-      providerMode: 'platform_credits',
-      seatSummary: buildWorkspaceSeatSummary({ seatLimit: 5, usedSeats: 2 }),
-      permissions: buildWorkspacePermissions({ role, lifecycleState }),
-      teamId: 'ws-team-3300',
-      teamName: 'Acme Design',
-      workspaceName: 'Acme Design',
-    };
-  }
-
-  const teamScope = {
-    workspaceType: 'team',
-    workspaceId: 'ws-team-3300',
-    workspaceMemberId: 'wm-team-3300-member',
-  };
-
-  /**
-   * The shell's reads. `holdIdentity` keeps the directory and context reads
-   * pending until `releaseIdentity()` — the shape of a click that lands
-   * before a cold start or a workspace switch has resolved.
-   */
-  function installFetch(workspace: WorkspaceCollabContext, options: { holdIdentity?: boolean } = {}) {
-    let releaseIdentity: () => void = () => undefined;
-    const identityReleased = new Promise<void>((resolve) => {
-      releaseIdentity = resolve;
-    });
-    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url.endsWith('/api/workspace/directory')) {
-        if (options.holdIdentity) await identityReleased;
-        return jsonResponse(workspaceDirectoryFixture([workspace]));
-      }
-      if (url.endsWith('/api/workspace/context')) {
-        if (options.holdIdentity) await identityReleased;
-        return jsonResponse({ context: workspace });
-      }
-      if (url.includes('/api/workspace/billing?')) {
-        // No in-memory reading: the verdict comes from the confirmed gate.
-        return jsonResponse({ summary: null, workspaceBalance: null });
-      }
-      if (url.endsWith('/api/workspace/projects/team')) return jsonResponse({ projects: [] });
-      if (url.endsWith('/api/plugins')) return jsonResponse({ plugins: [] });
-      if (url.endsWith('/api/mcp/servers')) return jsonResponse({ servers: [] });
-      if (url.endsWith('/api/community/discord')) return jsonResponse({ stale: true });
-      if (url.endsWith('/api/github/open-design')) return jsonResponse({ stale: true });
-      return jsonResponse({});
-    }) as typeof fetch;
-    return { releaseIdentity: () => releaseIdentity() };
-  }
-
-  beforeEach(() => {
-    globalThis.ResizeObserver = ResizeObserverMock as typeof ResizeObserver;
-    window.sessionStorage.clear();
-    window.history.replaceState(null, '', '/');
-    resetWorkspaceContextCache();
-    resetWorkspaceBillingCache();
-    resetTeamProjectsCache();
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-    cleanup();
-    globalThis.fetch = originalFetch;
-    globalThis.ResizeObserver = originalResizeObserver;
-    mockedCheckAmrBalanceGate.mockReset();
-    resetWorkspaceContextCache();
-    resetWorkspaceBillingCache();
-    resetTeamProjectsCache();
-  });
-
-  it('settled member identity: the Team wallet is gated and the owner dialog shows, never the upgrade one', async () => {
-    installFetch(teamMemberContext());
-    const h = harness('amr');
-    h.setGate({ kind: 'hard', reason: 'insufficient', snapshot: emptyWallet() });
-    // Let the identity read settle the way it does before a user can type.
-    await waitFor(() => expect(screen.getByTestId('home-hero-input')).toBeTruthy());
-    await submitHome('Design the onboarding flow.');
-    await screen.findByTestId('amr-balance-owner-dialog');
-    expect(screen.queryByTestId('amr-balance-dialog')).toBeNull();
-    expect(mockedCheckAmrBalanceGate.mock.calls[0]?.[0]).toEqual(teamScope);
-    expect(h.onCreateProject).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByTestId('amr-balance-owner-dismiss'));
-    await waitFor(() => expect(h.rollback).toHaveBeenCalledTimes(1));
-    expect(h.rollback).toHaveBeenCalledWith();
-  });
-
-  it('identity read still in flight at the click: the send waits for it and gates the Team wallet, not the account', async () => {
-    const reads = installFetch(teamMemberContext(), { holdIdentity: true });
-    const h = harness('amr');
-    h.setGate({ kind: 'hard', reason: 'insufficient', snapshot: emptyWallet() });
-    await submitHome('Design the onboarding flow.');
-    await waitFor(() => expect(h.onBeginProjectCreation).toHaveBeenCalledTimes(1));
-    // Nothing may be gated yet: the shell has not heard which workspace pays.
-    await new Promise((resolve) => { setTimeout(resolve, 150); });
-    expect(mockedCheckAmrBalanceGate).not.toHaveBeenCalled();
-    expect(screen.queryByTestId('amr-balance-dialog')).toBeNull();
-    reads.releaseIdentity();
-    await screen.findByTestId('amr-balance-owner-dialog');
-    expect(screen.queryByTestId('amr-balance-dialog')).toBeNull();
-    expect(mockedCheckAmrBalanceGate.mock.calls[0]?.[0]).toEqual(teamScope);
-    expect(h.onCreateProject).not.toHaveBeenCalled();
-  });
-
-  it('identity read that never settles: the send returns to Home with the balance notice and gates nothing', async () => {
-    installFetch(teamMemberContext(), { holdIdentity: true });
-    const h = harness('amr');
-    await screen.findByTestId('home-hero-input');
-    setHomeHeroPrompt('Design the onboarding flow.');
-    // Capture the polling timer from its creation at Send, not midway through
-    // a real-time wait whose pending callback fake timers cannot advance.
-    vi.useFakeTimers();
-    fireEvent.click(screen.getByTestId('home-hero-submit'));
-    expect(h.onBeginProjectCreation).toHaveBeenCalledTimes(1);
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(HOME_AMR_GATE_CONTEXT_SETTLE_MS - 1);
-    });
-    expect(h.rollback).not.toHaveBeenCalled();
-    expect(mockedCheckAmrBalanceGate).not.toHaveBeenCalled();
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(1);
-    });
-    expect(h.rollback).toHaveBeenCalledTimes(1);
-    expect(h.rollback).toHaveBeenCalledWith({
-      notice: 'Couldn\'t confirm your OpenDesign Cloud balance. Try sending again.',
-    });
-    expect(mockedCheckAmrBalanceGate).not.toHaveBeenCalled();
-    expect(screen.queryByTestId('amr-balance-dialog')).toBeNull();
-    expect(screen.queryByTestId('amr-balance-owner-dialog')).toBeNull();
-    expect(h.onCreateProject).not.toHaveBeenCalled();
   });
 });

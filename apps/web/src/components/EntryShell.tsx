@@ -126,7 +126,6 @@ import {
   retryUnavailableAmrBalanceGate,
   type AmrBalanceGateScope,
 } from '../runtime/amr-balance-gate';
-import { awaitHomeAmrGateWorkspaceContext } from '../runtime/home-amr-gate-context';
 import { HomeView, seedHomeComposerPrompt } from './HomeView';
 import { entryStrategyRoutingFields } from './entry-strategy-routing';
 import { EntryBlankState } from './EntryBlankState';
@@ -1497,26 +1496,18 @@ export function EntryShell({
     let amrGatePrecheckPassed = false;
     if (isAmrSend) {
       // PRODUCT INVARIANT: Send never starts Workspace identity discovery.
-      // Billing consumes the shell's current in-memory snapshot. While that
-      // read is still in flight the send waits for it (bounded) instead of
-      // gating on the account wallet — that fallback showed a Team member the
-      // personal upgrade dialog; see `awaitHomeAmrGateWorkspaceContext`. The
-      // legacy account-scoped gate remains for a shell that has settled
-      // without a workspace identity. The daemon's ordinary project-create
-      // route is local and does not need live Workspace authority.
-      // Account/scope generation checks below only prevent a result from
-      // being reused after the user switches identity while the balance
+      // Billing consumes the shell's current in-memory snapshot; if it has not
+      // arrived yet, the existing account-scoped gate is used. The daemon's
+      // ordinary project-create route is local and does not need live Workspace
+      // authority. Account/scope generation checks below only prevent a result
+      // from being reused after the user switches identity while the balance
       // request or dialog is in flight.
       for (let scopeAttempt = 0; scopeAttempt < 2; scopeAttempt += 1) {
-        const settledWorkspace = await awaitHomeAmrGateWorkspaceContext(
-          () => workspaceContextStateRef.current,
-        );
-        if (settledWorkspace.kind === 'unsettled') {
-          handoff.rollback({ notice: t('home.amrGateUnavailable') });
-          return false;
-        }
         const gateAccountGeneration = currentWorkspaceAccountGeneration();
-        const gateWorkspaceContext = settledWorkspace.context;
+        const gateWorkspaceState = workspaceContextStateRef.current;
+        const gateWorkspaceContext = gateWorkspaceState.failure === 'unsupported'
+          ? null
+          : workspaceResourceReadContext(gateWorkspaceState);
         const gateWorkspaceIdentity = workspaceIdentityCacheKey(gateWorkspaceContext);
         const gateScope = amrBalanceGateScopeForWorkspaceContext(gateWorkspaceContext);
         let gate = await retryUnavailableAmrBalanceGate(
