@@ -14,7 +14,7 @@ import type {
   ProjectBrowserWorkspaceTab,
   ProjectTabsState,
 } from '@open-design/contracts';
-import { eventsEndedWithUnfinishedWork } from '@open-design/contracts';
+import { cacheProjectStatusSummary, migrateProjectStatusSummary, readProjectStatusSummary } from './storage/project-status-summary.js';
 import { migrateCollabSyncSnapshots } from './collab/sync-snapshot-store.js';
 import { migrateCommentRelayOutbox } from './collab/comment-relay-outbox.js';
 import { migratePublicFilePublications } from './collab/public-file-publication-store.js';
@@ -452,6 +452,7 @@ function migrate(db: SqliteDb): void {
   if (!messageCols.some((c: DbRow) => c.name === 'telemetry_finalized_at')) {
     db.exec(`ALTER TABLE messages ADD COLUMN telemetry_finalized_at INTEGER`);
   }
+  migrateProjectStatusSummary(db);
   const routineRunCols = db.prepare(`PRAGMA table_info(routine_runs)`).all() as DbRow[];
   if (!routineRunCols.some((c: DbRow) => c.name === 'error_code')) {
     db.exec(`ALTER TABLE routine_runs ADD COLUMN error_code TEXT`);
@@ -1635,43 +1636,39 @@ export function deleteWorkspaceResourceByResourceId(
 }
 
 export function listLatestProjectRunStatuses(db: SqliteDb) {
-  const rows = db
-    .prepare(
-      `SELECT c.project_id AS projectId,
-              m.run_id AS runId,
-              m.run_status AS status,
-              m.events_json AS eventsJson,
-              COALESCE(m.ended_at, m.started_at, m.created_at) AS updatedAt
-         FROM messages m
-         JOIN conversations c ON c.id = m.conversation_id
-        WHERE m.run_status IS NOT NULL
-        ORDER BY updatedAt DESC`,
+  // Rank scalar metadata only. The former all-history events projection could
+  // exhaust Electron's heap before the JS Map discarded older messages.
+  const latest = db.prepare(`WITH ranked AS (
+      SELECT m.rowid AS messageRowId, c.project_id AS projectId,
+             ROW_NUMBER() OVER (
+               PARTITION BY c.project_id
+               ORDER BY COALESCE(m.ended_at, m.started_at, m.created_at) DESC, m.rowid ASC
+             ) AS rank
+        FROM messages m JOIN conversations c ON c.id = m.conversation_id
+       WHERE m.run_status IS NOT NULL
     )
-    .all() as DbRow[];
+    SELECT m.id AS messageId, r.projectId, m.run_id AS runId, m.run_status AS status,
+           s.unfinished,
+           COALESCE(m.ended_at, m.started_at, m.created_at) AS updatedAt
+      FROM ranked r JOIN messages m ON m.rowid = r.messageRowId
+      LEFT JOIN message_project_status_summaries s ON s.message_id = m.id
+     WHERE r.rank = 1`).all() as DbRow[];
   const latestByProject = new Map<string, DbRow>();
-  for (const row of rows) {
-    if (!latestByProject.has(row.projectId)) {
-      latestByProject.set(row.projectId, {
-        value: projectDisplayStatusForRunRow(row.status, row.eventsJson),
-        updatedAt: Number(row.updatedAt),
-        runId: row.runId ?? undefined,
-      });
+  for (const row of latest) {
+    let value: string = normalizeProjectRunStatus(row.status);
+    if (value === 'succeeded') {
+      const unfinished = row.unfinished == null
+        ? readProjectStatusSummary(db, row.messageId)
+        : row.unfinished === 1;
+      if (unfinished) value = 'incomplete';
     }
+    latestByProject.set(row.projectId, {
+      value,
+      updatedAt: Number(row.updatedAt),
+      runId: row.runId ?? undefined,
+    });
   }
   return latestByProject;
-}
-
-// A terminal `succeeded` run whose PERSISTED events show unfinished declared
-// work (a non-`completed` TodoWrite task) projects as `incomplete`, never
-// `succeeded`, so the project pill can't read "Completed" for a run whose work
-// is not actually done (#1247 / #1060). Derived from the same events the chat
-// footer reads, so the two surfaces cannot disagree, and it survives reload
-// because the events were persisted per-event as the run streamed.
-function projectDisplayStatusForRunRow(status: unknown, eventsJson: unknown) {
-  const normalized = normalizeProjectRunStatus(status);
-  if (normalized !== 'succeeded') return normalized;
-  const events = parseJsonOrUndef(eventsJson);
-  return eventsEndedWithUnfinishedWork(events) ? 'incomplete' : normalized;
 }
 
 export function listLatestConversationRunStatuses(db: SqliteDb) {
@@ -2778,9 +2775,14 @@ export function conversationTurnIndexForRun(
 }
 
 export function upsertMessage(db: SqliteDb, conversationId: string, m: DbRow) {
+  return db.transaction(() => upsertMessageWithSummary(db, conversationId, m)).immediate();
+}
+
+function upsertMessageWithSummary(db: SqliteDb, conversationId: string, m: DbRow) {
   const persistedEvents = Array.isArray(m.events)
     ? compactAdjacentMessageAgentEvents(m.events)
     : m.events;
+  let summaryEvents: unknown = persistedEvents ?? null;
   const eventBatchProjection = hasMessageEventBatchStorage(db)
     ? `EXISTS(
                 SELECT 1 FROM message_event_batches AS batch
@@ -2808,6 +2810,7 @@ export function upsertMessage(db: SqliteDb, conversationId: string, m: DbRow) {
       (typeof existing.runId === 'string' &&
         (existing.runStatus === 'queued' || existing.runStatus === 'running') &&
         !incomingRunIsTerminal);
+    if (preserveDaemonEventSnapshot) summaryEvents = undefined;
     const nextEventsJson = preserveDaemonEventSnapshot
       ? existing.eventsJson ?? null
       : persistedEvents
@@ -2923,6 +2926,7 @@ export function upsertMessage(db: SqliteDb, conversationId: string, m: DbRow) {
       createdAt,
     );
   }
+  if (summaryEvents !== undefined) cacheProjectStatusSummary(db, m.id, summaryEvents);
   // Bump conversation activity so the sidebar's recency sort works.
   db.prepare(`UPDATE conversations SET updated_at = ? WHERE id = ?`).run(
     now,
@@ -2975,6 +2979,10 @@ export function getMessageTelemetryFinalizationState(db: SqliteDb, messageId: st
 }
 
 export function appendMessageStatusEvent(db: SqliteDb, messageId: string, event: DbRow) {
+  return db.transaction(() => appendMessageStatusEventWithSummary(db, messageId, event)).immediate();
+}
+
+function appendMessageStatusEventWithSummary(db: SqliteDb, messageId: string, event: DbRow) {
   const label = typeof event?.label === 'string' ? event.label.trim() : '';
   const detail = typeof event?.detail === 'string' ? event.detail.trim() : '';
   if (!label) return null;
@@ -2998,6 +3006,7 @@ export function appendMessageStatusEvent(db: SqliteDb, messageId: string, event:
   const next = [...events, nextEvent];
   db.prepare(`UPDATE messages SET events_json = ? WHERE id = ?`)
     .run(JSON.stringify(next), messageId);
+  cacheProjectStatusSummary(db, messageId, next);
   return next;
 }
 
@@ -3139,6 +3148,14 @@ export function appendMessageAgentEvents(
   messageId: string,
   incomingEvents: readonly DbRow[],
 ): DbRow[] | null {
+  return db.transaction(() => appendMessageAgentEventsWithSummary(db, messageId, incomingEvents)).immediate();
+}
+
+function appendMessageAgentEventsWithSummary(
+  db: SqliteDb,
+  messageId: string,
+  incomingEvents: readonly DbRow[],
+): DbRow[] | null {
   if (incomingEvents.length === 0) return null;
   const events = mergeMessageAgentEvents([], incomingEvents);
   if (events.length === 0) return null;
@@ -3159,6 +3176,7 @@ export function appendMessageAgentEvents(
           SET content = COALESCE(content, '') || ?, events_json = ?
         WHERE id = ?`,
     ).run(textDelta, JSON.stringify(materializedEvents), messageId);
+    cacheProjectStatusSummary(db, messageId, materializedEvents);
     return materializedEvents;
   }
   const inserted = db.prepare(
@@ -3187,6 +3205,7 @@ export function finalizeMessageAgentEvents(
           SET content = COALESCE(content, '') || ?, events_json = ?
         WHERE id = ?`,
     ).run(materialized.textDelta, JSON.stringify(materialized.events), messageId);
+    cacheProjectStatusSummary(db, messageId, materialized.events);
     clearMessageAgentEventBatches(db, messageId);
     return materialized.events;
   })();
