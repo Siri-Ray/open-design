@@ -3,6 +3,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Keep the safety-transport assertions separate from the independently tested diagnostic bridge.
+// Shared setup imports analytics transitively; reload it after registering this mock.
+vi.hoisted(() => vi.resetModules());
 vi.mock('../../src/observability/experience-diagnostics', () => ({ reportExperienceEvent: vi.fn() }));
 
 import {

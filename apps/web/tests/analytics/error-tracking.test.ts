@@ -27,6 +27,8 @@ import {
  */
 
 // The consent-gated local diagnostic transport is covered independently.
+// Shared setup imports analytics transitively; reload it after registering this mock.
+vi.hoisted(() => vi.resetModules());
 vi.mock('../../src/observability/experience-diagnostics', () => ({ reportExperienceEvent: vi.fn() }));
 
 const fetchMock = vi.fn();
