@@ -61,7 +61,7 @@ it('does not capture while disabled and scrubs pending content when consent is r
   expect(f.service.record({ sourceId: 'b', at: Date.now(), kind: 'run_error' })).toBeNull();
   f.setConsent(true); await f.service.tick(); expect(f.calls.filter((c) => c.body.complete)).toHaveLength(1);
 });
-it('maps failed attempts and recovered retries but excludes successful runs and cancellation', () => {
+it('maps failed attempts and recovered retries but excludes healthy success and unattributed cancellation', () => {
   const run = { id: 'r' }; const event = { id: 1, timestamp: 1, data: {} };
   expect(diagnosticFaultFromRun(run, { ...event, event: 'run_retry_attempted' })?.kind).toBe('retry');
   expect(diagnosticFaultFromRun(run, { ...event, event: 'end', data: { status: 'canceled' } })).toBeNull();

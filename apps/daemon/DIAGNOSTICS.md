@@ -1,11 +1,18 @@
 # Automatic fault diagnostics (OPEND-3397)
 
 The daemon observes Run errors, failed terminal fallbacks, automatic/model retries,
-OD Next `blocked` outcomes, and chat/resume admission errors. Its existing desktop
+OD Next `blocked` outcomes, and chat/resume admission errors. Main-path API failures emitted through
+`sendApiError` additionally cover runs, projects/conversations/files, uploads,
+artifacts, previews and exports. Its existing desktop
 observability route also captures renderer/child-process crashes, unclean exits and
 packaged startup failures. Fatal daemon handlers synchronously register evidence;
-active Run markers recover daemon interruptions on restart. Ordinary cancellation
-and successful terminal callbacks do not create incidents. An error followed by
+active Run markers recover daemon interruptions on restart. User-stop requests are recorded before awaiting process termination, with elapsed
+and last-agent-activity ages, first-model-event presence, retries and cancellation
+origin. A repeated request and its canceled terminal fallback share one source ID.
+Project cleanup and unattributed cancellations are not labeled user stops.
+Terminal persistence write failures (including metadata refresh failure) and
+explicitly invalid deliverables also produce evidence, even on execution success.
+Healthy successful terminal callbacks do not create incidents. An error followed by
 its terminal callback is one fault; independent error events keep their identities.
 
 This is background behavior controlled by the existing metrics/content preferences,
@@ -65,3 +72,17 @@ Before releasing a client, enable and validate the compatible Worker with a
 prefix-scoped 30-day R2 lifecycle rule. Its production switch remains disabled in
 the change until the existing CUTOVER process authorizes activation. Dry-run builds
 and in-memory R2 tests are not real cloud or macOS/Windows packaged acceptance.
+
+## Experience coverage boundary
+
+The 2026-09-22 expansion reuses existing evidence hooks, without changing SLO
+classification or adding relay endpoints. Inactivity ages are observations, not
+proof of a hang. User cancellation alone is not classified as a system failure.
+API summaries retain route templates and error codes, not request bodies or URLs.
+Telemetry/diagnostic API errors are outside the selected business route families,
+so delivery failures cannot recursively generate more diagnostic bundles.
+
+Frontend-only cards, legacy handlers bypassing `sendApiError`, unavailable-daemon
+host compensation, and new white-screen/hang detection still need dedicated
+coverage. Existing host crash events do not prove delivery while the daemon is
+unavailable. Do not present this extension as complete main-path coverage.

@@ -687,7 +687,7 @@ import {
 import { buildMcpInstallPayload } from './mcp-install-info.js';
 import { createDiagnosticsExportHandler, buildAutomaticDiagnosticSources } from './diagnostics-export.js';
 import { AutomaticDiagnostics } from './services/automatic-diagnostics.js';
-import { createDiagnosticRunObserver } from './services/diagnostic-faults.js';
+import { createDiagnosticRunObserver, diagnosticFaultFromApi, diagnosticFaultFromLifecycle } from './services/diagnostic-faults.js';
 import { diagnosticRelayUrl } from './integrations/diagnostic-relay.js';
 import { automaticDiagnosticsConsent, observeAppConfig } from './app-config.js';
 import { observeApiFailures } from './http/api-failure-journal.js';
@@ -7550,9 +7550,8 @@ export async function startServer({
   } catch { console.warn('[diagnostics] local outbox unavailable'); }
   const stopDiagnosticConfigObserver = observeAppConfig(RUNTIME_DATA_DIR, () => automaticDiagnostics?.consentChanged());
   const stopDiagnosticApiObserver = observeApiFailures((failure) => {
-    if (!/\/chat$|\/runs\/[^/]+\/(resume|retry)$/.test(failure.path)) return;
-    automaticDiagnostics?.record({ sourceId: `api:${failure.requestId ?? randomUUID()}:${failure.code}`,
-      kind: 'admission_failure', at: Date.parse(failure.at), errorCode: failure.code, detail: failure });
+    const fault = diagnosticFaultFromApi(failure);
+    if (fault) automaticDiagnostics?.record(fault);
   });
   const observeDiagnosticRun = createDiagnosticRunObserver();
   const design = {
@@ -7565,6 +7564,10 @@ export async function startServer({
       // each event is emitted, so the finalization verdict (retry safety gate,
       // artifact_count, close-status artifactProducedThisRun) does not depend on
       // early tool_use/artifact events surviving the run.events ring buffer.
+      onDiagnosticLifecycle: (run, kind, at, errorType) => {
+        const incidentId = automaticDiagnostics?.record(diagnosticFaultFromLifecycle(run, kind, at, errorType));
+        if (incidentId) run.diagnosticIncidentIds = [...new Set([...(run.diagnosticIncidentIds ?? []), incidentId])].slice(-100);
+      },
       onEventEmitted: (run, record) => {
         if (record.event === 'start') automaticDiagnostics?.trackRun(run.id, {
           sourceId: `run:${run.id}:interrupted:${run.manualResumeAttemptCount ?? 0}:${record.timestamp}`,
