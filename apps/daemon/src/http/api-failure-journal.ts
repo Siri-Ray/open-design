@@ -1,3 +1,4 @@
+import { recordDiagnosticFailure } from '../services/diagnostics-evidence.js';
 const MAX_RECENT_API_FAILURES = 100;
 
 export interface RecentApiFailure {
@@ -42,6 +43,7 @@ function diagnosticRouteTemplate(request: ApiFailureToRecord['request']): string
 
 export function recordApiFailure(failure: ApiFailureToRecord): void {
   const { request, ...metadata } = failure;
+  recordDiagnosticFailure({ source: 'local-api', operation: diagnosticRouteTemplate(request), status: failure.status, requestId: failure.requestId });
   const entry: RecentApiFailure = {
     ...metadata,
     method: request?.method?.toUpperCase() ?? 'UNKNOWN',

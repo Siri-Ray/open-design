@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { pickHomeTemplate } from '../helpers/home-template-picker';
 
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -39,16 +40,11 @@ async function renderMissingImageScenario(locale: 'en' | 'zh-CN') {
         projects={[]}
         onSubmit={() => undefined}
         onOpenProject={() => undefined}
-        onViewAllProjects={() => undefined}
       />
     </I18nProvider>,
   );
 
-  // Image lives behind the type row's 更多 popover.
-  const more = await screen.findByTestId('home-hero-type-pills-more');
-  await waitFor(() => expect((more as HTMLButtonElement).disabled).toBe(false));
-  fireEvent.click(more);
-  fireEvent.click(await screen.findByTestId('home-hero-type-pill-image-more'));
+  await pickHomeTemplate('image');
   return screen.findByRole('alert');
 }
 

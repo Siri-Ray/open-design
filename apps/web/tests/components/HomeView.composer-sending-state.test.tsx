@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { pickHomeTemplate } from '../helpers/home-template-picker';
 
 // Home composer send must show an in-flight state (#4082).
 //
@@ -84,7 +85,6 @@ function renderHome(onSubmit: (payload: unknown) => Promise<boolean> | void) {
         projects={[]}
         onSubmit={onSubmit}
         onOpenProject={() => undefined}
-        onViewAllProjects={() => undefined}
       />
     </I18nProvider>,
   );
@@ -247,14 +247,13 @@ describe('home composer sending state', () => {
           projects={[]}
           onSubmit={onSubmit}
           onOpenProject={() => undefined}
-          onViewAllProjects={() => undefined}
         />
       </I18nProvider>,
     );
 
     // Seeding through a fallback prompt-example card is what arms the
     // examplePromptContext marker; the type comes from the row under the composer.
-    fireEvent.click(await screen.findByTestId('home-hero-type-pill-prototype'));
+    await pickHomeTemplate('prototype');
     const exampleCards = await screen.findAllByTestId('home-hero-prompt-example');
     fireEvent.click(exampleCards[0]!);
 

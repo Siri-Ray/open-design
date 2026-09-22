@@ -24,6 +24,7 @@ import type {
   RefObject,
 } from 'react';
 import type {
+  ChatSessionMode,
   ConnectorDetail,
   DesignSystemSummary,
   InputFieldSpec,
@@ -35,6 +36,12 @@ import type {
 import { DesignSystemPicker } from './DesignSystemPicker';
 import type { SkillSummary } from '../types';
 import { Icon, type IconName } from './Icon';
+import {
+  FileTypeIcon,
+  fileTypePreviewKind,
+  previewFallbackIcon,
+  resolveFileTypeIcon,
+} from './FileTypeIcon';
 import { useAnalytics } from '../analytics/provider';
 import {
   trackContextLinkResult,
@@ -58,7 +65,7 @@ import {
   type InlineMentionEntity,
 } from '../utils/inlineMentions';
 import { useI18n, useT } from '../i18n';
-import { localizePluginDescription, localizePluginTitle } from './plugins-home/localization';
+import { localizeHomePresetTitle, localizePluginDescription, localizePluginTitle } from './plugins-home/localization';
 import {
   examplePresetSeedPrompt,
   pluginPresetQuery,
@@ -81,7 +88,6 @@ import { ContextChipHoverCard } from './ContextChipHoverCard';
 import { workspaceContextDetailLine, workspaceContextKindLabel } from './workspace-context';
 import { FigmaHelpModal } from './FigmaHelpModal';
 import { TemplatePicker } from './home-hero/TemplatePicker';
-import { TypePillRow } from './home-hero/TypePillRow';
 import { LibraryPicker } from './LibraryPicker';
 import { assetTitle } from './LibraryAssetMeta';
 import { libraryAssetRawUrl } from '../providers/registry';
@@ -141,6 +147,13 @@ interface Props {
   // showing: the host seeds the prompt with `scenario.text`, binds the
   // scenario's template, and creates the project -- one-click "just start".
   onSubmitScenario?: (scenario: PlaceholderScenario) => void;
+  // Wiring for the dormant `ComposerModePicker` (see the composer footer
+  // below). Nothing in HomeHero reads these while the picker is off screen —
+  // the host keeps its own `sessionMode` state, which now stays on the app
+  // default. They are kept declared so the HomeView call site (and the restore
+  // path) stays intact.
+  sessionMode?: ChatSessionMode;
+  onSessionModeChange?: (mode: ChatSessionMode) => void;
   activePluginTitle: string | null;
   // True when the active plugin chip shows a user-picked plugin (Community card
   // or example-prompt preset) rather than a task-type chip's default plugin —
@@ -174,6 +187,7 @@ interface Props {
   onAddWorkspaceContext?: (item: WorkspaceContextItem) => void;
   onRemoveWorkspaceContext?: (id: string) => void;
   onAddConnector?: () => void;
+  onAddPlugin?: () => void;
   onAddMcp?: () => void;
   onOpenPluginDetails?: (record: InstalledPluginRecord) => void;
   onOpenSkillDetails?: (skill: SkillSummary) => void;
@@ -359,6 +373,7 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
     onAddWorkspaceContext = () => undefined,
     onRemoveWorkspaceContext = () => undefined,
     onAddConnector = () => undefined,
+    onAddPlugin,
     onAddMcp = () => undefined,
     onOpenPluginDetails = () => undefined,
     onOpenSkillDetails = () => undefined,
@@ -979,7 +994,12 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
     const urls = new Map<string, string>();
     if (typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function') {
       stagedFiles.forEach((file, index) => {
-        if (isImageFile(file)) urls.set(homeFileKey(file, index), URL.createObjectURL(file));
+        // Rasters, vectors AND videos all lead with a thumbnail now (per
+        // product: 视频类、图像类位图、矢量图 默认展示可打开预览), so each of
+        // them needs an object URL to draw from.
+        if (fileTypePreviewKind(file.name, file.type)) {
+          urls.set(homeFileKey(file, index), URL.createObjectURL(file));
+        }
       });
     }
     setStagedFilePreviewUrls(urls);
@@ -1152,11 +1172,10 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
     });
   }
 
-  // Both context actions now live in the working-dir menu (2026-08-19) —
-  // same question as the folder rows: what may the agent read besides this
-  // thread. They stay reachable when that chip is absent (a host without
-  // folder picking) by falling back to the "+" menu, so no configuration
-  // loses them.
+  // Both context actions live in the Add menu only (OPEND-3126), where the
+  // project composer offers them too. Their pick still lands on the
+  // working-directory trigger below (see `workdirSelection`), but that row's
+  // own menu no longer offers a second copy of either entry.
   function referenceProjectAction() {
     trackHomeChatComposerClick(analytics.track, {
       page_name: 'home',
@@ -1672,9 +1691,23 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
                 {stagedFiles.map((file, index) => {
                   const key = homeFileKey(file, index);
                   const previewUrl = stagedFilePreviewUrls.get(key) ?? null;
+                  const previewKind = fileTypePreviewKind(file.name, file.type);
                   const fileBody = (
                     <>
-                      {previewUrl ? (
+                      {previewUrl && previewKind === 'video' ? (
+                        // Its own first frame is the thumbnail: `preload
+                        // metadata` is enough to paint one, and the element
+                        // stays inert (no controls, muted) — the chip is a
+                        // label, the click opens the real player.
+                        <video
+                          className="home-hero__active-thumb"
+                          src={previewUrl}
+                          muted
+                          playsInline
+                          preload="metadata"
+                          aria-hidden
+                        />
+                      ) : previewUrl && previewKind ? (
                         <img
                           className="home-hero__active-thumb"
                           src={previewUrl}
@@ -1684,7 +1717,17 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
                         />
                       ) : (
                         <span className="home-hero__active-icon" aria-hidden>
-                          <Icon name={isImageFile(file) ? 'image' : 'file'} size={12} />
+                          {/* The type's own mark (per product). A previewable
+                              file only lands here when its thumbnail could not
+                              be made at all. */}
+                          <FileTypeIcon
+                            name={
+                              previewKind
+                                ? previewFallbackIcon(previewKind, file.name)
+                                : resolveFileTypeIcon(file.name, file.type)
+                            }
+                            size={20}
+                          />
                         </span>
                       )}
                       {/* Name over type · size (per product): two lines inside the
@@ -2154,6 +2197,54 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
                   resource_kind: PLUS_SUBMENU_RESOURCE_KIND[submenu],
                 });
               }}
+              onSearchUsed={(submenu) => {
+                trackHomeChatComposerClick(analytics.track, {
+                  page_name: 'home',
+                  area: 'chat_composer',
+                  element: 'plus_search',
+                  resource_kind: PLUS_SUBMENU_RESOURCE_KIND[submenu],
+                });
+              }}
+              connectors={connectorOptions}
+              onPickConnector={(connector) => {
+                trackHomeChatComposerClick(analytics.track, {
+                  page_name: 'home',
+                  area: 'chat_composer',
+                  element: 'plus_pick',
+                  resource_kind: 'connector',
+                  resource_id: connector.id,
+                });
+                pickConnector(connector);
+              }}
+              onAddConnector={() => {
+                trackHomeChatComposerClick(analytics.track, {
+                  page_name: 'home',
+                  area: 'chat_composer',
+                  element: 'plus_add',
+                  resource_kind: 'connector',
+                });
+                onAddConnector();
+              }}
+              plugins={pluginOptions}
+              onPickPlugin={(record) => {
+                trackHomeChatComposerClick(analytics.track, {
+                  page_name: 'home',
+                  area: 'chat_composer',
+                  element: 'plus_pick',
+                  resource_kind: 'plugin',
+                  resource_id: record.id,
+                });
+                pickPlugin(record);
+              }}
+              onAddPlugin={onAddPlugin ? () => {
+                trackHomeChatComposerClick(analytics.track, {
+                  page_name: 'home',
+                  area: 'chat_composer',
+                  element: 'plus_add',
+                  resource_kind: 'plugin',
+                });
+                onAddPlugin();
+              } : undefined}
               skills={skillOptions}
               onPickSkill={(skill) => {
                 trackHomeChatComposerClick(analytics.track, {
@@ -2165,6 +2256,26 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
                 });
                 pickSkill(skill);
               }}
+              mcpServers={mcpOptions}
+              onPickMcp={(server) => {
+                trackHomeChatComposerClick(analytics.track, {
+                  page_name: 'home',
+                  area: 'chat_composer',
+                  element: 'plus_pick',
+                  resource_kind: 'mcp',
+                  resource_id: server.id,
+                });
+                pickMcp(server);
+              }}
+              onAddMcp={() => {
+                trackHomeChatComposerClick(analytics.track, {
+                  page_name: 'home',
+                  area: 'chat_composer',
+                  element: 'plus_add',
+                  resource_kind: 'mcp',
+                });
+                onAddMcp();
+              }}
               onAttachFiles={() => {
                 trackHomeChatComposerClick(analytics.track, {
                   page_name: 'home',
@@ -2173,8 +2284,13 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
                 });
                 fileInputRef.current?.click();
               }}
-              onReferenceProject={onPickWorkingDir ? undefined : referenceProjectAction}
-              onLinkLocalCode={onPickWorkingDir ? undefined : linkLocalCodeAction}
+              // Both context actions sit in the Add menu on Home as well as
+              // in the project composer (OPEND-3085, per the Demo). This is
+              // their ONLY entry on Home (OPEND-3126): the working-directory
+              // row below no longer carries copies, so the `plus_pick`
+              // analytics are emitted from here alone.
+              onReferenceProject={referenceProjectAction}
+              onLinkLocalCode={linkLocalCodeAction}
               onSelectFromLibrary={() => {
                 trackHomeChatComposerClick(analytics.track, {
                   page_name: 'home',
@@ -2230,16 +2346,9 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
                 style". */}
             <TemplatePicker
               templates={templateChips}
+              onPick={handlePickTaskChip}
+              disabled={pluginsLoading || pendingChipId !== null || pendingPluginId !== null}
               activeChipId={activeChipId}
-              onClearTemplate={() => {
-                trackHomeChatComposerClick(analytics.track, {
-                  page_name: 'home',
-                  area: 'chat_composer',
-                  element: 'task_chip_clear',
-                  chip_id: activeChipId ?? undefined,
-                });
-                onClearActiveChip?.();
-              }}
               labelFor={(id) => homeHeroChipLabel(id, t)}
             />
             {libraryPickerOpen ? (
@@ -2290,6 +2399,24 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
             ) : null}
           </div>
           <div className="home-hero__foot-right">
+            {/* No mode picker on Home (2026-09-08, product): the 「设计 ×」 chip
+                used to sit here, left of the model switcher. The project
+                composer dropped the same chooser first (2026-08-19 — see the
+                matching comment in `ChatComposer.tsx`); Home was the last
+                surface still carrying it, and every Home request defaulted
+                past it to Design anyway.
+
+                Behaviour is unchanged, only the control is gone: `HomeView`
+                still owns the `sessionMode` state that feeds `conversationMode`
+                (plus the task profile and plugin provenance), and with nothing
+                calling `setSessionMode` it stays on the app default, `design`.
+
+                To restore: re-add `import { ComposerModePicker } from
+                './ComposerModePicker'`, re-destructure the `sessionMode` /
+                `onSessionModeChange` props (still declared above, still passed
+                by `HomeView`), and render the picker here with the
+                `trackComposerSessionModeClick` call it had. Pinned by
+                `tests/components/HomeView.mode-picker-removed.test.tsx`. */}
             {executionSwitcher ? (
               <div className="home-hero__execution-switcher">
                 {executionSwitcher}
@@ -2377,16 +2504,12 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
               });
               onClearWorkingDir?.();
             }}
-            // Analytics keep the original `plus_pick` element name so the
-            // funnel stays continuous across the move.
-            onReferenceProject={referenceProjectAction}
-            onLinkLocalCode={linkLocalCodeAction}
-            /* All four menu rows answer one question — what may the agent read
-               besides this thread — so they all report the same way: the
-               trigger takes the pick's name, and its hover × clears it (per
-               product: 工作目录会换成后边的文件名…和现在选择最近使用的文件夹的
-               逻辑一样). The LAST attached item is the one named; a directory
-               outranks it. */
+            /* The folder rows here and the context actions in the Add menu
+               answer one question — what may the agent read besides this
+               thread — so they all report the same way: the trigger takes the
+               pick's name, and its hover × clears it (per product: 工作目录会
+               换成后边的文件名…和现在选择最近使用的文件夹的逻辑一样). The LAST
+               attached item is the one named; a directory outranks it. */
             selection={
               workdirSelection
                 ? {
@@ -2449,25 +2572,6 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
         ))}
       </div>
       </div>
-
-      {/* Creation types, horizontal, under the working-directory row (per
-          product, 2026-08-21). They spent a round as a dropdown pill inside the
-          composer's foot row; out here the whole catalog is one glance.
-
-          The row is the EMPTY state's whole job: an untouched Home shows this
-          and nothing else. Picking a type retires it — the composer's pill now
-          names the choice, the categories below narrow it, and the examples
-          answer it, so a second full catalog under all three was just repeating
-          the question. The pill's × brings the row back. */}
-      {activeChipId || isDock ? null : (
-        <TypePillRow
-          chips={templateChips}
-          activeChipId={activeChipId}
-          disabled={pluginsLoading || pendingChipId !== null || pendingPluginId !== null}
-          labelFor={(id) => homeHeroChipLabel(id, t)}
-          onPick={handlePickTaskChip}
-        />
-      )}
 
       {/* No second-level category row under a picked type (per product,
           2026-08-25): picking a type already narrows the examples, and a
@@ -2550,7 +2654,14 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
                 <Icon name="close" size={14} />
               </button>
             </div>
-            <img src={previewHomeFileUrl} alt={previewHomeFile.name} />
+            {/* A video opens as a player, everything else as a still — the
+                same card either way, so the chip's click always lands on the
+                file itself rather than on a download. */}
+            {fileTypePreviewKind(previewHomeFile.name, previewHomeFile.type) === 'video' ? (
+              <video src={previewHomeFileUrl} controls autoPlay={false} playsInline />
+            ) : (
+              <img src={previewHomeFileUrl} alt={previewHomeFile.name} />
+            )}
           </div>
         </div>,
         document.body,
@@ -2602,8 +2713,9 @@ function PluginPromptPresets({
   // the poster rides in the row itself, on the left. The cursor-following
   // preview card that used to rise on hover is gone (per product: 去掉 hover
   // 展示的弹窗): every row already shows its own still, and the floating copy
-  // covered the rows either side of the one being read. The eye badge on the
-  // poster stays — that is a control, and still the way into the full preview.
+  // covered the rows either side of the one being read. The poster carries no
+  // eye badge either (OPEND-3100): the whole still is the way into the full
+  // preview, with nothing drawn on top of it at rest or on hover.
   return (
     <div
       className="home-hero__prompt-examples home-hero__plugin-presets-wrap"
@@ -2633,7 +2745,7 @@ function PluginPromptPresets({
   );
 }
 
-// One example per row: the template's own name on top — the same label the
+// One example per row: its Home-facing title on top — the same label the
 // composer's chip carries once the row is picked — and under it the very text
 // the composer would be seeded with (`examplePresetSeedPrompt`), so the row
 // both names the example and shows the prompt it applies.
@@ -2668,7 +2780,7 @@ function PluginPromptPresetRow({
   // Collapse the seed's own line breaks: the detail is a single line, and a
   // multi-paragraph seed would otherwise leave its tail invisible mid-clip.
   const line = seedPrompt.replace(/\s+/g, ' ').trim();
-  const title = localizePluginTitle(locale, record).trim() || line;
+  const title = localizeHomePresetTitle(locale, record).trim() || line;
   return (
     <button
       type="button"
@@ -2684,19 +2796,18 @@ function PluginPromptPresetRow({
           produces without the pointer going anywhere. The slot is rendered
           even when a plugin has no poster, so every title in the list still
           starts on one column. */}
-      {/* The WHOLE poster opens the preview (per product), not just the eye
-          badge on it — the badge is only the affordance that says so, and it
-          lets clicks through to this box. A `span`, not a `button`: the row
-          itself IS a button, and a nested one is invalid nesting React warns
-          about — so this carries the role explicitly and stops its click from
-          reaching the row, which would otherwise seed the composer instead of
-          opening the preview. */}
+      {/* The WHOLE poster opens the preview (per product) — and it is bare
+          (OPEND-3100): no eye badge on it and no "Preview" tooltip, at rest or
+          on hover. Only the accessible name says what the click does. A
+          `span`, not a `button`: the row itself IS a button, and a nested one
+          is invalid nesting React warns about — so this carries the role
+          explicitly and stops its click from reaching the row, which would
+          otherwise seed the composer instead of opening the preview. */}
       <span
         className="home-hero__plugin-preset-row-thumb"
         role="button"
         tabIndex={-1}
         aria-label={t('common.preview')}
-        title={t('common.preview')}
         onClick={(event) => {
           event.stopPropagation();
           event.preventDefault();
@@ -2706,13 +2817,6 @@ function PluginPromptPresetRow({
         {poster ? (
           <img src={poster} alt="" draggable={false} loading="lazy" decoding="async" />
         ) : null}
-        {/* Icon-only: the poster has no room for the 预览 word beside it, so
-            the label lives on the box above instead. */}
-        <span className="home-hero__plugin-preset-row-preview" aria-hidden>
-          <svg viewBox="0 0 24 24" fill="currentColor" focusable="false" aria-hidden>
-            <path d="M12.0003 3C17.3924 3 21.8784 6.87976 22.8189 12C21.8784 17.1202 17.3924 21 12.0003 21C6.60812 21 2.12215 17.1202 1.18164 12C2.12215 6.87976 6.60812 3 12.0003 3ZM12.0003 19C16.2359 19 19.8603 16.052 20.7777 12C19.8603 7.94803 16.2359 5 12.0003 5C7.7646 5 4.14022 7.94803 3.22278 12C4.14022 16.052 7.7646 19 12.0003 19ZM12.0003 16.5C9.51498 16.5 7.50026 14.4853 7.50026 12C7.50026 9.51472 9.51498 7.5 12.0003 7.5C14.4855 7.5 16.5003 9.51472 16.5003 12C16.5003 14.4853 14.4855 16.5 12.0003 16.5ZM12.0003 14.5C13.381 14.5 14.5003 13.3807 14.5003 12C14.5003 10.6193 13.381 9.5 12.0003 9.5C10.6196 9.5 9.50026 10.6193 9.50026 12C9.50026 13.3807 10.6196 14.5 12.0003 14.5Z" />
-          </svg>
-        </span>
       </span>
       <span className="home-hero__plugin-preset-row-body">
         <span className="home-hero__plugin-preset-row-head">
@@ -4093,6 +4197,32 @@ const EXAMPLE_PRESET_HIDDEN_PLUGIN_IDS = new Set<string>([
   'example-web-clone',
 ]);
 
+// Keep the five Home recommendations in the selected editorial order;
+// popularity still orders the remaining library and the Community surface.
+const HOME_PRESET_PLUGIN_IDS_BY_CHIP: Partial<Record<string, readonly string[]>> = {
+  deck: [
+    'example-fs-creative-voltage',
+    'example-fs-electric-studio',
+    'example-html-ppt-zhangzara-block-frame',
+    'example-fs-notebook-tabs',
+    'example-guizang-ppt',
+  ],
+  document: [
+    'example-pm-spec',
+    'example-finance-report',
+    'example-clinical-case-report',
+    'example-resume-modern',
+    'example-invoice',
+  ],
+  image: [
+    'image-template-vr-headset-exploded-view-poster',
+    'image-template-social-media-post-psg-transfer-announcement-poster',
+    'image-template-social-media-post-vintage-sign-painter-sketch',
+    'image-template-profile-avatar-cyberpunk-anime-portrait-with-neon-face-text',
+    'image-template-profile-avatar-monochrome-studio-portrait',
+  ],
+};
+
 export function homeHeroExamplePluginsForChip(
   chipId: string,
   plugins: InstalledPluginRecord[],
@@ -4127,6 +4257,16 @@ function comparePluginPresetOrder(
   b: InstalledPluginRecord,
   chipId: string,
 ): number {
+  const homePresetIds = HOME_PRESET_PLUGIN_IDS_BY_CHIP[chipId];
+  if (homePresetIds) {
+    const aIndex = homePresetIds.indexOf(a.id);
+    const bIndex = homePresetIds.indexOf(b.id);
+    if (aIndex >= 0 || bIndex >= 0) {
+      if (aIndex < 0) return 1;
+      if (bIndex < 0) return -1;
+      return aIndex - bIndex;
+    }
+  }
   // Gallery order (OPEND-449): pins first, default seeds + no-preview tiles sunk
   // to the bottom, then usage popularity for non-prototype chips. The prototype
   // chip stays curation-governed, so popularity is skipped and it keeps its

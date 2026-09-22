@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { useEffect } from 'react';
+import { pickHomeTemplate } from '../helpers/home-template-picker';
 
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -36,6 +38,21 @@ let workspaceContextState: {
 
 vi.mock('../../src/components/home-hero/PlaceholderCarousel', () => ({
   PlaceholderCarousel: () => null,
+}));
+
+// Team plugin projections load after stream activation. This suite exercises
+// context serialization; supply the same readiness signal as a live workspace.
+vi.mock('../../src/collab/workspace-events', () => ({
+  useWorkspaceInvalidation: (
+    _handlers: unknown,
+    options?: { onActive?: () => void; enabled?: boolean; workspaceContext?: WorkspaceCollabContext | null },
+  ) => {
+    const identity = options?.workspaceContext?.workspaceId;
+    useEffect(() => {
+      if (options?.enabled && identity) options.onActive?.();
+    }, [identity, options?.enabled]);
+    return { connected: false };
+  },
 }));
 
 vi.mock('../../src/collab/useWorkspaceContext', async (importOriginal) => {
@@ -152,37 +169,13 @@ afterEach(() => {
   workspaceContextState = { context: workspaceA, loading: false };
   cleanup();
   vi.unstubAllGlobals();
+  window.localStorage.clear();
+  window.sessionStorage.clear();
 });
 
 // #5517 removed the inline template rail from Home; scenario templates are
 // picked from the composer footer's radial Template picker instead.
-async function pickHomeTemplate(id: string) {
-  // A type already picked retires the row, and the pill has no menu — so
-  // switching means clearing back to the empty state first.
-  const clear = screen.queryByTestId('home-hero-template-clear');
-  if (clear) fireEvent.click(clear);
-  const lead = await screen.findByTestId('home-hero-type-pill-prototype');
-  await waitFor(() => expect((lead as HTMLButtonElement).disabled).toBe(false));
-  let pill = screen.queryByTestId(`home-hero-type-pill-${id}`);
-  if (!pill) {
-    // Types behind 更多 mount only while its popover is open.
-    fireEvent.click(screen.getByTestId('home-hero-type-pills-more'));
-    pill = screen.queryByTestId(`home-hero-type-pill-${id}-more`);
-  }
-  if (pill) {
-    fireEvent.click(pill);
-    return;
-  }
-  // Types outside the fixed row (media, HyperFrames, …) are reached the way
-  // the workspace tabs-bar hands one off: the apply-template window event,
-  // which HomeHero applies exactly as a row click.
-  fireEvent.keyDown(document, { key: 'Escape' });
-  await act(async () => {
-    window.dispatchEvent(
-      new CustomEvent(HOME_APPLY_TEMPLATE_EVENT, { detail: { chipId: id } }),
-    );
-  });
-}
+
 
 describe('HomeView context picker', () => {
   it('preserves selected local catalog provenance while Workspace identity transitions', async () => {
@@ -215,7 +208,6 @@ describe('HomeView context picker', () => {
         defaultDesignSystemId={WORKSPACE_DESIGN_SYSTEM.id}
         onSubmit={onSubmit}
         onOpenProject={() => undefined}
-        onViewAllProjects={() => undefined}
       />,
     );
 
@@ -240,9 +232,9 @@ describe('HomeView context picker', () => {
         defaultDesignSystemId={WORKSPACE_DESIGN_SYSTEM.id}
         onSubmit={onSubmit}
         onOpenProject={() => undefined}
-        onViewAllProjects={() => undefined}
       />,
     );
+    await waitFor(() => expect((screen.getByTestId('home-hero-submit') as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(screen.getByTestId('home-hero-submit'));
 
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
@@ -288,7 +280,6 @@ describe('HomeView context picker', () => {
         projects={[]}
         onSubmit={onSubmit}
         onOpenProject={() => undefined}
-        onViewAllProjects={() => undefined}
       />,
     );
 
@@ -311,6 +302,7 @@ describe('HomeView context picker', () => {
     });
 
     await waitFor(() => expect(screen.getByText('brief.pdf')).toBeTruthy());
+    await waitFor(() => expect((screen.getByTestId('home-hero-submit') as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(screen.getByTestId('home-hero-submit'));
 
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
@@ -318,6 +310,107 @@ describe('HomeView context picker', () => {
       pluginId: DEFAULT_UNSELECTED_SCENARIO_PLUGIN_ID,
       attachments: [file],
     }));
+  });
+
+  // OPEND-3085: the Home Add menu carries the same rows as the project
+  // composer's — the context actions sit flat below "Attach files" and the
+  // resource submenus follow, while the working directory keeps its own row
+  // under the input instead of a submenu group.
+  it('lists the Demo Add-menu rows on Home', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async (url) => {
+      if (typeof url === 'string' && url === '/api/plugins') {
+        return new Response(JSON.stringify({ plugins: [] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (typeof url === 'string' && url === '/api/mcp/servers') {
+        return new Response(JSON.stringify({ servers: [], templates: [] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <HomeView
+        projects={[]}
+        onSubmit={() => undefined}
+        onOpenProject={() => undefined}
+        onBrowseRegistry={() => undefined}
+      />,
+    );
+
+    await screen.findByTestId('home-hero-input');
+    fireEvent.click(screen.getByTestId('home-hero-plus-trigger'));
+    const menu = screen.getAllByRole('menu')[0] as HTMLElement;
+    const rows = Array.from(
+      menu.querySelectorAll<HTMLElement>(
+        ':scope > .plus-menu__item, :scope > .plus-menu__submenu-row > .plus-menu__parent',
+      ),
+    ).map((row) => row.getAttribute('data-testid'));
+    expect(rows).toEqual([
+      'composer-plus-attach',
+      'composer-plus-reference-project',
+      'composer-plus-local-code',
+      'composer-plus-plugins',
+      'composer-plus-figma',
+      'composer-plus-connectors',
+      'composer-plus-mcp',
+    ]);
+    expect(screen.queryByTestId('composer-plus-working-dir')).toBeNull();
+    // The working directory stays on its own row under the input.
+    expect(screen.getByTestId('working-dir-trigger')).toBeTruthy();
+  });
+
+  // OPEND-3126: the two context actions are reachable from the Add menu ONLY.
+  // The working-directory menu under the input is back to its folder rows, so
+  // "Reference another project" and "Link local code" are not offered twice.
+  it('keeps reference-project and local-code out of the working-directory menu (OPEND-3126)', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async (url) => {
+      if (typeof url === 'string' && url === '/api/plugins') {
+        return new Response(JSON.stringify({ plugins: [] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (typeof url === 'string' && url === '/api/mcp/servers') {
+        return new Response(JSON.stringify({ servers: [], templates: [] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <HomeView
+        projects={[]}
+        onSubmit={() => undefined}
+        onOpenProject={() => undefined}
+        onBrowseRegistry={() => undefined}
+      />,
+    );
+
+    await screen.findByTestId('home-hero-input');
+    fireEvent.click(screen.getByTestId('working-dir-trigger'));
+    const panel = await screen.findByTestId('working-dir-panel');
+    expect(screen.getByTestId('working-dir-pick')).toBeTruthy();
+    expect(screen.queryByTestId('working-dir-reference-project')).toBeNull();
+    expect(screen.queryByTestId('working-dir-local-code')).toBeNull();
+    expect(panel.textContent).not.toContain('Reference another project');
+    expect(panel.textContent).not.toContain('Link local code');
+    // No stray separator either: the panel is one group of folder rows again.
+    expect(panel.querySelector('[role="separator"]')).toBeNull();
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    // …and the Add menu still carries both, unchanged.
+    fireEvent.click(screen.getByTestId('home-hero-plus-trigger'));
+    expect(screen.getByTestId('composer-plus-reference-project')).toBeTruthy();
+    expect(screen.getByTestId('composer-plus-local-code')).toBeTruthy();
   });
 
   it('adds multiple @ plugins as context without applying or hydrating their query', async () => {
@@ -352,7 +445,6 @@ describe('HomeView context picker', () => {
         projects={[]}
         onSubmit={onSubmit}
         onOpenProject={() => undefined}
-        onViewAllProjects={() => undefined}
       />,
     );
 
@@ -383,6 +475,7 @@ describe('HomeView context picker', () => {
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/apply'))).toBe(false);
     expect(homeHeroPromptText()).not.toContain('Hydrated query');
 
+    await waitFor(() => expect((screen.getByTestId('home-hero-submit') as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(screen.getByTestId('home-hero-submit'));
 
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
@@ -424,7 +517,6 @@ describe('HomeView context picker', () => {
         skills={[SKILL]}
         onSubmit={onSubmit}
         onOpenProject={() => undefined}
-        onViewAllProjects={() => undefined}
       />,
     );
 
@@ -438,6 +530,7 @@ describe('HomeView context picker', () => {
       expect(screen.getByTestId('home-hero-active-skill')).toBeTruthy();
     });
 
+    await waitFor(() => expect((screen.getByTestId('home-hero-submit') as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(screen.getByTestId('home-hero-submit'));
 
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
@@ -477,7 +570,6 @@ describe('HomeView context picker', () => {
         skills={[DECK_SKILL, SKILL]}
         onSubmit={onSubmit}
         onOpenProject={() => undefined}
-        onViewAllProjects={() => undefined}
       />,
     );
 
@@ -503,6 +595,7 @@ describe('HomeView context picker', () => {
     // task-type Skill in the prompt.
     expect(screen.getByTestId('home-hero-template-trigger').textContent).toContain('Prototype');
 
+    await waitFor(() => expect((screen.getByTestId('home-hero-submit') as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(screen.getByTestId('home-hero-submit'));
 
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
@@ -543,7 +636,6 @@ describe('HomeView context picker', () => {
         skills={[SKILL]}
         onSubmit={onSubmit}
         onOpenProject={() => undefined}
-        onViewAllProjects={() => undefined}
       />,
     );
 
@@ -566,6 +658,7 @@ describe('HomeView context picker', () => {
 
     setHomeHeroPrompt('Build a pricing-page prototype.');
     await settle();
+    await waitFor(() => expect((screen.getByTestId('home-hero-submit') as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(screen.getByTestId('home-hero-submit'));
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
@@ -612,7 +705,6 @@ describe('HomeView context picker', () => {
         connectors={[CONNECTOR]}
         onSubmit={onSubmit}
         onOpenProject={() => undefined}
-        onViewAllProjects={() => undefined}
       />,
     );
 
@@ -631,6 +723,7 @@ describe('HomeView context picker', () => {
       expect(homeHeroPromptText().trim()).toBe('@Linear @Slack');
     });
 
+    await waitFor(() => expect((screen.getByTestId('home-hero-submit') as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(screen.getByTestId('home-hero-submit'));
 
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
@@ -674,6 +767,20 @@ describe('HomeView context picker', () => {
           headers: { 'content-type': 'application/json' },
         });
       }
+      // These cases render HomeView with an active Workspace context, so the
+      // reference-project picker reads the workspace-scoped catalog. The
+      // unscoped `/api/projects` route only ever serves unbound projects
+      // (OPEND-2370), which is why it cannot stand in for this one.
+      if (typeof url === 'string' && url.startsWith('/api/workspaces/workspace-a/projects')) {
+        return new Response(JSON.stringify({
+          projects: [
+            { project: referenceProject, workspaceId: 'workspace-a', visibility: 'personal' },
+          ],
+        }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
       if (typeof url === 'string' && url === '/api/projects') {
         return new Response(JSON.stringify({ projects: [referenceProject] }), {
           status: 200,
@@ -709,14 +816,14 @@ describe('HomeView context picker', () => {
         projects={[]}
         onSubmit={onSubmit}
         onOpenProject={() => undefined}
-        onViewAllProjects={() => undefined}
       />,
     );
 
     await screen.findByTestId('home-hero-input');
-    // 引用其它项目 moved from the "+" menu into the working-dir chip's menu.
-    fireEvent.click(screen.getByTestId('working-dir-trigger'));
-    fireEvent.click(await screen.findByTestId('working-dir-reference-project'));
+    // 引用其它项目 lives in the "+" menu only (OPEND-3126); the pick still
+    // lands on the working-directory trigger below.
+    fireEvent.click(screen.getByTestId('home-hero-plus-trigger'));
+    fireEvent.click(await screen.findByTestId('composer-plus-reference-project'));
     await screen.findByText('Reference A');
     fireEvent.click(screen.getByRole('button', { name: 'Reference project' }));
 
@@ -729,6 +836,7 @@ describe('HomeView context picker', () => {
     // A reference on its own is not a request; type first, then submit.
     setHomeHeroPrompt('Describe this');
     await settle();
+    await waitFor(() => expect((screen.getByTestId('home-hero-submit') as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(screen.getByTestId('home-hero-submit'));
 
     await waitFor(() => {
@@ -758,6 +866,20 @@ describe('HomeView context picker', () => {
       }
       if (typeof url === 'string' && url === '/api/mcp/servers') {
         return new Response(JSON.stringify({ servers: [], templates: [] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      // These cases render HomeView with an active Workspace context, so the
+      // reference-project picker reads the workspace-scoped catalog. The
+      // unscoped `/api/projects` route only ever serves unbound projects
+      // (OPEND-2370), which is why it cannot stand in for this one.
+      if (typeof url === 'string' && url.startsWith('/api/workspaces/workspace-a/projects')) {
+        return new Response(JSON.stringify({
+          projects: [
+            { project: referenceProject, workspaceId: 'workspace-a', visibility: 'personal' },
+          ],
+        }), {
           status: 200,
           headers: { 'content-type': 'application/json' },
         });
@@ -797,14 +919,14 @@ describe('HomeView context picker', () => {
         projects={[]}
         onSubmit={onSubmit}
         onOpenProject={() => undefined}
-        onViewAllProjects={() => undefined}
       />,
     );
 
     await screen.findByTestId('home-hero-input');
-    // 引用其它项目 moved from the "+" menu into the working-dir chip's menu.
-    fireEvent.click(screen.getByTestId('working-dir-trigger'));
-    fireEvent.click(await screen.findByTestId('working-dir-reference-project'));
+    // 引用其它项目 lives in the "+" menu only (OPEND-3126); the pick still
+    // lands on the working-directory trigger below.
+    fireEvent.click(screen.getByTestId('home-hero-plus-trigger'));
+    fireEvent.click(await screen.findByTestId('composer-plus-reference-project'));
     await screen.findByText('Reference A');
     fireEvent.click(screen.getByRole('button', { name: 'Reference project' }));
 
@@ -818,6 +940,7 @@ describe('HomeView context picker', () => {
     await settle();
 
     expect(screen.getByTestId('working-dir-trigger').textContent).toContain('Reference A');
+    await waitFor(() => expect((screen.getByTestId('home-hero-submit') as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(screen.getByTestId('home-hero-submit'));
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
@@ -866,7 +989,6 @@ describe('HomeView context picker', () => {
         connectors={[CONNECTOR]}
         onSubmit={onSubmit}
         onOpenProject={() => undefined}
-        onViewAllProjects={() => undefined}
       />,
     );
 
@@ -885,6 +1007,7 @@ describe('HomeView context picker', () => {
     setHomeHeroPrompt('Summarize @Slack, then draft follow-ups');
     await settle();
 
+    await waitFor(() => expect((screen.getByTestId('home-hero-submit') as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(screen.getByTestId('home-hero-submit'));
 
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({

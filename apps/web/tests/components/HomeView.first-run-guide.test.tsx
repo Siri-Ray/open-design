@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { pickHomeTemplate } from '../helpers/home-template-picker';
 
 // First-run guidance trail (home-hero/firstRunGuide.ts).
 //
@@ -48,7 +49,6 @@ function renderHome(projects: unknown[] = []) {
         projects={projects as never}
         onSubmit={() => undefined}
         onOpenProject={() => undefined}
-        onViewAllProjects={() => undefined}
       />
     </I18nProvider>,
   );
@@ -59,21 +59,6 @@ afterEach(() => {
   cleanup();
   window.localStorage.clear();
 });
-
-// #5517 removed the inline template rail from Home, so beat 1 of the guide no
-// longer has a chip card to sheen; the stage still arms on mount and advances
-// when a template is picked from the composer footer's radial picker.
-// Home starts with no creation type: the type row under the composer is the
-// empty state's only control, and it retires once something is picked.
-async function pickHomeTemplate(id: string) {
-  // A type already picked retires the row, and the pill has no menu — so
-  // switching means clearing back to the empty state first.
-  const clear = screen.queryByTestId('home-hero-template-clear');
-  if (clear) fireEvent.click(clear);
-  const rowPill = await screen.findByTestId(`home-hero-type-pill-${id}`);
-  await waitFor(() => expect((rowPill as HTMLButtonElement).disabled).toBe(false));
-  fireEvent.click(rowPill);
-}
 
 describe('Home first-run guide trail', () => {
   it('arms beat 1 for a fresh user and advances when a template is picked', async () => {
@@ -105,7 +90,6 @@ describe('Home first-run guide trail', () => {
           projectsLoading
           onSubmit={() => undefined}
           onOpenProject={() => undefined}
-          onViewAllProjects={() => undefined}
         />
       </I18nProvider>,
     );
@@ -126,7 +110,6 @@ describe('Home first-run guide trail', () => {
           projectsLoading
           onSubmit={() => undefined}
           onOpenProject={() => undefined}
-          onViewAllProjects={() => undefined}
         />
       </I18nProvider>,
     );
@@ -145,7 +128,6 @@ describe('Home first-run guide trail', () => {
           projectsLoading={false}
           onSubmit={() => undefined}
           onOpenProject={() => undefined}
-          onViewAllProjects={() => undefined}
         />
       </I18nProvider>,
     );

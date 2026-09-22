@@ -99,11 +99,57 @@ describe('entry rail — 最近浏览过 rows', () => {
     expect(declarations('.entry-nav-rail__recent-menu button')).toMatch(/font-size:\s*13px/);
   });
 
+  it('gives the rail a height to shrink to, so the list scrolls instead of the footer leaving (OPEND-2757)', () => {
+    // The shell's single grid row is pinned to the container: an implicit
+    // `auto` row sized to the rail's content, which is what pushed the social
+    // links under the window in a short viewport.
+    expect(declarations('.entry-shell--no-header .entry')).toMatch(/grid-template-rows:\s*minmax\(0, 1fr\)/);
+    // Every box from the grid item down to the list opts out of the
+    // content-height minimum, and none of them GROWS to fill: a short list
+    // leaves the rail exactly as it was.
+    expect(declarations('.entry-nav-rail')).toMatch(/min-height:\s*0/);
+    expect(declarations('.entry-nav-rail__panel')).toMatch(/min-height:\s*0/);
+    expect(declarations('.entry-nav-rail__group')).toMatch(/min-height:\s*0/);
+    for (const selector of [
+      '.entry-nav-rail__team-section',
+      '.entry-nav-rail__recent',
+      '.entry-nav-rail__recent > .accordion-collapsible',
+    ]) {
+      const block = declarations(selector);
+      expect(block, selector).toMatch(/flex:\s*0 1 auto/);
+      expect(block, selector).toMatch(/min-height:\s*0/);
+    }
+    expect(declarations('.entry-nav-rail__recent > .accordion-collapsible > .accordion-collapsible-inner'))
+      .toMatch(/min-height:\s*0/);
+    // The list is the one scroll container, with the ~11-row desktop target as
+    // its ceiling rather than a fixed height.
+    const list = declarations('.entry-nav-rail__recent-list');
+    expect(list).toMatch(/min-height:\s*0/);
+    expect(list).toMatch(/max-height:\s*calc\(11 \* 38px \+ 10 \* 2px \+ 2px\)/);
+    expect(list).toMatch(/overflow-y:\s*auto/);
+  });
+
   it('keeps the inline rename inside the row box on the frosted panel', () => {
     const rename = declarations('.entry-nav-rail__recent-rename');
     expect(rename).toMatch(/height:\s*38px/);
     expect(rename).toMatch(/background:\s*transparent/);
     expect(rename).toMatch(/border-radius:\s*12px/);
     expect(declarations('.entry-nav-rail__recent-rename:focus')).toMatch(/border-color:\s*var\(--border\)/);
+  });
+  it('renders an HTML cover in the preview as the grid does: 1280px stage scaled to the plate, inert (OPEND-2766)', () => {
+    const plate = declarations('.entry-nav-rail__recent-preview-plate');
+    expect(plate).toMatch(/position:\s*relative/);
+    expect(plate).toMatch(/container-type:\s*inline-size/);
+
+    const frame = declarations('.entry-nav-rail__recent-preview-frame');
+    expect(frame).toMatch(/position:\s*absolute/);
+    expect(frame).toMatch(/width:\s*1280px/);
+    expect(frame).toMatch(/height:\s*800px/);
+    expect(frame).toMatch(/pointer-events:\s*none/);
+    expect(frame).toMatch(/transform:\s*scale\(calc\(100cqw \/ 1280px\)\)/);
+
+    const deck = declarations('.entry-nav-rail__recent-preview-frame.is-deck');
+    expect(deck).toMatch(/height:\s*720px/);
+    expect(deck).toMatch(/top:\s*50%/);
   });
 });

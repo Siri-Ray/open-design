@@ -1,10 +1,10 @@
 import { expect, test } from '@/playwright/suite';
 import type { Page } from '@playwright/test';
 import {
-  clearHomeTemplate,
-  HOME_TYPE_ROW_CHIP_IDS,
-  HOME_TYPE_ROW_MORE_CHIP_IDS,
-  homeTypeRow,
+  HOME_TYPE_PRIMARY_CHIP_IDS,
+  HOME_TYPE_OTHER_CHIP_IDS,
+  homeTemplateTrigger,
+  openHomeTemplates,
   pickHomeTemplate,
 } from '@/playwright/home-hero';
 import {
@@ -593,11 +593,10 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-test('[P1] cold-start Home keeps the type row as its only surface while plugins settle at every breakpoint', async ({ page }) => {
-  // #7635 dropped the examples loading shell: a cold Home starts typeless, so
-  // there is nothing to reserve under the composer while the catalogue loads.
-  // The type row is the only surface, its pills stay out of service until the
-  // plugins land, and the examples only appear once a type is picked.
+test('[P0] cold-start Home keeps the type capsule transparent and disabled while plugins settle', async ({ page }, testInfo) => {
+  await page.addInitScript(() => {
+    window.localStorage.removeItem('open-design:home-composer:chip');
+  });
   for (const viewport of [
     { width: 1280, height: 900 },
     { width: 800, height: 900 },
@@ -616,26 +615,53 @@ test('[P1] cold-start Home keeps the type row as its only surface while plugins 
     });
 
     await page.goto('/', { waitUntil: 'domcontentloaded' });
-    const typeRow = homeTypeRow(page);
+    const typeRow = homeTemplateTrigger(page);
     try {
       await expect(typeRow).toBeVisible();
       await expect(page.getByTestId('home-hero-examples-loading')).toHaveCount(0);
       await expect(page.getByTestId('home-hero-plugin-presets')).toHaveCount(0);
-      await expect(typeRow.getByTestId('home-hero-type-pill-prototype')).toBeDisabled();
-      await expect(page.getByTestId('home-hero-type-pills-more')).toBeDisabled();
+      await expect(typeRow).toBeDisabled();
+      await expect(typeRow).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+      await expect(typeRow).toHaveCSS('border-top-width', '0px');
+      await expect(typeRow).toHaveCSS('box-shadow', 'none');
+      await expect(page.getByTestId('home-hero-template-picker')).not.toHaveAttribute('data-type');
+      await expect(page.getByTestId('home-hero-submit')).toBeDisabled();
+      await testInfo.attach(`home-type-loading-${viewport.width}`, {
+        body: await page.screenshot(), contentType: 'image/png',
+      });
     } finally {
       releasePlugins();
     }
 
     await waitForLoadingToClear(page);
-    await expect(typeRow.getByTestId('home-hero-type-pill-prototype')).toBeEnabled();
-    await expect(page.getByTestId('home-hero-plugin-presets')).toHaveCount(0);
+    await expect(typeRow).toBeEnabled();
+    await expect(page.getByTestId('home-hero-template-picker')).toHaveAttribute('data-type', 'prototype');
 
     await pickHomeTemplate(page, 'prototype');
     await expect(page.getByTestId('home-hero-plugin-presets')).toBeVisible();
-    await expect(typeRow).toHaveCount(0);
-    await clearHomeTemplate(page);
+    await expect(typeRow).toBeVisible();
+    await pickHomeTemplate(page, 'deck');
   }
+});
+
+test('[P0] failed initial catalog releases the type picker without claiming a default selection', async ({ page }) => {
+  let failCatalog = true;
+  await page.route('**/api/plugins', async (route) => {
+    await route.fulfill(failCatalog
+      ? { status: 503, json: { error: 'Catalog temporarily unavailable' } }
+      : { json: { plugins: HOME_PLUGINS } });
+  });
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await expect(homeTemplateTrigger(page)).toBeEnabled();
+  await expect(page.getByTestId('home-hero-template-picker')).not.toHaveAttribute('data-type');
+  const menu = await openHomeTemplates(page);
+  await expect(menu.locator('[aria-selected="true"]')).toHaveCount(0);
+  await page.keyboard.press('Escape');
+
+  failCatalog = false;
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await expect(homeTemplateTrigger(page)).toBeEnabled();
+  await expect(page.getByTestId('home-hero-template-picker')).toHaveAttribute('data-type', 'prototype');
 });
 
 test('[P1] last project list row keeps its overflow menu inside the viewport', async ({ page }) => {
@@ -660,7 +686,8 @@ test('[P1] last project list row keeps its overflow menu inside the viewport', a
   });
   await gotoEntryHome(page);
 
-  await page.getByRole('button', { name: 'List view' }).click();
+  await page.getByRole('button', { name: 'Sort projects · View mode' }).click();
+  await page.getByRole('menuitemradio', { name: 'List view' }).click();
   const lastRow = page.locator(`[data-project-id="${lastProject.id}"]`);
   await expect(lastRow).toBeVisible();
   await page.evaluate((projectId) => {
@@ -749,7 +776,9 @@ test('[P1] home left rail expands and collapses from the shell controls', async 
 
   const shell = page.locator('.entry');
   const rail = page.locator('.entry-nav-rail');
-  const expand = page.getByTestId('workspace-home-rail-toggle');
+  // #7635: the toggle lives in the chrome row's search/toggle cluster and
+  // owns both directions; the pinned Home pill is hidden in the entry chrome.
+  const expand = page.getByTestId('entry-rail-collapse');
 
   await expect(shell).not.toHaveClass(/entry--rail-open/);
   await expect(rail).toHaveAttribute('aria-hidden', 'true');
@@ -764,7 +793,7 @@ test('[P1] home left rail expands and collapses from the shell controls', async 
   await expect(page.getByTestId('entry-nav-design-systems')).toBeVisible();
 
   // The rail has no in-rail collapse control (the header is chrome-free);
-  // the pinned Home tab's toggle folds it back.
+  // the same chrome-row toggle folds it back.
   await expect(expand).toHaveAttribute('aria-expanded', 'true');
   await expand.click();
   await expect(shell).not.toHaveClass(/entry--rail-open/);
@@ -772,16 +801,28 @@ test('[P1] home left rail expands and collapses from the shell controls', async 
   await expect(expand).toHaveAttribute('aria-expanded', 'false');
 });
 
-test('[P1] home composer plus menu exposes the attachment entry and no resource submenus', async ({ page }) => {
+test('[P1] home composer plus menu exposes attachment, connector, plugin, and MCP entries', async ({ page }) => {
   await gotoEntryHome(page);
+
+  const input = page.getByTestId('home-hero-input');
 
   await page.getByTestId('home-hero-plus-trigger').click();
   await expect(page.getByTestId('composer-plus-attach')).toBeVisible();
-  // Plugins, connectors and MCP were removed from this menu; they stay
-  // reachable from their own surfaces.
-  await expect(page.getByTestId('composer-plus-plugins')).toHaveCount(0);
-  await expect(page.getByTestId('composer-plus-connectors')).toHaveCount(0);
-  await expect(page.getByTestId('composer-plus-mcp')).toHaveCount(0);
+  await expect(page.getByTestId('composer-plus-connectors')).toBeVisible();
+  await expect(page.getByTestId('composer-plus-plugins')).toBeVisible();
+  await expect(page.getByTestId('composer-plus-mcp')).toBeVisible();
+
+  await page.getByTestId('composer-plus-connectors').click();
+  await expect(page.getByText(/No connected connectors/i)).toBeVisible();
+
+  await page.getByTestId('composer-plus-plugins').click();
+  await page.getByRole('menuitem', { name: /Web Prototype/i }).click();
+  await expect(input).toContainText(/Web Prototype/i);
+
+  await page.getByTestId('home-hero-plus-trigger').click();
+  await page.getByTestId('composer-plus-mcp').click();
+  await page.getByRole('menuitem', { name: /Docs MCP/i }).click();
+  await expect(input).toContainText(/Docs MCP/i);
 
   await page.getByTestId('home-hero-file-input').setInputFiles('../package.json');
   await expect(page.getByTestId('home-hero-staged-files')).toContainText('package.json');
@@ -832,19 +873,25 @@ test('[P1] home composer plus menu opens project, local code, Figma help, and de
   // picker rather than from this menu.
   await expect(page.getByTestId('composer-plus-attach')).toBeVisible();
   await expect(page.getByTestId('composer-plus-figma')).toBeVisible();
-  // Reference-project / local-code moved to the working-dir chip's menu, so
-  // they are no longer rows of this one.
-  await expect(page.getByTestId('composer-plus-reference-project')).toHaveCount(0);
-  await expect(page.getByTestId('composer-plus-local-code')).toHaveCount(0);
+  // Reference-project / local-code sit directly under "Attach files", the
+  // same as in the project composer (OPEND-3085). This menu is their ONLY
+  // entry on Home (OPEND-3126): the working-dir chip's menu below no longer
+  // carries copies.
+  await expect(page.getByTestId('composer-plus-reference-project')).toBeVisible();
+  await expect(page.getByTestId('composer-plus-local-code')).toBeVisible();
   // …and it does NOT carry the "查看方法" (.fig download guide) row: the menu
   // lists things to ATTACH to the message, and a help article is not one.
   await expect(page.getByTestId('composer-plus-figma-help')).toHaveCount(0);
   await page.keyboard.press('Escape');
 
   await page.getByTestId('working-dir-trigger').click();
-  await expect(page.getByTestId('working-dir-reference-project')).toBeVisible();
-  await expect(page.getByTestId('working-dir-local-code')).toBeVisible();
-  await page.getByTestId('working-dir-reference-project').click();
+  await expect(page.getByTestId('working-dir-pick')).toBeVisible();
+  await expect(page.getByTestId('working-dir-reference-project')).toHaveCount(0);
+  await expect(page.getByTestId('working-dir-local-code')).toHaveCount(0);
+  await page.keyboard.press('Escape');
+
+  await page.getByTestId('home-hero-plus-trigger').click();
+  await page.getByTestId('composer-plus-reference-project').click();
   const referenceDialog = page.getByRole('dialog', { name: 'Reference another project' });
   await expect(referenceDialog).toBeVisible();
   await expect(referenceDialog.getByRole('option', { name: /Reference Home Project/i })).toHaveAttribute('aria-selected', 'true');
@@ -856,8 +903,8 @@ test('[P1] home composer plus menu opens project, local code, Figma help, and de
   await expect(input).toHaveText('');
 
   // One slot, newest pick wins: linking a checkout evicts the reference.
-  await page.getByTestId('working-dir-trigger').click();
-  await page.getByTestId('working-dir-local-code').click();
+  await page.getByTestId('home-hero-plus-trigger').click();
+  await page.getByTestId('composer-plus-local-code').click();
   await expect(page.getByTestId('working-dir-trigger')).toContainText('local-code-home');
   await expect(page.getByTestId('working-dir-trigger')).not.toContainText('Reference Home Project');
   await expect(input).toHaveText('');
@@ -1107,8 +1154,8 @@ test('[P1] home composer sends referenced workspace context into project creatio
   await gotoEntryHome(page);
   const input = page.getByTestId('home-hero-input');
 
-  await page.getByTestId('working-dir-trigger').click();
-  await page.getByTestId('working-dir-reference-project').click();
+  await page.getByTestId('home-hero-plus-trigger').click();
+  await page.getByTestId('composer-plus-reference-project').click();
   const referenceDialog = page.getByRole('dialog', { name: 'Reference another project' });
   await expect(referenceDialog.getByRole('option', { name: /Reference Home Payload/i })).toHaveAttribute('aria-selected', 'true');
   await referenceDialog.getByRole('button', { name: 'Reference project' }).click();
@@ -1117,8 +1164,8 @@ test('[P1] home composer sends referenced workspace context into project creatio
 
   // The working-directory row holds ONE pick; linking a checkout replaces the
   // reference, and only the survivor rides into project creation.
-  await page.getByTestId('working-dir-trigger').click();
-  await page.getByTestId('working-dir-local-code').click();
+  await page.getByTestId('home-hero-plus-trigger').click();
+  await page.getByTestId('composer-plus-local-code').click();
   await expect(page.getByTestId('working-dir-trigger')).toContainText('local-code-home-payload');
 
   await input.fill('Create a project using the referenced workspace context.');
@@ -1285,8 +1332,8 @@ test('[P1] home staged workspace context auto-sends into the first project run',
   await gotoEntryHome(page);
   const input = page.getByTestId('home-hero-input');
 
-  await page.getByTestId('working-dir-trigger').click();
-  await page.getByTestId('working-dir-reference-project').click();
+  await page.getByTestId('home-hero-plus-trigger').click();
+  await page.getByTestId('composer-plus-reference-project').click();
   const referenceDialog = page.getByRole('dialog', { name: 'Reference another project' });
   await expect(referenceDialog.getByRole('option', { name: /Reference Home Autosend/i })).toHaveAttribute('aria-selected', 'true');
   await referenceDialog.getByRole('button', { name: 'Reference project' }).click();
@@ -1294,8 +1341,8 @@ test('[P1] home staged workspace context auto-sends into the first project run',
   await expect(input).toHaveText('');
 
   // One slot: the linked checkout replaces the reference before the send.
-  await page.getByTestId('working-dir-trigger').click();
-  await page.getByTestId('working-dir-local-code').click();
+  await page.getByTestId('home-hero-plus-trigger').click();
+  await page.getByTestId('composer-plus-local-code').click();
   await expect(page.getByTestId('working-dir-trigger')).toContainText('local-code-home-autosend');
 
   await input.fill(prompt);
@@ -1325,7 +1372,7 @@ test('[P1] home staged workspace context auto-sends into the first project run',
 test('[P2] home hero exposes the composer footer pickers and the full template set', async ({ page }) => {
   await gotoEntryHome(page);
 
-  await expect(page.getByTestId('home-hero-type-pills')).toBeVisible();
+  await expect(page.getByTestId('home-hero-template-picker')).toBeVisible();
   await expect(page.getByTestId('home-hero-design-system-picker')).toBeVisible();
   await expect(page.getByTestId('working-dir-picker')).toBeVisible();
 
@@ -1336,24 +1383,15 @@ test('[P2] home hero exposes the composer footer pickers and the full template s
   await expect(page.getByTestId('home-hero-type-tabs')).toHaveCount(0);
   await expect(page.getByTestId('home-hero-shortcuts-trigger')).toHaveCount(0);
 
-  // The row is a curated entry set (product, 2026-08-31): three inline, two
-  // behind 更多, nothing else — the remaining create types reach the hero only
-  // through the cross-surface hand-off.
-  const typeRow = homeTypeRow(page);
-  for (const id of HOME_TYPE_ROW_CHIP_IDS) {
-    await expect(typeRow.getByTestId(`home-hero-type-pill-${id}`)).toBeVisible();
-  }
-  await page.getByTestId('home-hero-type-pills-more').click();
-  const overflow = page.getByTestId('home-hero-type-pills-popover');
-  for (const id of HOME_TYPE_ROW_MORE_CHIP_IDS) {
-    await expect(overflow.getByTestId(`home-hero-type-pill-${id}-more`)).toBeVisible();
-  }
-  for (const id of ['live-artifact', 'video', 'hyperframes', 'audio']) {
-    await expect(typeRow.getByTestId(`home-hero-type-pill-${id}`)).toHaveCount(0);
-    await expect(overflow.getByTestId(`home-hero-type-pill-${id}-more`)).toHaveCount(0);
+  // The row is a curated entry set (product, 2026-09-16 / OPEND-3146): three
+  // inline, every other create type behind 更多 in product order, so no kind
+  // is stranded outside the row.
+  const menu = await openHomeTemplates(page);
+  for (const id of [...HOME_TYPE_PRIMARY_CHIP_IDS, ...HOME_TYPE_OTHER_CHIP_IDS]) {
+    await expect(menu.locator(`[data-chip="${id}"]`)).toBeVisible();
   }
   await page.keyboard.press('Escape');
-  await expect(overflow).toHaveCount(0);
+  await expect(menu).toHaveCount(0);
 });
 
 test('[P0] empty home composer submits the active prototype suggestion without explicit plugin authority', async ({ page }) => {
@@ -1361,8 +1399,6 @@ test('[P0] empty home composer submits the active prototype suggestion without e
   await routeRunsAccepted(page);
   await gotoEntryHome(page);
 
-  // Home starts typeless (#7635); picking Prototype is what narrows the
-  // placeholder carousel to that type's lines.
   await pickHomeTemplate(page, 'prototype');
   await expect(page.getByTestId('home-hero-submit')).toBeEnabled();
   const createRequestPromise = page.waitForRequest((request) =>
@@ -1382,14 +1418,26 @@ test('[P0] empty home composer submits the active prototype suggestion without e
   await expect(page).toHaveURL(/\/projects\//);
 });
 
-test('[P1] home composer has no mode picker and always creates in design mode', async ({ page }) => {
+// This spec used to drive the Home mode chip: pick 「提问」, submit, and check
+// the request switched to `conversationMode: 'chat'` with no plugin. The chip
+// left the Home composer (2026-09-08, product — see the comment at its old slot
+// in `HomeHero.tsx`), so Home has no surface that can select Ask any more and
+// that half is unreachable from here rather than broken.
+//
+// What survives is the half that still describes Home: with no picker on
+// screen, every Home submission routes Design and carries a plugin. Ask/Plan
+// routing itself is untouched and still covered where it is still reachable —
+// the project side keeps its stored session mode (`project-management-flows`
+// "project detail turns carry the stored design session mode…").
+test('[P1] home composer routes every request as design with no mode picker on screen', async ({ page }) => {
   await routeProjectCreates(page);
   await routeRunsAccepted(page);
   await gotoEntryHome(page);
 
-  // The 「设计」 mode pill was removed from the Home composer footer; the
-  // per-conversation picker now lives only in the project chat composer.
   await expect(page.getByTestId('composer-mode-trigger')).toHaveCount(0);
+  await expect(page.getByTestId('composer-mode-clear')).toHaveCount(0);
+  await expect(page.getByTestId('composer-mode-menu')).toHaveCount(0);
+
   await page.getByTestId('home-hero-input').fill('Design the screens from this brief.');
 
   const designRequestPromise = page.waitForRequest((request) =>
@@ -1506,28 +1554,17 @@ test('[P1] brand-backed design system previews as a Brand Kit and carries into p
   expect(body.designSystemId).toBe(BRAND_DESIGN_SYSTEM.id);
 });
 
-// The horizontally-scrolling scenario-card rail this used to drive
-// (`.home-hero__scenario-cards` + `.home-hero__rail-edge`) was deleted with the
-// rest of the inline template rail in #5517; the radial picker is a fixed-size
-// ring with no scroll axis, so there is no overflow behaviour left to pin.
-//
-// The first-run "scroll up to reveal community templates" affordance went with
-// it, so its two specs are gone too.
 
-test('[P2] home template pill clears from its icon and opens nothing', async ({ page }) => {
+test('[P2] home template dropdown switches types and dismisses with Escape', async ({ page }) => {
   await gotoEntryHome(page);
-
   await pickHomeTemplate(page, 'deck');
-
-  // The pill is display + clear: no standalone reset, no dropdown behind it.
-  await expect(page.getByTestId('home-hero-template-reset')).toHaveCount(0);
-  await expect(page.getByTestId('home-hero-template-clear')).toHaveCount(1);
-  await page.getByTestId('home-hero-template-trigger').click();
-  await expect(page.getByTestId('home-hero-template-menu')).toHaveCount(0);
-
-  // Clearing gives the type row back — the only way to a different type.
-  await clearHomeTemplate(page);
-  await expect(page.getByTestId('home-hero-template-picker')).toHaveCount(0);
+  await expect(page.getByTestId('home-hero-template-clear')).toHaveCount(0);
+  const menu = await openHomeTemplates(page);
+  await expect(menu.locator('[data-chip="deck"]')).toHaveAttribute('aria-selected', 'true');
+  await page.keyboard.press('Escape');
+  await expect(menu).toHaveCount(0);
+  await expect(homeTemplateTrigger(page)).toBeFocused();
+  await pickHomeTemplate(page, 'prototype');
 });
 
 test('[P1] home suggestion entry remains retryable after create failures', async ({ page }) => {
@@ -1561,9 +1598,7 @@ test('[P2] zh-CN home smoke exposes the localized creation type, design system, 
     'title',
     '上传文件、关联设计系统，或描述你想创作的内容',
   );
-  // Nothing picked yet, so the type row under the composer is the type control
-  // (the composer's own pill only exists once one is chosen).
-  await expect(page.getByTestId('home-hero-type-pills')).toBeVisible();
+  await expect(page.getByTestId('home-hero-template-picker')).toBeVisible();
   // The design-system control is permanent at the head of the foot row (设计
   // 系统常驻在添加附件后面), so it is there before any type is chosen.
   await expect(page.getByTestId('home-hero-design-system-trigger')).toBeVisible();
@@ -1575,19 +1610,15 @@ test('[P2] zh-CN home smoke exposes the localized creation type, design system, 
   await expect(page.getByTestId('home-hero-submit')).toHaveAccessibleName('运行');
 });
 
-test('[P1] home type row switches between types through the pill clear', async ({ page }) => {
+test('[P1] home dropdown switches between types', async ({ page }) => {
   await gotoEntryHome(page);
-  // Home starts empty now (no fresh-home default binding), so the type row is
-  // the entry point and both kinds are on it.
-  const typeRow = homeTypeRow(page);
-  await expect(typeRow.getByTestId('home-hero-type-pill-prototype')).toBeVisible();
-  await expect(typeRow.getByTestId('home-hero-type-pill-deck')).toBeVisible();
+  const typeRow = homeTemplateTrigger(page);
+  await expect(typeRow).toBeVisible();
+  await expect(typeRow).toBeVisible();
 
   await pickHomeTemplate(page, 'deck');
   await expect(page.getByTestId('home-hero-template-trigger')).toContainText(/Slide deck|幻灯片|投影片/i);
 
-  // Switching goes clear → row → new type; the pill follows the new one and
-  // deck-only footer chrome drops away.
   await pickHomeTemplate(page, 'prototype');
   await expect(page.getByTestId('home-hero-footer-option-speakerNotes')).toHaveCount(0);
   await expect(page.getByTestId('home-hero-template-trigger')).toContainText(/Prototype|原型/i);
@@ -1606,7 +1637,7 @@ test('[P1] home type row switches between types through the pill clear', async (
 test('[P1] home creation picker switches non-media modes without surfacing media-only footer options', async ({ page }) => {
   await gotoEntryHome(page);
 
-  await expect(page.getByTestId('home-hero-type-pills')).toBeVisible();
+  await expect(page.getByTestId('home-hero-template-picker')).toBeVisible();
   await expect(page.getByTestId('home-hero-footer-option-duration')).toHaveCount(0);
   await expect(page.getByTestId('home-hero-footer-option-audioType')).toHaveCount(0);
 
@@ -1653,7 +1684,7 @@ test('[P1] expired plugin refresh keeps known Home creation types actionable aft
   page,
 }) => {
   await gotoEntryHome(page);
-  await expect(homeTypeRow(page).getByTestId('home-hero-type-pill-prototype')).toBeEnabled();
+  await expect(homeTemplateTrigger(page)).toBeEnabled();
 
   // Age the module-level catalog past its 10-second TTL, then leave Home
   // through an in-app route so HomeView really unmounts while the JS module and
@@ -1684,9 +1715,9 @@ test('[P1] expired plugin refresh keeps known Home creation types actionable aft
     // The revalidation is deliberately unresolved. The latest successful
     // catalog must seed the remount synchronously instead of greying every
     // creation type until this request finishes.
-    const remountedRow = homeTypeRow(page);
-    await expect(remountedRow.getByTestId('home-hero-type-pill-prototype')).toBeEnabled();
-    await expect(remountedRow.getByTestId('home-hero-type-pill-deck')).toBeEnabled();
+    const remountedRow = homeTemplateTrigger(page);
+    await expect(remountedRow).toBeEnabled();
+    await expect(remountedRow).toBeEnabled();
   } finally {
     releaseRefresh();
   }
@@ -1809,7 +1840,7 @@ test('[P1] live dashboard preset sends the active workspace name to plugin apply
   });
 
   await gotoEntryHome(page);
-  await page.getByTestId('workspace-home-rail-toggle').click();
+  await page.getByTestId('entry-rail-collapse').click();
   await expect(page.getByTestId('workspace-switcher')).toContainText('Personal Workspace');
 
   await pickHomeTemplate(page, 'live-artifact');
@@ -1912,11 +1943,8 @@ test('[P2] switching the selected hero template swaps preset chrome and keeps th
   await expect(page.getByTestId('home-hero-footer-option-designSystem')).toHaveCount(0);
   await expect(page.getByTestId('home-hero-footer-option-ratio')).toHaveCount(0);
   await expect(page.getByTestId('home-hero-footer-option-duration')).toHaveCount(0);
-  // Every type is still reachable from any selection: clearing gives the row
-  // back, and a type outside the row (Live artifact) still lands through the
-  // hand-off path the helper drives.
-  await clearHomeTemplate(page);
-  await expect(homeTypeRow(page).getByTestId('home-hero-type-pill-prototype')).toBeVisible();
+
+  await expect(homeTemplateTrigger(page)).toBeVisible();
   await pickHomeTemplate(page, 'live-artifact');
   await expect(page.getByTestId('home-hero-template-trigger')).toContainText(/Live artifact|实时/i);
 });

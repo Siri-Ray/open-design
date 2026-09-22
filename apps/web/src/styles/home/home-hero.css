@@ -29,19 +29,6 @@
    viewport's true center, reading as an oversized blank band above it. Drop
    it back to match the bottom padding so the hero's own box is symmetric and
    the flex centering does all of the vertical balancing. */
-/* Typography ladder stand-in. The refreshed entry surfaces set the app's
-   default text to `body { font-weight: 600 }` and `button { font-weight: 600 }`
-   (base.css / primitives.css); that app-wide normalization lands with the
-   rest of the entry refresh, not with the hero. Until then the hero inherits
-   the same ladder locally so its staged chips, controls and rows read at the
-   weight they were designed at. `:where()` keeps the button rule at element
-   specificity, exactly where primitives.css's own sits, so a control that
-   names its weight still wins. Drop this block when the global one lands. */
-.home-hero,
-:where(.home-hero) button {
-  font-weight: 600;
-}
-
 .home-view--centered .home-hero {
   padding-top: var(--spacing-4);
 }
@@ -151,7 +138,7 @@
 
      Georgia carries no CJK glyphs (1111 codepoints, zero Han), so the Chinese
      headline would fall straight through to the UI sans and look unchanged.
-     The two Song faces behind it are what actually make 我们来设计点什么？read
+     The two Song faces behind it are what actually make 让我们创建原型 read
      as a serif; drop them if the headline should stay sans in Chinese. */
   font-family: Georgia, "Songti SC", STSong, SimSun, serif;
   font-weight: 600;
@@ -325,8 +312,11 @@
   gap: 8px;
   flex: 0 0 auto;
 }
+/* NOT a containing block: the 更多 popover below positions against the row
+   as a whole (`.home-hero__type-pills-wrap` on Home, the tab row in
+   Community), so it centres on the row rather than hanging off this trigger's
+   right edge (OPEND-3146 / OPEND-3098). */
 .home-hero__type-pills-more {
-  position: relative;
   flex: 0 0 auto;
 }
 /* Invisible measuring copy of the full pill set: out of flow, unpainted,
@@ -347,16 +337,24 @@
   border-color: color-mix(in srgb, var(--bg-subtle) 82%, var(--text));
   background: transparent;
 }
+/* Open 更多: one line of pills centred under the WHOLE type row (per product,
+   2026-09-16), so the seven folded types read as a continuation of the row
+   rather than a menu off its last button. `left: 50%` + `translate` rather than
+   `transform`: the pop-in animation owns `transform`, and the two would fight.
+   At the row's own width (820px) the seven fit one line; a narrower viewport
+   lets them wrap. The Community tab row overrides the wrap (never wraps). */
 .home-hero__type-pills-popover {
   position: absolute;
   top: calc(100% + 8px);
-  right: 0;
+  left: 50%;
+  translate: -50% 0;
   z-index: 60;
   display: flex;
   flex-wrap: wrap;
+  justify-content: center;
   gap: 8px;
   width: max-content;
-  max-width: min(420px, calc(100vw - 32px));
+  max-width: min(820px, calc(100vw - 32px));
   padding: 10px;
   background: var(--bg-panel);
   border: 1px solid var(--border-soft, var(--border));
@@ -365,8 +363,13 @@
     0 1px 2px color-mix(in srgb, #000 4%, transparent),
     0 12px 32px -12px color-mix(in srgb, #000 22%, transparent);
   animation: pop-in 160ms cubic-bezier(0.23, 1, 0.32, 1);
-  transform-origin: top right;
+  transform-origin: top center;
 }
+/* SHARED CONTRACT — `.home-hero__type-pill` (+ `[data-chip]`, `.is-active`,
+   `.home-hero__type-pills-more` / `-more-btn` / `-popover`) is consumed by the
+   Community gallery's type tabs (CommunityView.tsx) as well as the Home type
+   row. The two rows are meant to be one object: change the pill here and both
+   surfaces follow; do not fork a community copy of these rules. */
 .home-hero__type-pill {
   appearance: none;
   display: inline-flex;
@@ -374,11 +377,13 @@
   gap: 6px;
   min-height: 32px;
   padding: 5px 12px;
-  /* Outline only (per product): a #EDEDED hairline and NO fill, so the pill
-     is a ring on the page ground rather than a chip sitting on it. Written as
-     `--bg-subtle`, the token that holds #EDEDED, so dark mode follows the
-     neutral ladder instead of pinning a light gray onto a dark ground. */
-  border: 1px solid var(--bg-subtle);
+  /* Outline only (per product): a hairline and NO fill, so the pill is a
+     ring on the page ground rather than a chip sitting on it. The ring is
+     mixed from the text ink at 20% (OPEND-2684): the #EDEDED it used to be
+     sat too close to a white page to read as an edge, and on the dark panel
+     it vanished altogether. Through --text rather than a literal, so the same
+     20% is a visible outline on either theme's ground. */
+  border: 1px solid color-mix(in srgb, var(--text) 20%, transparent);
   border-radius: var(--radius-pill);
   background: transparent;
   /* Label + icon rest at the hover ink (#202020) — the old --text-soft rest
@@ -398,11 +403,18 @@
 .home-hero__type-pill:hover:not(:disabled) {
   color: var(--text-strong);
   /* Hover darkens the RING, not the inside: the pill has no fill at rest, so
-     growing one on hover would make it change category rather than state. */
-  border-color: color-mix(in srgb, var(--bg-subtle) 82%, var(--text));
+     growing one on hover would make it change category rather than state.
+     One step up the same ink ladder the rest ring is mixed from. */
+  border-color: color-mix(in srgb, var(--text) 40%, transparent);
   background: transparent;
   transform: translateY(-0.5px);
 }
+/* No per-type colour (OPEND-3103, product 2026-09-16, per the #7635 Demo):
+   the icon inherits the pill's ink like the label, on every type including
+   原型 / 幻灯片 / 文档. The `data-chip` the component stamps is a selector hook
+   only. (There is no lit pill in this row: picking a type retires the row, and
+   the composer's template pill — see the picker section — carries the
+   selection in the brand pair.) */
 /* Selected pill mirrors the composer's selected template chip exactly (the
    `.has-selection` pair above: 极浅品牌背景 --brand-surface, brand green
    --brand-ink, inset 1px ring at 22%), so the picked type reads as the same
@@ -591,9 +603,14 @@
    The lift must stay BELOW `.entry-main__topbar` (z-index 10): the sticky
    topbar is opaque chrome and the card scrolling under it must never cover
    the chip cluster. It must also stay below the fixed modal family
-   (`.home-hero-confirm__backdrop` 80, `.plus-menu__popup` 90,
-   `.plugins-import-modal__backdrop` 100, `.use-everywhere-modal-backdrop`
-   920). Popover z-indexes inside the card (1503/1701/…) are local to the
+   (`.plus-menu__popup` 90, `.use-everywhere-modal-backdrop` 920, and the
+   app-modal tier at 1000 — `.home-hero-confirm__backdrop`,
+   `.plugins-import-modal__backdrop`, `.plugin-marketplace__modal-backdrop`,
+   `.automation-modal-backdrop`, plus the five `.backdrop` CSS modules that
+   define that tier). Those scrims used to sit at 60–100, i.e. UNDER the
+   shell chrome itself (`.workspace-tabs-chrome` 120, the top-right cluster
+   measured at 150) — see `tests/styles/app-scrim-layer.test.ts`.
+   Popover z-indexes inside the card (1503/1701/…) are local to the
    card's stacking context and only order its own children. */
 .home-hero__input-card:has(.inline-switcher__popover),
 .home-hero__input-card:has(.home-hero__plugin-picker) {
@@ -633,15 +650,16 @@
    so the SECOND line would still be pushed right — so `.is-chip-inline` takes
    the row out of flow and indents just the first line past it, using the two
    custom props HomeHero measures (`--home-hero-chip-w`, and
-   `--home-hero-chip-text-left`, the chip's border+padding). Also owns the
-   prompt's scroll (moved off `.composer-input-editor`) so the out-of-flow chip
-   scrolls together with the text it leads. */
+   `--home-hero-chip-text-left`, the chip's border+padding).
+   It does NOT scroll: the attachment band above the prompt is its child, and a
+   scroller here carried that band away with the text — an attachment the user
+   staged has to stay in sight while they write about it. The scroll sits on
+   `.home-hero__prompt-surface` below, which holds the prompt and the lead chip
+   and nothing else. */
 .home-hero__prompt-flow {
   position: relative;
   display: block;
   min-width: 0;
-  max-height: var(--home-hero-prompt-max-height, 180px);
-  overflow-y: auto;
 }
 .home-hero__active {
   display: flex;
@@ -666,7 +684,9 @@
   display: none;
 }
 /* Staged files + the remaining context chips keep their own band above the
-   prompt; only the template chip below leads the text. */
+   prompt; only the template chip below leads the text. The band sits OUTSIDE
+   the prompt's scroller (see `.home-hero__prompt-surface`), so a long prompt
+   scrolls underneath it and what the user attached stays on screen. */
 .home-hero__prompt-flow > .home-hero__active-band {
   margin-bottom: var(--spacing-8);
 }
@@ -740,8 +760,14 @@
 /* The template chip's own line, anchored to the prompt surface (NOT the flow —
    the attachment row above must be able to push it down). Stays in flow when
    the inline treatment is off, so it simply sits above the text. */
+/* The prompt's own scroller. `position: relative` is load-bearing twice: it is
+   the containing block for the out-of-flow lead chip, and because that
+   containing block IS this scroller, the chip scrolls with the text it leads
+   instead of pinning itself to the top of the box. */
 .home-hero__prompt-surface {
   position: relative;
+  max-height: var(--home-hero-prompt-max-height, 180px);
+  overflow-y: auto;
 }
 .home-hero__lead-chip {
   display: flex;
@@ -809,8 +835,8 @@
   display: block;
   min-width: 0;
 }
-/* Scroll moved to .home-hero__prompt-flow (above) — keeping it here would fence
-   the text off from the float in its own formatting context. */
+/* Scroll moved up to `.home-hero__prompt-surface` — keeping it here would fence
+   the text off from the out-of-flow chip in its own formatting context. */
 .home-hero__prompt-flow .composer-input-editor {
   max-height: none;
   overflow: visible;
@@ -1185,13 +1211,20 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Sized to the native caret it stands in for, not to the carousel's own line
+   box: Chromium draws the caret on the composer's 14px text 1px wide and 17px
+   tall (the font's ascent + descent), square-ended, in `caret-color`. The
+   1.5px bar that stretched to the 13px line minus a 3px margin pair came out
+   14px tall and visibly heavier, so focusing the field made the caret jump in
+   height and weight (OPEND-2698). Explicit height + centred, so a line-height
+   change cannot silently resize it again. */
 .home-hero__carousel-caret {
   flex: none;
-  width: 1.5px;
-  align-self: stretch;
-  margin: 3px 0 3px 2px;
+  width: 1px;
+  height: 17px;
+  align-self: center;
+  margin: 0 0 0 1px;
   background: var(--accent);
-  border-radius: 1px;
   animation: home-hero-caret-blink 1.05s steps(1, end) infinite;
 }
 @keyframes home-hero-caret-blink {
@@ -2082,11 +2115,15 @@
 }
 /* The picker is the upload disc's twin at the head of the card's foot row (per
    product: 设计系统常驻在添加附件后面，样式和 icon 的大小和上传附件一致), so it
-   copies `.home-hero__foot-left .plus-menu__trigger` exactly: the same 36px
-   band, the same pale fill, no stroke and no shadow. `height: auto` undoes
-   primitives.css's blanket `button { height: 36px }`, which min-height alone
-   cannot override. */
-.home-hero__foot-left .home-hero__ds-row-trigger {
+   matches the adjacent `.plus-menu__trigger` on Home AND in the project chat
+   composer (`.composer-row`, which hosts the same `home` variant per the
+   #8113 Demo): the same 36px band, the same pale fill, no stroke and no
+   shadow. `height: auto` undoes primitives.css's blanket
+   `button { height: 36px }`, which min-height alone cannot override.
+   Paired selectors rather than `:is(...)` so the selector-literal style tests
+   keep matching each host on its own. */
+.home-hero__foot-left .home-hero__ds-row-trigger,
+.composer-row .home-hero__ds-row-trigger {
   box-sizing: border-box;
   min-height: 36px;
   height: auto;
@@ -2101,18 +2138,25 @@
   font-size: 13px;
   box-shadow: none;
 }
-/* Same hover as the upload disc beside it — the pair lights up identically. */
+/* Same hover as the upload disc beside it — the pair lights up identically.
+   The open state holds the hover fill so the pill stays lit under its popover. */
 .home-hero__foot-left .home-hero__ds-row-picker .home-hero__ds-row-trigger:hover,
-.home-hero__foot-left .home-hero__ds-row-picker .home-hero__ds-row-trigger:focus-visible {
+.home-hero__foot-left .home-hero__ds-row-picker .home-hero__ds-row-trigger:focus-visible,
+.home-hero__foot-left .home-hero__ds-row-trigger[aria-expanded="true"],
+.composer-row .home-hero__ds-row-picker .home-hero__ds-row-trigger:hover,
+.composer-row .home-hero__ds-row-picker .home-hero__ds-row-trigger:focus-visible,
+.composer-row .home-hero__ds-row-trigger[aria-expanded="true"] {
   background: var(--bg-subtle);
   color: var(--text-strong);
 }
-.home-hero__foot-left .home-hero__ds-row-trigger-icon {
+.home-hero__foot-left .home-hero__ds-row-trigger-icon,
+.composer-row .home-hero__ds-row-trigger-icon {
   opacity: 1;
 }
 /* Nothing picked yet: the palette glyph alone (the field name lives on the
    tooltip), so the control is the upload disc's exact 36px circle. */
-.home-hero__foot-left .home-hero__ds-row-trigger.is-icon-only {
+.home-hero__foot-left .home-hero__ds-row-trigger.is-icon-only,
+.composer-row .home-hero__ds-row-trigger.is-icon-only {
   width: 36px;
   min-width: 36px;
   height: 36px;
@@ -2122,7 +2166,8 @@
   border-radius: var(--radius-circular, 50%);
 }
 /* The pill never gets squeezed by a long prompt-input row beside it. */
-.home-hero__foot-left .home-hero__ds-row-picker {
+.home-hero__foot-left .home-hero__ds-row-picker,
+.composer-row .home-hero__ds-row-picker {
   flex: 0 0 auto;
 }
 .home-hero__footer-options {
@@ -2904,7 +2949,12 @@
 .home-hero-confirm__backdrop {
   position: fixed;
   inset: 0;
-  z-index: 80;
+  /* 应用模态档(1000,和既有的五张 `.backdrop` 同档)。80 压不住 shell chrome
+     —— `.workspace-tabs-chrome` 是 120、右上角那簇真机量到 150,遮罩上会漏出
+     顶栏和右上角照常亮着。这张确认框走 `<Dialog includeChromeClassName={false}>`,
+     所以共享原语的遮罩样式不参与,只有这一条规则说了算。
+     守护:`tests/styles/app-scrim-layer.test.ts`。 */
+  z-index: 1000;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -3109,7 +3159,7 @@
    name on the first line, the prompt it seeds on the second. Four rows are
    visible; the rest scroll. */
 .home-hero__plugin-presets {
-  /* One row's height: 8px top padding + 56px poster + 16px bottom padding.
+  /* One row's height: 12px top padding + 56px poster + 12px bottom padding.
      The POSTER is what sets it now — enlarged per product, it is taller than
      the two text lines beside it (17.5 title + 8 gap + 16.2 prompt = 41.7), so
      the row measures off the picture instead. The viewport below is cut to
@@ -3145,13 +3195,16 @@
      shrunk row squeezes the prompt line's box under its own text — which the
      ellipsis clip then cuts through the glyphs' bottoms. */
   flex: none;
-  /* 16px of air on the sides and below (per product), so the hover fill reads
-     as a rounded block around the two lines rather than a full-bleed band with
-     the text jammed against its left edge. The row's outer box still IS the
-     chip cluster's box above it — only the text inside moves in. The TOP is
-     8px (per product): stacked flush, two 16px edges met between every pair of
-     rows and pushed the run taller than it read. */
-  padding: 8px 16px 16px;
+  /* 16px of air on the sides (per product), so the hover fill reads as a
+     rounded block around the two lines rather than a full-bleed band with the
+     text jammed against its left edge. The row's outer box still IS the chip
+     cluster's box above it — only the text inside moves in. Vertically the
+     two edges are EQUAL, 12px each: the fill used to carry 8 above and 16
+     below (the pair once chosen so stacked rows did not double a 16px edge),
+     which left the poster and text visibly low inside the hover block
+     (OPEND-2687). 12 + 12 keeps the same 24px between neighbouring rows and
+     the same 80px pitch, so `--preset-row-h` above is unchanged. */
+  padding: 12px 16px;
   border: 0;
   border-radius: var(--radius-xlarge);
   background: transparent;
@@ -3185,7 +3238,8 @@
 .home-hero__plugin-preset-row-thumb {
   position: relative;
   /* The whole poster is the preview target (see the row's markup), so it
-     carries the pointer — the eye badge on it is decoration. */
+     carries the pointer. Nothing is drawn on top of it (OPEND-3100): no eye
+     badge, at rest or on hover. */
   cursor: pointer;
   flex: none;
   height: 56px;
@@ -3199,6 +3253,21 @@
   height: 100%;
   object-fit: cover;
   display: block;
+}
+/* A hairline over the poster's edge, so a white or near-white still (a paper
+   document, a resume) does not merge into the page behind it (OPEND-2705).
+   Default treatment pending product/design sign-off. A pseudo element rather
+   than an inset shadow on the box: the box's own shadow is painted UNDER its
+   <img> child, so it would never show. Mixed down from the border token so it
+   is a quiet edge on a white page in light mode and stays soft on the dark
+   theme's panel ink, instead of a hard 1px line in either. */
+.home-hero__plugin-preset-row-thumb::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--border) 70%, transparent);
 }
 /* The two text lines, stacked — this is the column the row used to be. */
 .home-hero__plugin-preset-row-body {
@@ -3258,52 +3327,6 @@
     opacity 120ms var(--ease-out),
     transform 120ms var(--ease-out),
     visibility 0s linear 120ms;
-}
-/* Preview control, sitting ON the poster at its top-right corner (per
-   product) and revealed with the row. A dark scrim disc rather than a bare
-   glyph: it lands on whatever the poster happens to show there, which is as
-   often white paper as it is ink. Hidden with opacity + visibility, never
-   `display` — the poster must not reflow under the pointer — and
-   `pointer-events` come back only once it is visible, so an invisible control
-   can never swallow a click meant for the row. */
-.home-hero__plugin-preset-row-preview {
-  position: absolute;
-  /* Never a click target of its own: the poster behind it takes the click, so
-     the badge must not swallow one that lands on its 20px disc. */
-  pointer-events: none;
-  top: 4px;
-  right: 4px;
-  width: 20px;
-  height: 20px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--radius-pill);
-  background: color-mix(in srgb, #000 55%, transparent);
-  color: #fff;
-  cursor: pointer;
-  opacity: 0;
-  visibility: hidden;
-  pointer-events: none;
-  transition:
-    opacity 120ms var(--ease-out),
-    visibility 0s linear 120ms;
-}
-.home-hero__plugin-preset-row-preview svg {
-  width: 13px;
-  height: 13px;
-  flex: 0 0 13px;
-}
-.home-hero__plugin-preset-row:not(:disabled):hover .home-hero__plugin-preset-row-preview,
-.home-hero__plugin-preset-row:not(:disabled):focus-visible .home-hero__plugin-preset-row-preview {
-  opacity: 1;
-  visibility: visible;
-  transition-delay: 0s;
-}
-/* Deepens with the POSTER's hover, not its own — the badge takes no pointer
-   events, so `:hover` on it would never fire. */
-.home-hero__plugin-preset-row-thumb:hover .home-hero__plugin-preset-row-preview {
-  background: color-mix(in srgb, #000 72%, transparent);
 }
 /* The prompt underneath, one step back so the name leads the row. */
 .home-hero__plugin-preset-row-text {
@@ -4022,6 +4045,8 @@
      would otherwise swap in shadow-xs. */
   box-shadow: none;
 }
+/* The picked type wears the brand pair above whatever the type (OPEND-3103):
+   the per-type tint 原型 / 幻灯片 / 文档 used to take here is withdrawn. */
 .home-hero__footer-option.home-hero__template-option:hover,
 .home-hero__footer-option.home-hero__template-option.is-open,
 .home-hero__footer-option.home-hero__template-option:focus-within {

@@ -1,3 +1,4 @@
+import { observeUpdateLifecycleStages } from '../migration/update-apply-observations.js';
 import express, { type Express } from 'express';
 import { SIDECAR_DEFAULTS } from '@open-design/sidecar-proto';
 import { randomUUID } from 'node:crypto';
@@ -30,6 +31,7 @@ export interface DaemonTelemetry {
   resolveAppVersion: () => Promise<any>;
   reportFeedback: (req: {
     runId: string;
+    traceId?: string;
     rating: 'positive' | 'negative';
     reasonCodes: string[];
     hasCustomReason: boolean;
@@ -282,9 +284,26 @@ export function registerTelemetryRoutes(app: Express, deps: RegisterTelemetryRou
     ...(deps.onHostFault ? { onHostFault: deps.onHostFault } : {}),
   });
 
+  let lifecycleScanRunning = false;
+  let telemetryDisposed = false;
+  const scanUpdateLifecycle = async () => {
+    if (telemetryDisposed || lifecycleScanRunning || cachedAppVersion == null) return;
+    lifecycleScanRunning = true;
+    try {
+      await observeUpdateLifecycleStages({
+        analytics: analyticsService, appVersion: cachedAppVersion.version,
+        currentChannel: cachedAppVersion.channel, currentVersion: cachedAppVersion.version,
+        dataRoot: dataDir, namespace: resolveInstallerObservationNamespace(deps.namespace),
+      });
+    } catch { /* Observability never gates daemon lifecycle. */ }
+    finally { lifecycleScanRunning = false; }
+  };
+  const lifecycleTimer = setInterval(() => { void scanUpdateLifecycle(); }, 10_000);
+  lifecycleTimer.unref();
   const appVersionPromise = (async () => {
     try {
       cachedAppVersion = await readCurrentAppVersionInfo();
+      void scanUpdateLifecycle();
       void observePendingInstallerApplyAttempts({
         analytics: analyticsService,
         appVersion: cachedAppVersion.version,
@@ -305,7 +324,11 @@ export function registerTelemetryRoutes(app: Express, deps: RegisterTelemetryRou
 
   return {
     analyticsService,
-    disposeFatalHandlers,
+    disposeFatalHandlers: () => {
+      telemetryDisposed = true;
+      clearInterval(lifecycleTimer);
+      disposeFatalHandlers();
+    },
     getCachedAppVersion: () => cachedAppVersion,
     resolveAppVersion: () => appVersionPromise,
     reportFeedback: (req) =>

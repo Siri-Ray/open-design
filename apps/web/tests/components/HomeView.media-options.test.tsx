@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { pickHomeTemplate, homeTemplateTrigger } from '../helpers/home-template-picker';
 
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -91,37 +92,26 @@ describe('HomeView media composer options', () => {
     stubFetch({ mediaApplyResponse });
     renderHome();
 
-    // Image lives behind the row's 更多 popover.
-    const more = await screen.findByTestId('home-hero-type-pills-more');
-    await waitFor(() => expect((more as HTMLButtonElement).disabled).toBe(false));
-    fireEvent.click(more);
-    const imageTab = await screen.findByTestId('home-hero-type-pill-image-more');
-    expect((imageTab as HTMLButtonElement).disabled).toBe(false);
+    await pickHomeTemplate('image');
 
-    fireEvent.click(imageTab);
-
-    // Picking retires the row; the composer pill names the type and its clear
-    // stays live while the media apply is still pending, so the choice is
-    // reversible at every moment.
     await waitFor(() => {
       expect(screen.getByTestId('home-hero-template-trigger').textContent).toContain('Image');
     });
-    expect(screen.getByTestId('home-hero-template-clear')).toBeTruthy();
+    expect(homeTemplateTrigger()).toBeTruthy();
   });
 
-  it('drops the Home composer mode picker and still submits in Design mode', async () => {
+  it('defaults to Design mode with no mode picker in the composer', async () => {
     stubFetch();
     const onSubmit = vi.fn();
     renderHome({ onSubmit });
 
     await screen.findByTestId('home-hero-input');
 
-    // 设计 is the app default AND the default SELECTION: the composer opens with
-    // the Design pill showing, so the mode the request will run in is stated on
-    // screen rather than hidden behind a neutral glyph. The submitted payload
-    // carries design either way.
-    // The 「设计」 pill was removed from the Home composer footer; Home creates
-    // keep running in the app default — design — which the payload states.
+    // 设计 is the app default, and since the mode chip left the Home composer
+    // (2026-09-08, product) it is also the only mode Home submits — nothing on
+    // this surface can move it any more. Absence is pinned in full by
+    // `HomeView.mode-picker-removed.test.tsx`; this spec keeps the payload half
+    // of the pair, so a picker coming back cannot quietly change what Home runs.
     expect(screen.queryByTestId('composer-mode-trigger')).toBeNull();
 
     await setHomePrompt('Create a clean loading animation');
@@ -578,7 +568,7 @@ describe('HomeView media composer options', () => {
 
     await screen.findByTestId('home-hero-input');
     expect(
-      (screen.getByTestId('home-hero-type-pill-deck') as HTMLButtonElement).disabled,
+      (homeTemplateTrigger() as HTMLButtonElement).disabled,
     ).toBe(true);
     expect(fetchMock.mock.calls.some(([url]) => (
       typeof url === 'string' && url.includes('/api/plugins/od-media-generation/apply')
@@ -648,7 +638,6 @@ function homeProps(overrides: Partial<React.ComponentProps<typeof HomeView>> = {
     projects: [],
     onSubmit: () => undefined,
     onOpenProject: () => undefined,
-    onViewAllProjects: () => undefined,
     promptTemplates: PROMPT_TEMPLATES,
     ...overrides,
   };
@@ -737,33 +726,7 @@ async function openOption(name: string) {
   await waitFor(() => expect(screen.getByTestId(`home-hero-footer-option-${name}-menu`)).toBeTruthy());
 }
 
-async function clickHomeRailChip(id: string) {
-  // A type already picked retires the row, and the pill has no menu — so
-  // switching means clearing back to the empty state first.
-  const clear = screen.queryByTestId('home-hero-template-clear');
-  if (clear) fireEvent.click(clear);
-  const lead = await screen.findByTestId('home-hero-type-pill-prototype');
-  await waitFor(() => expect((lead as HTMLButtonElement).disabled).toBe(false));
-  let pill = screen.queryByTestId(`home-hero-type-pill-${id}`);
-  if (!pill) {
-    // Types behind 更多 mount only while its popover is open.
-    fireEvent.click(screen.getByTestId('home-hero-type-pills-more'));
-    pill = screen.queryByTestId(`home-hero-type-pill-${id}-more`);
-  }
-  if (pill) {
-    fireEvent.click(pill);
-    return;
-  }
-  // Types outside the fixed row (media, HyperFrames, …) are reached the way
-  // the workspace tabs-bar hands one off: the apply-template window event,
-  // which HomeHero applies exactly as a row click.
-  fireEvent.keyDown(document, { key: 'Escape' });
-  await act(async () => {
-    window.dispatchEvent(
-      new CustomEvent(HOME_APPLY_TEMPLATE_EVENT, { detail: { chipId: id } }),
-    );
-  });
-}
+const clickHomeRailChip = pickHomeTemplate;
 
 // Drive the Lexical editor and let the OnChange -> onPromptChange -> setPrompt
 // state flush settle (the submit path reads HomeView's React `prompt` state, not

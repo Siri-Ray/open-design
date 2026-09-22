@@ -24,6 +24,7 @@ import { useBrandsByDesignSystemId } from '../runtime/brands';
 import { DesignSystemKitPreview } from './DesignSystemKitPreview';
 import { DesignSystemPreviewModal } from './DesignSystemPreviewModal';
 import { Icon } from './Icon';
+import { ComposerPaletteIcon } from './chat/primitives/icons';
 
 // Mirror DesignSystemsTab's user/official split so the picker's grouping lines
 // up exactly with the "你的体系 / 官方预设" tabs in the Design Systems tab.
@@ -496,7 +497,7 @@ export function DesignSystemPicker({
           title={selected?.title ?? t('designSystemPicker.noneTitle')}
           onClick={() => setOpen((v) => !v)}
         >
-          <Icon name="palette" size={16} />
+          <ComposerPaletteIcon size={16} />
           {selected ? (
             <span className="composer-ds-icon-trigger-label">{selected.title}</span>
           ) : null}
@@ -519,15 +520,20 @@ export function DesignSystemPicker({
         <button
           ref={triggerRef}
           type="button"
-          className={`home-hero__ds-row-trigger${selected ? ' is-selected' : ' is-icon-only'}`}
+          className={`home-hero__ds-row-trigger${selected ? ' is-selected' : ' is-icon-only od-tooltip'}`}
           data-testid="home-hero-design-system-trigger"
           aria-haspopup="listbox"
           aria-expanded={open}
           disabled={triggerDisabled}
-          title={triggerLabel}
           /* Unselected the control is the palette glyph alone (per product:
              不选择不显示文案), so the field name lives on the tooltip + this
-             label rather than in the pill. */
+             label rather than in the pill. The tooltip is the app's own
+             `od-tooltip` bubble, the same one the "+" trigger beside it uses,
+             not the browser's native `title` — the two sat in one row and
+             showed two different styles. Once a system is picked its name is
+             on the pill, so the bubble would only repeat it (the "+" trigger
+             drops its bubble for the same reason once it carries a label). */
+          {...(selected ? {} : { 'data-tooltip': triggerLabel })}
           aria-label={triggerLabel}
           onClick={() => setOpen((v) => !v)}
         >
