@@ -2,6 +2,9 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+// Keep the safety-transport assertions separate from the independently tested diagnostic bridge.
+vi.mock('../../src/observability/experience-diagnostics', () => ({ reportExperienceEvent: vi.fn() }));
+
 import {
   clearExceptionTrackingContext,
   setExceptionTrackingContext,

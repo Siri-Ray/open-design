@@ -24,6 +24,9 @@ import {
  *   5. Scrubbing (file path redaction) runs before dispatch.
  */
 
+// The consent-gated local diagnostic transport is covered independently.
+vi.mock('../../src/observability/experience-diagnostics', () => ({ reportExperienceEvent: vi.fn() }));
+
 const fetchMock = vi.fn();
 
 const ORIGINAL_FETCH = globalThis.fetch;

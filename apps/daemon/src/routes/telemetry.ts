@@ -5,6 +5,9 @@ import {
   type McpAnalyticsEventRequest,
   type McpAnalyticsContextResponse,
   type ObservabilityEventRequest,
+  CLIENT_EXPERIENCE_DIAGNOSTIC_EVENT,
+  parseClientExperienceDiagnostic,
+  type ClientExperienceDiagnostic,
 } from '@open-design/contracts/analytics';
 import {
   createAnalyticsService,
@@ -40,7 +43,23 @@ export interface RegisterTelemetryRoutesDeps {
   namespace?: string;
   readAppConfig: typeof readAppConfig;
   writeAppConfig: typeof writeAppConfig;
+  onClientExperience?: (evidence: ClientExperienceDiagnostic) => string | null;
   onHostFault?: (event: string, properties: Record<string, unknown>) => string | null;
+}
+
+export async function acceptClientExperienceDiagnostic(
+  deps: RegisterTelemetryRoutesDeps, value: unknown,
+): Promise<{ ok: false } | { ok: true; accepted: boolean; retryable?: true }> {
+  const evidence = parseClientExperienceDiagnostic(value);
+  if (!evidence) return { ok: false };
+  try {
+    const config = await deps.readAppConfig(deps.dataDir);
+    if (config.telemetry?.metrics !== true || config.telemetry?.content !== true) {
+      return { ok: true, accepted: false };
+    }
+    const accepted = (deps.onClientExperience?.(evidence) ?? null) !== null;
+    return accepted ? { ok: true, accepted: true } : { ok: true, accepted: false, retryable: true };
+  } catch { return { ok: true, accepted: false }; }
 }
 
 export function resolveInstallerObservationNamespace(namespace: string | undefined): string {
@@ -230,7 +249,7 @@ export function registerTelemetryRoutes(app: Express, deps: RegisterTelemetryRou
     res.json({ ok: true });
   });
 
-  app.post('/api/observability/event', express.json({ limit: '64kb' }), (req, res) => {
+  app.post('/api/observability/event', express.json({ limit: '64kb' }), async (req, res) => {
     const body = (req.body ?? {}) as Partial<ObservabilityEventRequest>;
     const eventName = typeof body.event === 'string' ? body.event.trim() : '';
     if (!eventName) {
@@ -241,6 +260,12 @@ export function registerTelemetryRoutes(app: Express, deps: RegisterTelemetryRou
       body.properties != null && typeof body.properties === 'object' && !Array.isArray(body.properties)
         ? (body.properties as Record<string, unknown>)
         : {};
+    if (eventName === CLIENT_EXPERIENCE_DIAGNOSTIC_EVENT) {
+      // Never falls through to consent-bypassing safety telemetry.
+      const result = await acceptClientExperienceDiagnostic(deps, properties);
+      res.status(!result.ok ? 400 : result.retryable ? 503 : 200).json(result);
+      return;
+    }
     const incidentId = ['desktop_unclean_exit', 'desktop_renderer_crash', 'desktop_child_process_crash', 'packaged_runtime_failed'].includes(eventName)
       ? deps.onHostFault?.(eventName, properties) : null;
     analyticsService.captureSafety({

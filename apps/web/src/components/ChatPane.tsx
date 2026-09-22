@@ -1,3 +1,4 @@
+import { reportExperienceEvent } from '../observability/experience-diagnostics';
 import {
   Fragment,
   memo,
@@ -1583,6 +1584,15 @@ export function ChatPane({
   const displayError = runFailureUi?.messageKey
     ? t(runFailureUi.messageKey, { agent: failedAgentLabel, ...runFailureMessageVars })
     : rawError;
+  useEffect(() => {
+    if (!displayError) return;
+    reportExperienceEvent('surface_view', { element: 'run_failed_toast',
+      error_code: failedRunErrorEvent?.code ?? 'visible_error',
+      run_id: retryAssistant?.runId, project_id: projectId,
+      conversation_id: activeConversationId,
+    });
+  }, [displayError, failedRunErrorEvent?.code, retryAssistant?.runId, projectId, activeConversationId]);
+
   const errorDiagnosticText = displayError
     ? buildRunErrorDiagnosticText({
         message: displayError,

@@ -1,3 +1,4 @@
+import { useExperienceError } from '../observability/use-experience-error';
 import {
   memo,
   useCallback,
@@ -1435,6 +1436,7 @@ export function FileWorkspace({
 
   const [showLibraryPicker, setShowLibraryPicker] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  useExperienceError(uploadError, 'workspace_upload', projectId);
   // The folder the Design Files panel is currently viewing (synced via
   // onCurrentDirChange). New files — uploads, pastes, sketches, dropped files —
   // are created under this folder instead of the project root.

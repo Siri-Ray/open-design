@@ -82,7 +82,35 @@ API summaries retain route templates and error codes, not request bodies or URLs
 Telemetry/diagnostic API errors are outside the selected business route families,
 so delivery failures cannot recursively generate more diagnostic bundles.
 
-Frontend-only cards, legacy handlers bypassing `sendApiError`, unavailable-daemon
-host compensation, and new white-screen/hang detection still need dedicated
-coverage. Existing host crash events do not prove delivery while the daemon is
-unavailable. Do not present this extension as complete main-path coverage.
+The frontend bridge below supplements cards, visible failures and existing
+white-screen/hang detectors. Legacy handlers without a visible-error or typed
+result signal, unavailable-daemon host compensation, and silent unrecognized
+failures remain coverage gaps. Existing host crash events do not prove delivery
+while the daemon is unavailable. Do not claim universal failure detection.
+
+## Frontend evidence bridge
+
+The `client_experience_diagnostic` branch of `/api/observability/event` is separate
+from safety analytics: it validates bounded metadata, checks BOTH consent flags,
+and calls the same diagnostic queue. It never falls through to `captureSafety`.
+Frontend delivery is independent of PostHog setup and accepts no free-text error,
+URL, stack or page content. It carries category/surface/code, optional project,
+conversation and Run IDs, and an observation timestamp. Server registration time
+owns retention; client time is only evidence.
+
+Sources: chat card (including missing Run/code), typed failed result events,
+start-blocked and preview failure surfaces; failed/incomplete projects in workspace
+tabs, recent cards and the recent rail; existing white-screen, preview runtime/
+resource errors and stuck-run detectors; file version, refresh, source loading,
+manual edit, template save, deployment, image export and workspace upload errors.
+Awaiting-input, healthy success and canceled export result events do not trigger
+this bridge. Manual Run cancellation remains the separate daemon lifecycle hook.
+
+Run/code and project status identities deduplicate repeated displays across reloads
+at the durable daemon queue. Operation/runtime events coalesce identical metadata
+for 10 seconds in a bounded 100-entry browser map. Local transport retries at most
+twice with five-second request timeouts and bounded in-memory outstanding work;
+transport errors never create more diagnostics. Closing the browser can lose
+unacknowledged events. No persistent browser queue or unavailable-daemon host
+uploader is claimed. Different kinds of evidence can still create distinct incidents
+for one Run; full cross-layer incident merging is not implemented.

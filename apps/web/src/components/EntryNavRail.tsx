@@ -506,6 +506,7 @@ function RailRecentSection({
                     project={project}
                     workspaceContext={workspaceContext}
                     runStatus={acknowledged ? undefined : status}
+                    runId={summary?.latestTerminalRunId}
                     onOpen={openProject}
                     onRename={onRename}
                     onDelete={onDelete}

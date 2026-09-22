@@ -1,3 +1,4 @@
+import { reportProjectFailure } from '../../observability/experience-diagnostics';
 // One row of the nav rail's 最近浏览过 list: the project name, a hover preview
 // that floats out to the right of the rail, and a ⋮ menu.
 //
@@ -160,6 +161,7 @@ export function RailRecentRow({
   project,
   workspaceContext,
   runStatus,
+  runId,
   onOpen,
   onRename,
   onDelete,
@@ -169,11 +171,16 @@ export function RailRecentRow({
   /** This project's live run status, when it has one (per product: 如果有项目在
    *  进行，这个 icon 换成状态). Drives the leading glyph and nothing else. */
   runStatus?: ProjectDisplayStatus;
+  runId?: string;
   onOpen?: (id: string) => void | Promise<unknown>;
   onRename?: (id: string, name: string) => void;
   onDelete?: (id: string) => Promise<boolean | void> | boolean | void;
 }) {
   const t = useT();
+  useEffect(() => {
+    if (runStatus) reportProjectFailure({ id: project.id,
+      status: { value: runStatus, runId, updatedAt: project.status?.updatedAt } }, 'recent_rail');
+  }, [project.id, project.status?.updatedAt, runStatus, runId]);
   const snapshotKey = projectCoverSnapshotKey(
     workspaceIdentityCacheKey(workspaceContext),
     project.id,

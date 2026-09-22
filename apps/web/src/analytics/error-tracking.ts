@@ -1,3 +1,4 @@
+import { reportExperienceEvent } from '../observability/experience-diagnostics';
 // Direct-fetch safety telemetry transport.
 //
 // Why this exists alongside posthog-js's autocapture
@@ -195,6 +196,7 @@ function captureException(
     handled: metadata.handled === true,
   };
 
+  reportExperienceEvent('client_exception', {});
   enqueue('$exception', properties);
 }
 
@@ -210,6 +212,7 @@ export function reportSafetyEvent(
   properties: Record<string, unknown> = {},
   options: { currentUrlOverride?: string } = {},
 ): void {
+  reportExperienceEvent(eventName, properties);
   const merged: Record<string, unknown> = {
     ...properties,
     $current_url: scrubUrl(
