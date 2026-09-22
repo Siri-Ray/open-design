@@ -968,6 +968,7 @@ export function createRunAnalyticsLifecycle(
             : undefined;
           const finishedProperties: Record<string, unknown> = {
               ...baseProps,
+              ...(run.diagnosticIncidentIds?.length ? { diagnostic_incident_ids: run.diagnosticIncidentIds } : {}),
               design_system_id: run.designSystemId ?? undefined,
               design_system_digest: run.designSystemDigest ?? undefined,
               design_system_selection_source: run.designSystemSelectionSource ?? 'none',

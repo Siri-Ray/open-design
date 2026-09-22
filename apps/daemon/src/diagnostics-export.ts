@@ -92,6 +92,7 @@ export interface DiagnosticsHandlerOptions {
   runsDir?: string | null;
   /** OpenDesign data dir (OD_DATA_DIR), used to locate the AMR OpenCode home. */
   dataDir?: string | null;
+  automaticUploadStatus?: () => Record<string, unknown>;
 }
 
 const TAIL_BYTES_PER_LOG = 4 * 1024 * 1024;
@@ -224,6 +225,27 @@ function resolveDesktopCrashDumpsDir(runtime: SidecarRuntimeContext<LegacySideca
   return join(dirname(desktopLog), 'crashes');
 }
 
+/** Automatic uploads select the failing run and its runtime; manual exports remain broader. */
+export async function buildAutomaticDiagnosticSources(
+  options: DiagnosticsHandlerOptions,
+  incident: { runId?: string; agentId?: string },
+): Promise<LogSource[]> {
+  const sources: LogSource[] = [];
+  if (incident.runId && /^[A-Za-z0-9_-]{1,128}$/.test(incident.runId) && options.runsDir) {
+    sources.push({ name: `runs/${incident.runId}/events.jsonl`,
+      absolutePath: join(options.runsDir, incident.runId, 'events.jsonl'), kind: 'text', tailBytes: TAIL_BYTES_PER_LOG });
+  }
+  sources.push(...await buildSidecarLogSources(options.runtime));
+  if (incident.agentId) {
+    const environment = await resolveDiagnosticsAgentEnvironment(options.dataDir);
+    const agentSources = await buildAgentCliLogSources({ homeDir: homedir(), dataDir: options.dataDir ?? null,
+      amrOpenCodeHome: environment.amrOpenCodeHome, claudeConfigDir: environment.claudeConfigDir,
+      codexHome: environment.codexHome, xdgDataHome: environment.openCodeXdgDataHome ?? null });
+    sources.push(...agentSources.filter((source) => incident.agentId === '*' || source.name.startsWith(`agent-cli-logs/${incident.agentId}/`)));
+  }
+  return sources;
+}
+
 export function createDiagnosticsExportHandler(options: DiagnosticsHandlerOptions): RequestHandler {
   return async (_req, res) => {
     try {
@@ -284,6 +306,10 @@ export function createDiagnosticsExportHandler(options: DiagnosticsHandlerOption
         },
         sources,
         summaries: {
+          'automatic-log-upload.json': (() => {
+            try { return options.automaticUploadStatus?.() ?? { available: false }; }
+            catch { return { available: false, reason: 'status_unavailable' }; }
+          })(),
           'recent-api-failures.json': {
             retainedLimit: 100,
             privacy:

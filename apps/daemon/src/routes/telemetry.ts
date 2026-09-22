@@ -40,6 +40,7 @@ export interface RegisterTelemetryRoutesDeps {
   namespace?: string;
   readAppConfig: typeof readAppConfig;
   writeAppConfig: typeof writeAppConfig;
+  onHostFault?: (event: string, properties: Record<string, unknown>) => string | null;
 }
 
 export function resolveInstallerObservationNamespace(namespace: string | undefined): string {
@@ -240,10 +241,12 @@ export function registerTelemetryRoutes(app: Express, deps: RegisterTelemetryRou
       body.properties != null && typeof body.properties === 'object' && !Array.isArray(body.properties)
         ? (body.properties as Record<string, unknown>)
         : {};
+    const incidentId = ['desktop_unclean_exit', 'desktop_renderer_crash', 'desktop_child_process_crash', 'packaged_runtime_failed'].includes(eventName)
+      ? deps.onHostFault?.(eventName, properties) : null;
     analyticsService.captureSafety({
       eventName,
       appVersion: cachedAppVersion?.version ?? UNKNOWN_APP_VERSION,
-      properties,
+      properties: { ...properties, ...(incidentId ? { diagnostic_incident_id: incidentId } : {}) },
     });
     res.json({ ok: true });
   });
@@ -251,6 +254,7 @@ export function registerTelemetryRoutes(app: Express, deps: RegisterTelemetryRou
   const disposeFatalHandlers = installFatalTelemetryHandlers({
     analyticsService,
     getAppVersion: () => cachedAppVersion,
+    ...(deps.onHostFault ? { onHostFault: deps.onHostFault } : {}),
   });
 
   const appVersionPromise = (async () => {
@@ -588,9 +592,11 @@ export function sanitizeMcpAnalyticsProperties(
 function installFatalTelemetryHandlers({
   analyticsService,
   getAppVersion,
+  onHostFault,
 }: {
   analyticsService: ReturnType<typeof createAnalyticsService>;
   getAppVersion: () => any;
+  onHostFault?: (event: string, properties: Record<string, unknown>) => string | null;
 }): () => void {
   const FATAL_FLUSH_TIMEOUT_MS = 1000;
   let fatalShuttingDown = false;
@@ -600,6 +606,10 @@ function installFatalTelemetryHandlers({
   ): void => {
     if (fatalShuttingDown) return;
     fatalShuttingDown = true;
+    try {
+      const incidentId = onHostFault?.(eventName, properties);
+      if (incidentId) properties = { ...properties, diagnostic_incident_id: incidentId };
+    } catch { /* local evidence registration must never delay fatal shutdown */ }
     const flushSequence = (async () => {
       try {
         await analyticsService.captureSafety({
