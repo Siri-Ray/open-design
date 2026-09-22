@@ -1,5 +1,5 @@
 // Selected creation type with category-switch controls.
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useId, useRef, useState } from 'react';
 import type { HomeHeroChip } from './chips';
 import { Icon } from '../Icon';
 import { useT } from '../../i18n';
@@ -42,7 +42,9 @@ export function TemplatePicker({
       document.removeEventListener('keydown', escape);
     };
   }, [open]);
-  useEffect(() => { setOpen(false); }, [activeChipId, disabled]);
+  // Reset before the enabled trigger can receive a click. A passive reset can
+  // otherwise close the menu opened immediately after loading completes.
+  useLayoutEffect(() => { setOpen(false); }, [activeChipId, disabled]);
   const active = templates.find((chip) => chip.id === activeChipId) ?? null;
 
   const valueLabel = active ? labelFor(active.id) : t('homeHero.templatePicker.label');

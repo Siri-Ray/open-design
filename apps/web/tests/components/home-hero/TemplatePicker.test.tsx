@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import { useLayoutEffect } from 'react';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -92,6 +93,18 @@ describe('TemplatePicker', () => {
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(screen.queryByRole('listbox')).toBeNull();
     expect(document.activeElement).toBe(trigger);
+  });
+
+  it('keeps a click made as the picker becomes enabled before passive effects flush', () => {
+    function ReadyPicker({ disabled }: { disabled: boolean }) {
+      useLayoutEffect(() => {
+        if (!disabled) screen.getByTestId('home-hero-template-trigger').querySelector('button')!.click();
+      }, [disabled]);
+      return <TemplatePicker templates={templates} activeChipId="prototype" labelFor={labelFor} disabled={disabled} />;
+    }
+    const { rerender } = render(<ReadyPicker disabled />);
+    rerender(<ReadyPicker disabled={false} />);
+    expect(screen.getByRole('listbox')).toBeTruthy();
   });
 
   it('closes an open menu when loading disables the picker', () => {
