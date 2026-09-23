@@ -287,6 +287,23 @@ type DesignToolboxResource =
 
 export type ChatSendOutcome = void | 'restore-draft';
 
+/** Everything `reset()` clears, captured at submit so a handed-back send can be restored. */
+interface ComposerSendSnapshot {
+  draft: string;
+  staged: ChatAttachment[];
+  nextAttachmentOrder: number;
+  stagedVisualComments: ChatCommentAttachment[];
+  stagedSkills: SkillSummary[];
+  stagedMcpServers: McpServerConfig[];
+  stagedConnectors: ConnectorDetail[];
+  stagedWorkspaceContexts: WorkspaceContextItem[];
+  workspaceLinkedDirAdds: Record<string, TrackedWorkspaceLinkedDir>;
+  promotedWorkspaceContextDir: string | null;
+  activeAppliedPlugin: AppliedPluginSnapshot | null;
+  inlineBackedPlugin: { id: string; label: string } | null;
+  quotes: ChatQuote[];
+}
+
 interface Props {
   /**
    * 正文取词(设计稿组件 23)攒下的引用。输入框上方那枚「N 条注释」芯片就是它,
@@ -643,9 +660,10 @@ export const ChatComposer = forwardRef<ChatComposerHandle, Props>(
     // by handleEditorChange (the editor is the single source for typing) and by
     // the programmatic-set paths below.
     const draftRef = useRef(draft);
-    // Submission admission can cross asynchronous gates before the composer
-    // is cleared. Keep a synchronous latch so a second Enter/click in that
-    // window cannot enqueue the same still-visible payload again.
+    // Submission admission can cross asynchronous gates after the composer
+    // has already cleared (OPEND-3392). Keep a synchronous latch so a second
+    // Enter/click in that window cannot start another send before the host
+    // decides whether the first one is kept or handed back.
     const composedSendPendingRef = useRef(false);
     // The latch above prevents duplicates, but a ref alone leaves the UI
     // completely unchanged while an async admission gate (notably AMR's
@@ -1603,31 +1621,76 @@ export const ChatComposer = forwardRef<ChatComposerHandle, Props>(
       return Object.keys(meta).length > 0 ? meta : undefined;
     }
 
+    /**
+     * 输入框在「点发送」那一刻的全部可发内容 —— `reset()` 清掉的每一样都在这里。
+     *
+     * 宿主的 `onSend` 可能要等一道异步闸门(OpenDesign Cloud 的余额预检是两次
+     * HTTP 往返)才落定,而那一轮在闸门之前就已经上屏、会话已经是 Working。
+     * 输入框要是等到落定才清,用户就会看着已经发出去的正文在输入框里再躺
+     * 一两秒,以为没发出去(OPEND-3392)。所以提交即清空,只有宿主把这一发
+     * 退回来(`'restore-draft'` 或抛错)时,才凭这份快照原样还回去。
+     */
+    function captureSendSnapshot(): ComposerSendSnapshot {
+      return {
+        draft: draftRef.current,
+        staged,
+        nextAttachmentOrder: nextAttachmentOrderRef.current,
+        stagedVisualComments,
+        stagedSkills,
+        stagedMcpServers,
+        stagedConnectors,
+        stagedWorkspaceContexts,
+        workspaceLinkedDirAdds,
+        promotedWorkspaceContextDir,
+        activeAppliedPlugin,
+        inlineBackedPlugin: inlineBackedPluginRef.current,
+        quotes: quotes ?? [],
+      };
+    }
+
+    /**
+     * 把退回来的那一发还给输入框。
+     *
+     * 等待期间用户已经开始写下一条的话**不还原**:此刻输入框里的是新内容,
+     * 拿旧快照盖上去等于吞掉用户刚打的字。
+     */
+    function restoreSendSnapshot(snapshot: ComposerSendSnapshot) {
+      const currentText = editorRef.current?.getText() ?? draftRef.current;
+      if (currentText.trim()) return;
+      replaceEditorDraft(snapshot.draft);
+      setStaged(snapshot.staged);
+      nextAttachmentOrderRef.current = snapshot.nextAttachmentOrder;
+      setStagedVisualComments(snapshot.stagedVisualComments);
+      setStagedSkills(snapshot.stagedSkills);
+      setStagedMcpServers(snapshot.stagedMcpServers);
+      setStagedConnectors(snapshot.stagedConnectors);
+      setStagedWorkspaceContexts(snapshot.stagedWorkspaceContexts);
+      setWorkspaceLinkedDirAdds(snapshot.workspaceLinkedDirAdds);
+      setPromotedWorkspaceContextDir(snapshot.promotedWorkspaceContextDir);
+      setActiveAppliedPlugin(snapshot.activeAppliedPlugin);
+      inlineBackedPluginRef.current = snapshot.inlineBackedPlugin;
+      if (snapshot.quotes.length > 0) onRestoreQuotes?.(snapshot.quotes);
+    }
+
     function finishComposedSend(
       outcome: ChatSendOutcome | Promise<ChatSendOutcome>,
+      snapshot: ComposerSendSnapshot,
       pendingMetadata?: { entryFrom: ChatSendMeta['entryFrom'] | null; sessionMode: ChatSessionMode | null },
     ) {
+      const handBack = () => {
+        restoreSendSnapshot(snapshot);
+        if (pendingMetadata?.entryFrom && !pendingEntryFromRef.current) {
+          pendingEntryFromRef.current = pendingMetadata.entryFrom;
+        }
+        if (pendingMetadata?.sessionMode && !pendingSessionModeRef.current) {
+          pendingSessionModeRef.current = pendingMetadata.sessionMode;
+        }
+      };
       void Promise.resolve(outcome).then(
         (result) => {
-          if (result === 'restore-draft') {
-            if (pendingMetadata?.entryFrom && !pendingEntryFromRef.current) {
-              pendingEntryFromRef.current = pendingMetadata.entryFrom;
-            }
-            if (pendingMetadata?.sessionMode && !pendingSessionModeRef.current) {
-              pendingSessionModeRef.current = pendingMetadata.sessionMode;
-            }
-            return;
-          }
-          reset();
+          if (result === 'restore-draft') handBack();
         },
-        () => {
-          if (pendingMetadata?.entryFrom && !pendingEntryFromRef.current) {
-            pendingEntryFromRef.current = pendingMetadata.entryFrom;
-          }
-          if (pendingMetadata?.sessionMode && !pendingSessionModeRef.current) {
-            pendingSessionModeRef.current = pendingMetadata.sessionMode;
-          }
-        },
+        handBack,
       ).finally(() => {
         composedSendPendingRef.current = false;
         setComposedSendPending(false);
@@ -1641,14 +1704,18 @@ export const ChatComposer = forwardRef<ChatComposerHandle, Props>(
       if (composedSendPendingRef.current) return false;
       composedSendPendingRef.current = true;
       setComposedSendPending(true);
+      const snapshot = captureSendSnapshot();
+      let outcome: ChatSendOutcome | Promise<ChatSendOutcome>;
       try {
-        finishComposedSend(send(), pendingMetadata);
-        return true;
+        outcome = send();
       } catch (error) {
         composedSendPendingRef.current = false;
         setComposedSendPending(false);
         throw error;
       }
+      reset();
+      finishComposedSend(outcome, snapshot, pendingMetadata);
+      return true;
     }
 
     /**
