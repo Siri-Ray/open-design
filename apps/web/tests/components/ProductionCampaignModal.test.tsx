@@ -1467,6 +1467,8 @@ describe("ProductionCampaignModal device impressions", () => {
 				"clearTimeout",
 				"setInterval",
 				"clearInterval",
+				"requestAnimationFrame",
+				"cancelAnimationFrame",
 			],
 		});
 		vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
@@ -1481,10 +1483,13 @@ describe("ProductionCampaignModal device impressions", () => {
 		await act(async () => {
 			await vi.advanceTimersByTimeAsync(10);
 		});
+		// Verification uses native async crypto, which fake timers cannot flush.
+		// Wait for the real mount + visible frame before polling; creating the
+		// element alone does not establish an open presentation.
+		await act(async () => {
+			await vi.waitFor(() => expect(localStorage.getItem(marker())).toBe("1"));
+		});
 		expect(document.querySelector("opend-touchpoint")).not.toBeNull();
-		// Fake timers do not drive jsdom's animation frames, so record the
-		// impression the paint would have recorded.
-		localStorage.setItem(marker(), "1");
 		await act(async () => {
 			await vi.advanceTimersByTimeAsync(30_000);
 		});
