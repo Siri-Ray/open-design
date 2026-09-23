@@ -23,14 +23,7 @@ export function TemplatePicker({
   labelFor,
 }: Props) {
   const t = useT();
-  // The menu belongs to the selection it was opened over: a new active type or
-  // a disabled flip closes it. Keying the open state on that selection (rather
-  // than resetting it from an effect) keeps a click on the very commit that
-  // enabled the trigger from being undone by the still-pending reset.
-  const selectionKey = `${activeChipId ?? ''}|${disabled ? 'disabled' : 'enabled'}`;
-  const [openFor, setOpenFor] = useState<string | null>(null);
-  const open = openFor === selectionKey;
-  const setOpen = (next: boolean) => setOpenFor(next ? selectionKey : null);
+  const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuId = useId();
@@ -49,6 +42,15 @@ export function TemplatePicker({
       document.removeEventListener('keydown', escape);
     };
   }, [open]);
+  // A type change or a disable closes the menu in the render that shows it, not
+  // in a later effect: passive effects can run after the user has already
+  // clicked the updated trigger, and would then close the menu that click just
+  // opened.
+  const [shownFor, setShownFor] = useState({ activeChipId, disabled });
+  if (shownFor.activeChipId !== activeChipId || shownFor.disabled !== disabled) {
+    setShownFor({ activeChipId, disabled });
+    setOpen(false);
+  }
   const active = templates.find((chip) => chip.id === activeChipId) ?? null;
 
   const valueLabel = active ? labelFor(active.id) : t('homeHero.templatePicker.label');
@@ -72,7 +74,7 @@ export function TemplatePicker({
         <button type="button" ref={triggerRef} className={styles.switcher}
           aria-label={t('homeHero.templatePicker.label')} aria-haspopup="listbox"
           aria-expanded={open} aria-controls={open ? menuId : undefined} disabled={disabled}
-          onClick={() => setOpen(!open)}>
+          onClick={() => setOpen((value) => !value)}>
           <span className="home-hero__footer-select-label">{valueLabel}</span>
           <svg xmlns="http://www.w3.org/2000/svg" width="8" height="8" viewBox="6 6 12 12" fill="currentColor" aria-hidden="true"><path d="M12 15.0006L7.75732 10.758L9.17154 9.34375L12 12.1722L14.8284 9.34375L16.2426 10.758L12 15.0006Z" /></svg>
         </button>
