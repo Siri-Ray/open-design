@@ -21,10 +21,15 @@ import {
 import {
 	emitProductionTouchpointLoadDiagnostic,
 	loadProductionTouchpointDecision,
+	productionTouchpointRecovery,
 } from "./production-touchpoint-loader";
 import {
 	resolveAuthorizationDeadline,
+	touchpointContentIdentity,
+	touchpointLeaseValue,
+	touchpointWithdrawsDisplay,
 	useTouchpointLifecycle,
+	type TouchpointLeaseValue,
 	type TouchpointLifecycleLoad,
 } from "./touchpoint-lifecycle";
 import {
@@ -35,7 +40,6 @@ import {
 import type { TestCampaignPlacement, TestDecision } from "./TestCampaignModal";
 import styles from "./TestCampaignModal.module.css";
 const PLACEMENT = "opend.home.campaign-modal";
-const MAX_LEASE_MS = 5 * 60_000;
 export const PRODUCTION_ACTION_TELEMETRY_TIMEOUT_MS = 3_000;
 const supportedCapabilities = new Set(["close", "static-action"]);
 
@@ -90,9 +94,15 @@ export function internalActionNavigationUrl(
 	}
 }
 
-/** Performs a server-validated click before the host consumes a static target. */
+/**
+ * Performs a server-validated click before the host consumes a static target.
+ *
+ * Takes the lease value, not the response DTO: how long authority lasts arrives
+ * as `expiresAt`, from the lease's own window, so the decision's own (possibly
+ * superseded) timing has no business being in scope here.
+ */
 export async function dispatchProductionCampaignAction(
-	decision: Decision,
+	decision: TouchpointLeaseValue<Decision>,
 	actionId: string,
 	generation: number,
 	currentGeneration: () => number,
@@ -200,7 +210,7 @@ function testSelectionKeyOf(
 	]);
 }
 /** Production v2 modal shares the Test adapter; it does not fall back to a frame when bytes or runtime identity fail. */
-type AuthorizedDecision = Decision & { sessionSubject: string };
+type AuthorizedDecision = TouchpointLeaseValue<Decision> & { sessionSubject: string };
 type OpenPresentation = Readonly<{
 	sessionSubject: string;
 	activityId: string;
@@ -267,15 +277,21 @@ export function ProductionCampaignModal({
 			const loaded = await loadProductionTouchpointDecision(PLACEMENT, locale, signal, active?.touchpointDecisionId);
 			if (signal.aborted) return { kind: "clear" };
 			if (loaded.kind === "revoked") {
-				clearOpenPresentation();
-				return active && loaded.receipt.touchpointDecisionId === active.touchpointDecisionId && loaded.receipt.deploymentId === active.deploymentId && loaded.receipt.activityId === active.activityId && loaded.receipt.contentVersionId === active.content.id ? { kind: "clear" } : { kind: "retain" };
+				const revokesActive =
+					active !== null &&
+					loaded.receipt.touchpointDecisionId === active.touchpointDecisionId &&
+					loaded.receipt.deploymentId === active.deploymentId &&
+					loaded.receipt.activityId === active.activityId &&
+					loaded.receipt.contentVersionId === active.content.id;
+				if (!active || revokesActive) clearOpenPresentation();
+				return revokesActive ? { kind: "clear" } : { kind: "retain" };
 			}
 			if (loaded.kind === "no-decision") {
-				clearOpenPresentation();
+				if (!active) clearOpenPresentation();
 				return active ? { kind: "retain" } : { kind: "clear" };
 			}
 			const next = loaded.value as Decision;
-			const deadline = resolveAuthorizationDeadline(next, MAX_LEASE_MS);
+			const deadline = resolveAuthorizationDeadline(next);
 			const serverTime = Date.parse(next.serverTime);
 			if (!next.activityId || !next.touchpointDecisionId || !next.deploymentId || !next.content?.id || next.placementKey !== PLACEMENT || next.content?.placementKey !== PLACEMENT || deadline === null || !Number.isFinite(serverTime) || !supportsWebTouchpointCapabilities(next.content, next.requiredCapabilities, supportedCapabilities)) {
 				clearOpenPresentation();
@@ -300,24 +316,39 @@ export function ProductionCampaignModal({
 				(presentation.sessionSubject !== sessionSubject || presentation.deadline <= Date.now())
 			)
 				clearOpenPresentation();
-			// Only this mounted activity may cross a locale transition. A stored impression
-			// never overrides a fresh authorization, expiry, revocation, or account fence.
+			// Only the presentation still on screen may cross a locale transition or a
+			// lease renewal. `active` is not that test: a lease revoked by the page
+			// fence stays behind as the revalidation subject, so keying the exemption
+			// on its activity let every wake re-offer an activity this device had
+			// already been shown. A stored impression never overrides a fresh
+			// authorization, expiry, revocation, or account fence.
 			const continuesOpenPresentation =
 				openPresentation.current === presentation &&
 				presentation?.sessionSubject === sessionSubject &&
 				presentation.activityId === next.activityId &&
 				presentation.deadline > Date.now();
-			if (!continuesOpenPresentation && active?.activityId !== next.activityId && wasDisplayed(sessionSubject, next.activityId)) return { kind: "retain" };
-			return { kind: "decision", value: { ...next, sessionSubject }, key: next.touchpointDecisionId + ":" + next.deploymentId + ":" + next.activityId + ":" + next.content.id, validForMs: deadline - serverTime };
+			// A recorded activity that is not the open presentation may not be
+			// published. Retaining is only for an offer arriving BESIDE a live
+			// presentation, which keeps its mount; with nothing on screen a retain
+			// would republish the very lease the page fence just withdrew, so the
+			// suppressed offer has to clear instead.
+			if (!continuesOpenPresentation && wasDisplayed(sessionSubject, next.activityId))
+				return openPresentation.current ? { kind: "retain" } : { kind: "clear" };
+			return { kind: "decision", value: { ...touchpointLeaseValue(next), sessionSubject }, key: touchpointContentIdentity(next), validForMs: deadline - serverTime, offlineRecovery: productionTouchpointRecovery(loaded.offlineReplay) ?? undefined };
 		},
 		[clearOpenPresentation, locale, sessionSubject],
 	);
 	const onError = useCallback((error: unknown) => {
-		clearOpenPresentation();
+		// The lifecycle keeps display authority through a transport failure and
+		// ends it only for the server's own withdrawal; the presentation on screen
+		// has to follow the same rule. Releasing it on every error told the
+		// impression gate the modal was gone while it was still mounted, so the
+		// recovering poll suppressed the activity it was still showing.
+		if (touchpointWithdrawsDisplay(error)) clearOpenPresentation();
 		const diagnostic = emitProductionTouchpointLoadDiagnostic(error);
 		if (diagnostic) emitWebTouchpointDiagnostic(diagnostic);
 	}, [clearOpenPresentation]);
-	const lifecycle = useTouchpointLifecycle<AuthorizedDecision>({ enabled: productionEnabled, identity: productionEnabled ? JSON.stringify([sessionSubject, locale]) : null, load, onError });
+	const lifecycle = useTouchpointLifecycle<AuthorizedDecision>({ enabled: productionEnabled, identity: productionEnabled ? JSON.stringify([sessionSubject, locale]) : null, load, onError, offlineFallback: true });
 	const { current: decision, generation, clear, isCurrent } = lifecycle;
 	const closeProductionModal = useCallback(() => {
 		clearOpenPresentation();
@@ -327,6 +358,27 @@ export function ProductionCampaignModal({
 		if (!authenticated || !sessionSubject || openPresentation.current?.sessionSubject !== sessionSubject)
 			clearOpenPresentation();
 	}, [authenticated, clearOpenPresentation, sessionSubject]);
+	/*
+	 * There is deliberately no visibility fence here.
+	 *
+	 * One existed, to release the open presentation whenever the page went
+	 * hidden. Its premise was that "a hidden page withdraws the lease and takes
+	 * this modal down with it", so the presentation was genuinely over and the
+	 * offer arriving on wake was a new one. OPEND-3363 removed that premise:
+	 * hiding now cancels only the request in flight and leaves both the lease
+	 * and this modal exactly as they were.
+	 *
+	 * Releasing the presentation anyway left the campaign on screen with nothing
+	 * recorded as presenting it, and the poll that follows on return read the
+	 * device impression, found no open presentation, and cleared the host — the
+	 * campaign vanished on a tab switch, which is the symptom both fixes were
+	 * written to remove.
+	 *
+	 * What the fence was protecting is still protected, by the presentation's own
+	 * deadline: it is anchored to the authorization that opened it, so a sleep
+	 * long enough to lapse the lease also lapses the presentation, and the offer
+	 * that arrives on wake is correctly read as a new one.
+	 */
 	useEffect(() => {
 		ensureWebTouchpointElement();
 	}, []);

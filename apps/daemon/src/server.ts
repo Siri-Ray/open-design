@@ -13,7 +13,7 @@ import type {
 import express from 'express';
 import multer from 'multer';
 import JSZip from 'jszip';
-import { execFile, spawn } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -142,7 +142,8 @@ import {
   selectPromptImagePaths,
 } from './runtimes/chat-prompt-inputs.js';
 import {
-  writePromptAndEndStdin,
+  recordPromptDeliveredAtSpawn,
+  runtimeReadsPlainTextPromptFromStdin,
   applyClaudeStreamJsonRunBookkeeping,
   assertValidRuntimeDefFirstOutputTimeoutMs,
   assertValidRuntimeDefInactivityTimeoutMs,
@@ -538,6 +539,7 @@ import { importFigmaFromBytes } from './figma/figma-import.js';
 import { renderDesignSystemPreview } from './design-systems/preview.js';
 import { renderDesignSystemShowcase } from './design-systems/showcase.js';
 import { createChatRunService } from './runtimes/runs.js';
+import { reapLeftoverAgentProcesses, spawnAgentProcess } from './runtimes/agent-process.js';
 import {
   createAmrTerminalReportDeliveryService,
   createAmrTerminalReportFinalizer,
@@ -626,6 +628,10 @@ import {
   readRunTelemetrySinkConfig,
 } from './langfuse-trace.js';
 import { reconcileDurableRunTerminals } from './runtimes/run-terminal-reconciliation.js';
+import {
+  startMessageEventPayloadHeal,
+  type MessageEventPayloadHealHandle,
+} from './storage/message-event-payload-heal.js';
 import { createTaskObservationRolloutService } from './observability/task-observation-rollout.js';
 import { strategyTaskRunObservationId } from './observability/task-observation-aggregation.js';
 import { collectCodexChildEvidence } from './runtimes/codex-child-evidence.js';
@@ -727,7 +733,9 @@ import {
 } from './routines.js';
 import { buildMcpInstallPayload } from './mcp-install-info.js';
 import { configureDiagnosticsEvidence } from './services/diagnostics-evidence.js';
-import { createDiagnosticsExportHandler } from './diagnostics-export.js';
+import { beginDaemonHealthSession } from './services/daemon-health.js';
+import { readSqlitePageStats } from './storage/db-inspect.js';
+import { createDiagnosticsExportHandler, resolveDaemonPreviousLogPath } from './diagnostics-export.js';
 import {
   CHAT_SCROLL_FORENSICS_PATH,
   chatScrollForensicsBodyParser,
@@ -3161,6 +3169,25 @@ export async function startServer({
     );
   }
 
+  // Agent CLIs a previous daemon spawned and never saw finish (it died without
+  // running any shutdown path) keep running until this point. Verify them by
+  // OS identity and terminate them first thing, in the background: for as
+  // long as a leftover runs it may be editing the project unsupervised.
+  void reapLeftoverAgentProcesses({ runsLogDir: path.join(RUNTIME_DATA_DIR, 'runs') })
+    .then((result) => {
+      const unverified = result.skipped.filter((entry) => entry.verdict === 'unverifiable');
+      if (result.reaped.length > 0 || unverified.length > 0 || result.stagedPromptsRemoved > 0) {
+        console.warn('[runs] leftover agent processes from a previous daemon', {
+          reaped: result.reaped,
+          unverified,
+          stagedPromptsRemoved: result.stagedPromptsRemoved,
+        });
+      }
+    })
+    .catch((error) => {
+      console.warn('[runs] leftover agent process reap failed', error);
+    });
+
   const app = express();
   installRouteRegistrationGuard(app);
   // Clipper page captures are self-contained HTML with inlined images plus a
@@ -3447,7 +3474,14 @@ export async function startServer({
     }
     next();
   });
+  // Heap/SQLite health: begun before the first SQLite open so a daemon that
+  // dies seconds into startup still leaves a checkpoint for the next boot.
+  const daemonHealth = beginDaemonHealthSession({
+    dataRoot: RUNTIME_DATA_DIR,
+    previousLogPath: resolveDaemonPreviousLogPath(runtime),
+  });
   const db = openDatabase(PROJECT_ROOT, { dataDir: RUNTIME_DATA_DIR });
+  daemonHealth?.setStorageProbe(() => readSqlitePageStats({ db, file: db.name }));
   const amrTerminalReportOutbox = createAmrTerminalReportOutboxStore(db);
   const amrTerminalReportDelivery = createAmrTerminalReportDeliveryService({
     store: amrTerminalReportOutbox,
@@ -4064,20 +4098,35 @@ export async function startServer({
     readVelaControlApiContext,
     configuredAmrEnv(),
   );
+  let workspaceHubAmrProfile = resolveAmrProfile({
+    ...process.env,
+    ...configuredAmrEnv(),
+  });
   const resetWorkspaceIdentityCaches = (): void => {
     workspaceDirectoryAuthority.resetIdentity();
     workspaceExactAuthorityCache.resetIdentity();
     workspaceExactContextCache.resetIdentity();
   };
   const refreshWorkspaceHubAccountIdentity = (): void => {
+    const currentAmrProfile = resolveAmrProfile({
+      ...process.env,
+      ...configuredAmrEnv(),
+    });
     const currentIdentity = velaWorkspaceDirectoryIdentity(
       readVelaControlApiContext,
       configuredAmrEnv(),
     );
     if (currentIdentity === workspaceHubAccountIdentity) return;
+    const environmentChanged = currentAmrProfile !== workspaceHubAmrProfile;
     workspaceHubAccountIdentity = currentIdentity;
+    workspaceHubAmrProfile = currentAmrProfile;
     resetWorkspaceIdentityCaches();
-    workspaceHubSubscriptions?.refreshEndpoints();
+    if (environmentChanged) {
+      workspaceHubSubscriptions?.resetForEnvironmentChange();
+      workspaceBillingRuntime.resetIdentity();
+    } else {
+      workspaceHubSubscriptions?.refreshEndpoints();
+    }
   };
   const fetchWorkspaceDirectoryForAccountSurface = () => {
     refreshWorkspaceHubAccountIdentity();
@@ -12804,23 +12853,11 @@ export async function startServer({
       { allowRetry = true } = {},
     ) => {
       lifecycle.mark('finalize_start');
-      // A clean child exit does not complete a task rejected by the strategy
-      // gate. Reconcile before persisting the message or publishing the Run
-      // terminal event, while retaining the actual process exit code.
-      if (
-        status === 'succeeded'
-        && run.strategyTask?.outcome === 'blocked'
-        && run.strategyTask.activeRunId === run.id
-      ) {
-        status = 'failed';
-        allowRetry = false;
-        const reasonCodes = run.strategyTask.blockedContext?.reasonCodes ?? [];
-        send('error', createSseErrorPayload(
-          'OD_NEXT_TASK_BLOCKED',
-          `The task could not complete${reasonCodes.length ? `: ${reasonCodes.join(', ')}` : '.'}`,
-          { retryable: false, details: { reasonCodes } },
-        ));
-      }
+      // The Run records how the process ended; the strategy task records its
+      // own verdict. A task blocked at any stage keeps a cleanly exited Run
+      // succeeded: the task projection on the terminal event carries the
+      // blocked outcome and its reason codes, and the client decides from
+      // those and the deliverable on disk what this turn produced.
       flushRunMessageEvents(run);
       // Persist the transport-level close mechanism before classifying this
       // attempt. Runtime fatal/stream signals are only known in the close
@@ -14181,6 +14218,7 @@ export async function startServer({
     let child;
     let acpSession = null;
     let writePromptToChildStdin = false;
+    let promptDeliveredAtSpawn = false;
     let spawnedAgentEnv = null;
     let codexCleanupInvocation: CodexCleanupInvocation | null = null;
     let completeCodexEvidenceCollection = () => {};
@@ -14341,24 +14379,28 @@ export async function startServer({
         }
         startIntentResolution(db, strategyTaskAtStart.taskExecutionId, run.id);
       }
-      child = spawn(invocation.command, invocation.args, {
+      // A plain-text stdin prompt is handed over as a complete file at spawn;
+      // framed stdin protocols (stream-json, JSON-RPC) keep the pipe. The
+      // agent stays on record until its process group is gone, so a daemon
+      // started after this one dies can reap it. See runtimes/agent-process.ts.
+      const spawnedAgent = spawnAgentProcess({
+        command: invocation.command,
+        args: invocation.args,
         env,
-        stdio: [stdinMode, 'pipe', 'pipe'],
         cwd: effectiveCwd,
-        shell: false,
-        detached: process.platform !== 'win32',
-        // Required when invocation wraps a Windows .cmd/.bat shim through
-        // cmd.exe; without this, Node re-escapes the inner command line and
-        // breaks paths containing spaces (issue #315).
         windowsVerbatimArguments: invocation.windowsVerbatimArguments,
+        stdin: stdinMode === 'pipe' && runtimeReadsPlainTextPromptFromStdin(def)
+          ? { prompt: composed }
+          : stdinMode,
+        runDir: path.join(RUNTIME_DATA_DIR, 'runs', run.id),
+        runId: run.id,
       });
+      child = spawnedAgent.child;
+      promptDeliveredAtSpawn = spawnedAgent.promptDeliveredAtSpawn;
       lifecycle.mark('process_spawned');
       run.child = child;
       run.childPid = typeof child.pid === 'number' ? child.pid : null;
-      run.processGroupId =
-        process.platform !== 'win32' && typeof child.pid === 'number'
-          ? child.pid
-          : null;
+      run.processGroupId = spawnedAgent.processGroupId;
       // Schedule release of the antigravity model lock once agy's
       // --log-file confirms the chosen model was propagated to the
       // backend (the upstream signal that settings.json was read).
@@ -14437,8 +14479,9 @@ export async function startServer({
         });
         // The app-server transport owns its own stdin writes (JSON-RPC
         // frames); only the plain stdin-prompt adapters hand the composed
-        // prompt over on this channel.
-        writePromptToChildStdin = def.promptViaStdin === true;
+        // prompt over on this channel — and a prompt already delivered as the
+        // child's file-backed stdin at spawn must never be written twice.
+        writePromptToChildStdin = def.promptViaStdin === true && !promptDeliveredAtSpawn;
       }
     } catch (err) {
       cleanupPromptFile();
@@ -17103,7 +17146,12 @@ export async function startServer({
         cleanupPromptFile();
       }
     });
-    if (writePromptToChildStdin && child.stdin) {
+    if (promptDeliveredAtSpawn) {
+      // The complete plain-text prompt became the child's stdin at spawn
+      // (runtimes/agent-process.ts), so there is nothing left to write. A
+      // spawn that failed (no PID) never received it.
+      if (typeof child.pid === 'number') recordPromptDeliveredAtSpawn(run, lifecycle);
+    } else if (writePromptToChildStdin && child.stdin) {
       const promptInputFormat = def.promptInputFormat ?? 'text';
       lifecycle.mark('model_call_start');
       lifecycle.mark('stdin_write_start');
@@ -17111,6 +17159,10 @@ export async function startServer({
         if (err) return;
         lifecycle.mark('stdin_write_end');
       };
+      // Plain-text prompts never get here: they are delivered at spawn.
+      // stream-json is the one prompt still pumped through a live pipe; a
+      // frame cut short by a dying daemon does not parse, so the child can
+      // never act on a partial prompt.
       if (promptInputFormat === 'stream-json') {
         // Wrap the prompt as an Anthropic user message and write it as one
         // JSONL line. Do NOT close stdin: claude-code keeps reading further
@@ -17136,10 +17188,6 @@ export async function startServer({
           if (err && err.code !== 'EPIPE') throw err;
         }
         run.stdinOpen = true;
-      } else {
-        // Split write + close so the boolean backpressure signal survives —
-        // see writePromptAndEndStdin for why `end(chunk)` cannot report it.
-        run.stdinBackpressure = writePromptAndEndStdin(child.stdin, composed, markStdinWriteEnd);
       }
     }
   };
@@ -17910,7 +17958,15 @@ export async function startServer({
       for (const timer of terminalTelemetryFallbackTimers) clearTimeout(timer);
       terminalTelemetryFallbackTimers.clear();
     };
+    // One-time heal of run events stored before the payload budget existed
+    // (storage/message-event-payload-heal.ts). Started once the daemon is
+    // listening, never on a request path; stopped with the other background
+    // work below.
+    let messageEventPayloadHeal: MessageEventPayloadHealHandle | null = null;
     const cleanupDaemonBackgroundWork = () => {
+      daemonHealth?.markCleanShutdown();
+      daemonHealth?.stop();
+      void messageEventPayloadHeal?.stop();
       stopEvidenceDelivery();
       clearTerminalTelemetryFallbackTimers();
       amrTerminalReportDelivery.stop();
@@ -17994,6 +18050,18 @@ export async function startServer({
         }
         resolvedPort = boundPort;
         startAmrTerminalReportDeliveryAfterBind(amrTerminalReportDelivery, boundPort);
+        messageEventPayloadHeal ??= startMessageEventPayloadHeal({ db });
+        // Only once listening: a startup-time fatal report would add lines to
+        // the log tail that packaged startup telemetry samples.
+        daemonHealth?.enableFatalReports();
+        daemonHealth?.setAppVersion(currentAppVersion());
+        daemonHealth?.attachSink(({ eventName, properties, insertId }) =>
+          analyticsService.captureSafety({
+            eventName,
+            appVersion: currentAppVersion(),
+            properties,
+            insertId,
+          }));
         // When binding to all interfaces report localhost for local callers;
         // when binding to a specific address (e.g. a Tailscale IP) report that
         // address so remote callers and the sidecar use the correct URL.

@@ -79,6 +79,7 @@ import {
   resolveQuestionFormStrategyTaskExecutionId,
   strategySettledMessageFields,
   strategyTaskParkedOnSucceededRun,
+  strategyTaskRunIndex,
 } from '../runtime/strategy-question-continuation';
 import {
   isTodoWriteToolName,
@@ -7226,8 +7227,15 @@ export function ProjectView({
                 lastRunEventId: undefined,
                 strategyTaskPrefixLength: replayedContent.length,
                 strategyTaskPrefixEventCount: replayedEvents.length,
+                // The row now streams `nextRunId`, so its logical task
+                // position is that Run's — spreading `prev` would leave the
+                // predecessor's index on it. Same exact-map rule as the live
+                // send path: no daemon mapping, no position.
                 ...(strategyTask?.taskExecutionId
-                  ? { strategyTaskExecutionId: strategyTask.taskExecutionId }
+                  ? {
+                    strategyTaskExecutionId: strategyTask.taskExecutionId,
+                    strategyTaskRunIndex: strategyTaskRunIndex(strategyTask, nextRunId),
+                  }
                   : {}),
               }),
               true,
@@ -10282,7 +10290,10 @@ export function ProjectView({
               runId,
               runStatus: 'queued' as const,
               taskAnalytics: resolvedTaskAnalytics,
-              ...(strategyTaskExecutionId ? { strategyTaskExecutionId } : {}),
+              ...(strategyTaskExecutionId ? {
+                strategyTaskExecutionId,
+                strategyTaskRunIndex: strategyTaskRunIndex(strategyTask, runId),
+              } : {}),
               ...(isTaskSuccessor
                 ? {
                     strategyTaskPrefixLength: latestAssistantMsg.content.length,
@@ -10304,7 +10315,10 @@ export function ProjectView({
               runId,
               runStatus: 'queued',
               taskAnalytics: resolvedTaskAnalytics,
-              ...(strategyTaskExecutionId ? { strategyTaskExecutionId } : {}),
+              ...(strategyTaskExecutionId ? {
+                strategyTaskExecutionId,
+                strategyTaskRunIndex: strategyTaskRunIndex(strategyTask, runId),
+              } : {}),
               ...(isTaskSuccessor
                 ? {
                     strategyTaskPrefixLength: prev.content.length,
@@ -10516,7 +10530,10 @@ export function ProjectView({
               runId,
               runStatus: 'queued' as const,
               taskAnalytics: resolvedTaskAnalytics,
-              ...(strategyTaskExecutionId ? { strategyTaskExecutionId } : {}),
+              ...(strategyTaskExecutionId ? {
+                strategyTaskExecutionId,
+                strategyTaskRunIndex: strategyTaskRunIndex(strategyTask, runId),
+              } : {}),
               ...(isTaskSuccessor
                 ? {
                     strategyTaskPrefixLength: latestAssistantMsg.content.length,
@@ -10534,7 +10551,10 @@ export function ProjectView({
               runId,
               runStatus: 'queued',
               taskAnalytics: resolvedTaskAnalytics,
-              ...(strategyTaskExecutionId ? { strategyTaskExecutionId } : {}),
+              ...(strategyTaskExecutionId ? {
+                strategyTaskExecutionId,
+                strategyTaskRunIndex: strategyTaskRunIndex(strategyTask, runId),
+              } : {}),
               ...(isTaskSuccessor
                 ? {
                     strategyTaskPrefixLength: prev.content.length,
