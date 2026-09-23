@@ -34,7 +34,7 @@ function deferredSend() {
   let settle!: (outcome: ChatSendOutcome) => void;
   let fail!: (error: unknown) => void;
   const onSend = vi.fn(
-    () =>
+    (_prompt: string) =>
       new Promise<ChatSendOutcome>((resolve, reject) => {
         settle = resolve;
         fail = reject;
