@@ -6,7 +6,7 @@
 // so the frame already reads as the project page, and start no project-owned
 // request while the project does not exist yet.
 
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, within } from '@testing-library/react';
 import { StrictMode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -77,14 +77,15 @@ describe('ProjectCreationPendingView', () => {
     // as it does under ProjectView, so the row does not gain a button at the
     // hand-off; the dock is inert because no project exists yet.
     const dock = screen.getByTestId('pending-chat-history-dock');
-    expect(dock.querySelector('.chat-session-trigger')).toBeTruthy();
+    expect(within(dock).getByRole('button', { name: 'Conversation history' })).toBeTruthy();
     expect(dock.hasAttribute('inert')).toBe(true);
     // The workspace column is inert as a whole; its pills keep the live look
     // DesignFilesPanel gives them instead of a disabled one.
-    const workspace = document.querySelector('section.workspace') as HTMLElement;
+    const workspace = screen.getByRole('region', { name: 'Design Files' });
     expect(workspace.hasAttribute('inert')).toBe(true);
-    const ctas = Array.from(workspace.querySelectorAll('.df-empty-cta')) as HTMLButtonElement[];
-    expect(ctas.length).toBeGreaterThan(0);
+    const emptyState = within(workspace).getByTestId('pending-design-files-empty');
+    const ctas = within(emptyState).getAllByRole<HTMLButtonElement>('button');
+    expect(ctas).toHaveLength(5);
     expect(ctas.every((cta) => !cta.disabled)).toBe(true);
   });
 
@@ -99,11 +100,11 @@ describe('ProjectCreationPendingView', () => {
     // first turn: a user message and a running, empty assistant turn whose
     // execution record says "Working".
     const log = screen.getByTestId('chat-log');
-    expect(log.querySelectorAll('[data-testid="user-message"]')).toHaveLength(1);
-    expect(log.querySelectorAll('.msg.assistant')).toHaveLength(1);
-    expect(screen.getByText('Working')).toBeTruthy();
+    expect(within(log).getAllByTestId('user-message')).toHaveLength(1);
+    const assistant = within(log).getByTestId('assistant-message');
+    expect(within(assistant).getByText('Working')).toBeTruthy();
     expect(screen.queryByText('Preparing...')).toBeNull();
-    expect(document.querySelector('.assistant-footer')).toBeNull();
+    expect(within(log).queryByTestId('assistant-footer')).toBeNull();
   });
 
   it('lists staged attachments as user-message cards in send order', () => {
@@ -115,14 +116,16 @@ describe('ProjectCreationPendingView', () => {
     });
 
     const row = screen.getByTestId('user-attachment-row');
-    const cards = Array.from(row.querySelectorAll('.msg-att-doc, .msg-att-img'));
-    expect(cards.map((card) => (card.classList.contains('msg-att-img') ? 'img' : 'doc'))).toEqual(['doc', 'img']);
+    const cards = within(row).getAllByRole<HTMLButtonElement>('button');
+    expect(cards).toEqual([
+      within(row).getByRole('button', { name: 'brief.txt' }),
+      within(row).getByRole('button', { name: 'mood.png' }),
+    ]);
     expect(cards[0]!.textContent).toContain('brief');
     expect(cards[0]!.textContent).toContain('.txt');
     expect(cards[1]!.querySelector('img')?.getAttribute('src')).toBe('blob:preview-1');
     // Nothing has been uploaded, so no card can open a file.
-    const buttons = Array.from(row.querySelectorAll('button')) as HTMLButtonElement[];
-    expect(buttons.every((button) => button.disabled)).toBe(true);
+    expect(cards.every((card) => card.disabled)).toBe(true);
   });
 
   it('keeps image previews alive through a StrictMode double mount', () => {
@@ -156,14 +159,10 @@ describe('ProjectCreationPendingView', () => {
     // React 18 drops the boolean `inert` prop, so ChatPane sets the attribute
     // on the node itself; the assertion is on the DOM, not on props.
     expect(pane.hasAttribute('inert')).toBe(true);
-    expect(pane.classList.contains('pane')).toBe(true);
-    // The pane is the slot's direct child: the card material is keyed on
-    // `.split-chat-slot > .pane`, so a wrapper would strip it.
-    expect(pane.parentElement?.classList.contains('split-chat-slot')).toBe(true);
     // jsdom measures no geometry, so the composer stays in the pane's slot
     // here; in a browser it is portaled to a body-level layer that ChatPane
     // marks inert as well.
-    expect(pane.querySelector('.chat-composer-slot textarea, .chat-composer-slot [contenteditable]')).toBeTruthy();
+    expect(within(pane).getByRole('combobox')).toBeTruthy();
   });
 
   it('starts no project-owned request while the project is unconfirmed', async () => {

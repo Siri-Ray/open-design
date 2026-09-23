@@ -1306,6 +1306,7 @@ function AssistantMessageImpl({
   return (
     <div
       id={`assistant-message-${message.id}`}
+      data-testid="assistant-message"
       className={`msg assistant${showRole ? '' : ' assistant-continuation'}`}
       /* 「接上一条,不再重复报名字」是状态,不是样式的私事 —— 给它自己的出口 */
       data-continuation={showRole ? 'false' : 'true'}
