@@ -982,6 +982,15 @@ interface Props {
    * the pane root carries `data-testid="project-creation-pending-chat"`.
    */
   detached?: boolean;
+  /**
+   * Rows that first appear while this is true skip the `msg-enter` fade, for
+   * as long as they stay mounted. The Home hand-off (OPEND-3334) sets it: its
+   * first turn is already on screen when this pane mounts, and again when the
+   * real rows replace the optimistic ones, so replaying the entrance there
+   * reads as the turn flashing. A row keeps the choice it was born with;
+   * dropping the flag later never restarts an animation.
+   */
+  quietEntrance?: boolean;
 }
 
 const AMR_PROFILE_ENV_KEY = 'OPEN_DESIGN_AMR_PROFILE';
@@ -1440,6 +1449,7 @@ export function ChatPane({
   designSystemPicker,
   config,
   detached = false,
+  quietEntrance = false,
 }: Props) {
   const { workspaceContext } = useProjectCollabContext();
   const { t, locale } = useI18n();
@@ -4422,6 +4432,7 @@ export function ChatPane({
                   </div>
                 ) : null}
                 <ChatRows
+                  quietEntrance={quietEntrance}
                   items={chatRenderItems}
                   messages={displayMessages}
                   streaming={streaming}
@@ -5245,7 +5256,10 @@ function ChatRows({
   scrollContainerRef,
   onVirtualScrollTopWrite,
   highlightedUserMessageId,
+  quietEntrance = false,
 }: {
+  /** See ChatPane's `quietEntrance`. */
+  quietEntrance?: boolean;
   /**
    * 要画的那些行 —— 由 `ChatPane` 算好递进来(`buildChatRenderItems`)。
    *
@@ -5376,8 +5390,13 @@ function ChatRows({
     onScrollTopWrite: onVirtualScrollTopWrite,
   });
 
+  // Message ids first rendered under `quietEntrance`. Never pruned: a row's
+  // entrance is decided once, at its first render.
+  const quietEntranceIdsRef = useRef(new Set<string>());
   const renderItem = (item: ChatRenderItem) => {
     const m = item.message;
+    if (quietEntrance) quietEntranceIdsRef.current.add(m.id);
+    const enterQuietly = quietEntranceIdsRef.current.has(m.id);
     const messageStreaming = isAssistantMessageStreaming(
       m,
       streaming,
@@ -5395,6 +5414,7 @@ function ChatRows({
           t={t}
           highlighted={highlightedUserMessageId === m.id}
           onResend={onResendUserMessage}
+          enterQuietly={enterQuietly}
         />
       );
     }
@@ -5428,6 +5448,7 @@ function ChatRows({
         }
         shareToOpenDesignBusy={shareToOpenDesignBusyMessageId === m.id}
         showRole={assistantRoleByMessageId.get(m.id) ?? true}
+        enterQuietly={enterQuietly}
         isLast={m.id === lastAssistantId}
         isLastTurn={m.id === lastTurnAssistantId}
         errorCardOwnerId={errorCardOwnerId}
@@ -6611,6 +6632,7 @@ const UserMessage = memo(UserMessageImpl);
   t,
   highlighted,
   onResend,
+  enterQuietly = false,
 }: {
   message: ChatMessage;
   projectId: string | null;
@@ -6624,6 +6646,8 @@ const UserMessage = memo(UserMessageImpl);
   appliedContextItems?: ReadonlyArray<unknown>;
   t: TranslateFn;
   highlighted?: boolean;
+  /** See ChatPane's `quietEntrance`. */
+  enterQuietly?: boolean;
 }) {
   const { workspaceContext } = useProjectCollabContext();
   const attachments = sortChatAttachmentsForDisplay(message.attachments ?? []);
@@ -6674,7 +6698,7 @@ const UserMessage = memo(UserMessageImpl);
 
   return (
     <div
-      className={`msg user${highlighted ? ' is-chat-rail-highlighted' : ''}`}
+      className={`msg user${highlighted ? ' is-chat-rail-highlighted' : ''}${enterQuietly ? ' msg--quiet-enter' : ''}`}
       data-testid="user-message"
       data-chat-message-id={message.id}
     >

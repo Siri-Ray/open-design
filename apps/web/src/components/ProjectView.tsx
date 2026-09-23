@@ -13356,6 +13356,31 @@ export function ProjectView({
     selectedAssistantIdentity,
   );
   const creationHandoffTurnShown = creationHandoffActive && messages.length === 0;
+  // The hand-off's pane mounts before the project's first conversation id
+  // resolves. That resolution is the same pane learning its id, not a
+  // conversation switch, so it must not re-key (and remount) the pane: the
+  // resolved id keeps the key the pane was mounted with. A later switch still
+  // re-keys as usual (OPEND-3334).
+  const [handoffPaneConversation, setHandoffPaneConversation] = useState<{
+    adopted: string | null;
+  } | null>(() => (creationHandoff !== null && !activeConversationId ? { adopted: null } : null));
+  if (handoffPaneConversation?.adopted === null && activeConversationId) {
+    setHandoffPaneConversation({ adopted: activeConversationId });
+  }
+  const handoffAdoptedConversationId = handoffPaneConversation
+    ? handoffPaneConversation.adopted ?? activeConversationId
+    : null;
+  const chatPaneConversationKey =
+    activeConversationId && activeConversationId === handoffAdoptedConversationId
+      ? 'conversation-unavailable'
+      : activeConversationId ?? 'conversation-unavailable';
+  // A project born from the Home send starts with no files, and the pending
+  // frame already said so. Keep saying it until the first listing lands
+  // instead of flipping to "Loading…" in between. An imported working folder
+  // may hold files, so it keeps the honest loading state.
+  const [createdEmptyFromHome] = useState(
+    () => creationHandoff !== null && !project.metadata?.baseDir,
+  );
   const ignoreStopBeforeFirstRun = useCallback(() => undefined, []);
   const creationHandoffSettledRef = useRef(false);
   useEffect(() => {
@@ -13666,8 +13691,12 @@ export function ProjectView({
               historyPortalTarget={historyPortalTarget}
               // The conversation id is part of the key so switching conversations
               // resets internal scroll/draft state inside ChatPane and ChatComposer.
-              key={`${project.id}:${activeConversationId ?? 'conversation-unavailable'}:${chatSeed?.id ?? 'ready'}`}
+              key={`${project.id}:${chatPaneConversationKey}:${chatSeed?.id ?? 'ready'}`}
               messages={creationHandoffTurnShown ? creationHandoffMessages : messages}
+              // The hand-off's first turn is already on screen (the pending
+              // frame drew it); neither this remount nor the real rows that
+              // replace the optimistic ones may fade it in again.
+              quietEntrance={creationHandoffActive}
               // The optimistic turn is a running turn: the composer shows the
               // same stop control the auto-sent turn will, so it does not swap
               // at the hand-off. There is no run to stop yet.
@@ -13998,7 +14027,7 @@ export function ProjectView({
           projectName={currentProject.name}
           viewerOnly={projectMutationReadOnly}
           materializationPending={projectCollab.materializationPending}
-          filesAuthoritative={committedFilesGeneration > 0}
+          filesAuthoritative={committedFilesGeneration > 0 || createdEmptyFromHome}
           readonlyNotice={
             projectCollab.materializationPending
               ? t('designFiles.syncing')
