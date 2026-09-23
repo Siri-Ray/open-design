@@ -287,6 +287,18 @@ type DesignToolboxResource =
 
 export type ChatSendOutcome = void | 'restore-draft';
 
+/** Committed composer content other than the editor text, mirrored for stale send closures. */
+interface ComposerContent {
+  staged: ChatAttachment[];
+  stagedVisualComments: ChatCommentAttachment[];
+  stagedSkills: SkillSummary[];
+  stagedMcpServers: McpServerConfig[];
+  stagedConnectors: ConnectorDetail[];
+  stagedWorkspaceContexts: WorkspaceContextItem[];
+  activeAppliedPlugin: AppliedPluginSnapshot | null;
+  quotes: ChatQuote[];
+}
+
 /** Everything `reset()` clears, captured at submit so a handed-back send can be restored. */
 interface ComposerSendSnapshot {
   draft: string;
@@ -1543,7 +1555,8 @@ export const ChatComposer = forwardRef<ChatComposerHandle, Props>(
       [connectors, mcpServers, pluginsForComposer, skills]
     );
 
-    function reset() {
+    /** Clears everything sendable; returns the linked workspace contexts it deliberately keeps. */
+    function reset(): WorkspaceContextItem[] {
       pendingEntryFromRef.current = null;
       pendingSessionModeRef.current = null;
       const linkedWorkspaceContexts = stagedWorkspaceContexts.filter((item) => (
@@ -1576,6 +1589,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, Props>(
       setMentionTab('all');
       setSlash(null);
       editorRef.current?.clear();
+      return linkedWorkspaceContexts;
     }
 
     function currentCommentAttachments(extra: ChatCommentAttachment[] = []): ChatCommentAttachment[] {
@@ -1621,6 +1635,52 @@ export const ChatComposer = forwardRef<ChatComposerHandle, Props>(
       return Object.keys(meta).length > 0 ? meta : undefined;
     }
 
+    // Committed composer content, readable from the send promise's stale
+    // closure: a handed-back send must see what the user staged after reset().
+    const latestComposerContentRef = useRef<ComposerContent | null>(null);
+    useLayoutEffect(() => {
+      latestComposerContentRef.current = {
+        staged,
+        stagedVisualComments,
+        stagedSkills,
+        stagedMcpServers,
+        stagedConnectors,
+        stagedWorkspaceContexts,
+        activeAppliedPlugin,
+        quotes: quotes ?? [],
+      };
+    });
+
+    /**
+     * 清空之后输入框里有没有**任何**新东西 —— 不只是字。
+     *
+     * 等待期间输入框照常可用:用户可能没打字,只是加了附件、技能、插件、引用,
+     * 或者换了工作区上下文。这些同样是下一条的草稿,还原旧快照会把它们盖掉。
+     * 基线就是 `reset()` 之后的样子:全部为空,只留下它有意保留的已关联目录。
+     */
+    function composerChangedSinceReset(
+      snapshot: ComposerSendSnapshot,
+      keptWorkspaceContextIds: ReadonlySet<string>,
+    ): boolean {
+      const text = editorRef.current?.getText() ?? draftRef.current;
+      if (text.trim()) return true;
+      const current = latestComposerContentRef.current;
+      if (!current) return false;
+      return (
+        current.staged.length > 0
+        || current.stagedVisualComments.length > 0
+        || current.stagedSkills.length > 0
+        || current.stagedMcpServers.length > 0
+        || current.stagedConnectors.length > 0
+        || current.activeAppliedPlugin !== null
+        // Quotes live on the host, which may not have committed the clear yet:
+        // only a quote that was not part of the sent turn counts as new.
+        || current.quotes.some((quote) => !snapshot.quotes.some((sent) => sent.id === quote.id))
+        || current.stagedWorkspaceContexts.length !== keptWorkspaceContextIds.size
+        || current.stagedWorkspaceContexts.some((item) => !keptWorkspaceContextIds.has(item.id))
+      );
+    }
+
     /**
      * 输入框在「点发送」那一刻的全部可发内容 —— `reset()` 清掉的每一样都在这里。
      *
@@ -1651,12 +1711,14 @@ export const ChatComposer = forwardRef<ChatComposerHandle, Props>(
     /**
      * 把退回来的那一发还给输入框。
      *
-     * 等待期间用户已经开始写下一条的话**不还原**:此刻输入框里的是新内容,
-     * 拿旧快照盖上去等于吞掉用户刚打的字。
+     * 等待期间用户已经开始准备下一条的话**不还原**(见 `composerChangedSinceReset`):
+     * 此刻输入框里的是新内容,拿旧快照盖上去等于吞掉用户刚做的事。
      */
-    function restoreSendSnapshot(snapshot: ComposerSendSnapshot) {
-      const currentText = editorRef.current?.getText() ?? draftRef.current;
-      if (currentText.trim()) return;
+    function restoreSendSnapshot(
+      snapshot: ComposerSendSnapshot,
+      keptWorkspaceContextIds: ReadonlySet<string>,
+    ) {
+      if (composerChangedSinceReset(snapshot, keptWorkspaceContextIds)) return;
       replaceEditorDraft(snapshot.draft);
       setStaged(snapshot.staged);
       nextAttachmentOrderRef.current = snapshot.nextAttachmentOrder;
@@ -1675,10 +1737,11 @@ export const ChatComposer = forwardRef<ChatComposerHandle, Props>(
     function finishComposedSend(
       outcome: ChatSendOutcome | Promise<ChatSendOutcome>,
       snapshot: ComposerSendSnapshot,
+      keptWorkspaceContextIds: ReadonlySet<string>,
       pendingMetadata?: { entryFrom: ChatSendMeta['entryFrom'] | null; sessionMode: ChatSessionMode | null },
     ) {
       const handBack = () => {
-        restoreSendSnapshot(snapshot);
+        restoreSendSnapshot(snapshot, keptWorkspaceContextIds);
         if (pendingMetadata?.entryFrom && !pendingEntryFromRef.current) {
           pendingEntryFromRef.current = pendingMetadata.entryFrom;
         }
@@ -1713,8 +1776,8 @@ export const ChatComposer = forwardRef<ChatComposerHandle, Props>(
         setComposedSendPending(false);
         throw error;
       }
-      reset();
-      finishComposedSend(outcome, snapshot, pendingMetadata);
+      const keptWorkspaceContextIds = new Set(reset().map((item) => item.id));
+      finishComposedSend(outcome, snapshot, keptWorkspaceContextIds, pendingMetadata);
       return true;
     }
 

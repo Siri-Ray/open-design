@@ -4,7 +4,11 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import type { ComponentProps } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { ChatComposer, type ChatSendOutcome } from '../../src/components/ChatComposer';
+import {
+  ChatComposer,
+  STAGE_ATTACHMENT_EVENT,
+  type ChatSendOutcome,
+} from '../../src/components/ChatComposer';
 import type { ChatQuote } from '../../src/runtime/chat/quote-selection';
 import { composerText, flushMounts, typeAndSettle } from '../helpers/lexical-composer';
 
@@ -135,5 +139,63 @@ describe('ChatComposer clears on submit (OPEND-3392)', () => {
     await act(async () => send.settle('restore-draft'));
     await flushMounts();
     expect(composerText()).toBe('second thought');
+  });
+  it('keeps a non-text attachment staged while the send was pending instead of restoring over it', async () => {
+    const send = deferredSend();
+    renderComposer({ onSend: send.onSend });
+    await flushMounts();
+
+    await typeAndSettle('first prompt');
+    fireEvent.click(screen.getByTestId('chat-send'));
+    await waitFor(() => expect(composerText().trim()).toBe(''));
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent(STAGE_ATTACHMENT_EVENT, {
+        detail: { attachments: [{ path: 'shots/next.png', name: 'next.png', kind: 'image' }] },
+      }));
+    });
+    expect(screen.getByRole('button', { name: 'Preview next.png' })).toBeTruthy();
+
+    await act(async () => send.settle('restore-draft'));
+    await flushMounts();
+    expect(screen.getByRole('button', { name: 'Preview next.png' })).toBeTruthy();
+    expect(composerText().trim()).toBe('');
+  });
+
+  it('does not restore over a quote the host staged while the send was pending', async () => {
+    const send = deferredSend();
+    const sentQuotes: ChatQuote[] = [{ id: 'q1', text: '旧引用', messageId: 'm1' }];
+    const onRestoreQuotes = vi.fn();
+    const { rerender } = renderComposer({
+      onSend: send.onSend,
+      quotes: sentQuotes,
+      onClearQuotes: vi.fn(),
+      onRestoreQuotes,
+    });
+    await flushMounts();
+
+    await typeAndSettle('first prompt');
+    fireEvent.click(screen.getByTestId('chat-send'));
+    await waitFor(() => expect(composerText().trim()).toBe(''));
+
+    rerender(
+      <ChatComposer
+        projectId="project-1"
+        projectFiles={[]}
+        streaming={false}
+        onEnsureProject={async () => 'project-1'}
+        onSend={send.onSend}
+        onStop={vi.fn()}
+        skills={[]}
+        quotes={[{ id: 'q2', text: '新引用', messageId: 'm2' }]}
+        onClearQuotes={vi.fn()}
+        onRestoreQuotes={onRestoreQuotes}
+      />,
+    );
+
+    await act(async () => send.settle('restore-draft'));
+    await flushMounts();
+    expect(onRestoreQuotes).not.toHaveBeenCalled();
+    expect(composerText().trim()).toBe('');
   });
 });
