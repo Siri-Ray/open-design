@@ -33,6 +33,7 @@ import { T } from '@/timeouts';
 declare global {
   interface Window {
     __odStatusLog?: Array<{ at: number; text: string; className: string; where: string }>;
+    __odMountLog?: Array<{ at: number; surface: 'pending' | 'view'; pane: number; rows: string[]; entering: string[]; workspace: string }>;
   }
 }
 
@@ -93,6 +94,56 @@ async function installStatusLog(page: Page): Promise<void> {
         if (!seen.has(key)) {
           seen.add(key);
           log.push({ at: performance.now(), text, className, where });
+        }
+      }
+      requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
+  });
+}
+
+/**
+ * Every change, per animation frame, to: which surface draws the chat column,
+ * the identity of its `.pane` root, the identity of each `.msg` row, which rows
+ * are playing their `msg-enter` fade, and which state the workspace column
+ * shows. Identities are small integers handed out on first sight.
+ */
+async function installMountLog(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const log: NonNullable<Window['__odMountLog']> = [];
+    window.__odMountLog = log;
+    const ids = new WeakMap<Element, number>();
+    let next = 1;
+    const idOf = (el: Element) => {
+      let id = ids.get(el);
+      if (!id) {
+        id = next++;
+        ids.set(el, id);
+      }
+      return id;
+    };
+    let last = '';
+    const sample = () => {
+      const pane = document.querySelector('.split-chat-slot > .pane');
+      if (pane) {
+        const surface = document.querySelector('[data-testid="project-creation-pending-view"]') ? 'pending' : 'view';
+        const rows: string[] = [];
+        const entering: string[] = [];
+        for (const row of Array.from(document.querySelectorAll('.split-chat-slot .msg'))) {
+          const id = `${row.classList.contains('user') ? 'u' : 'a'}${idOf(row)}`;
+          rows.push(id);
+          const fading = row.getAnimations().some(
+            (animation) => animation.playState === 'running' && (animation as CSSAnimation).animationName === 'msg-enter',
+          );
+          if (fading) entering.push(id);
+        }
+        const workspace = ['design-files-loading', 'design-files-empty', 'pending-design-files-empty']
+          .find((testId) => document.querySelector(`[data-testid="${testId}"]`)) ?? 'other';
+        const entry = { at: performance.now(), surface, pane: idOf(pane), rows, entering, workspace } as const;
+        const key = JSON.stringify({ ...entry, at: 0 });
+        if (key !== last) {
+          last = key;
+          log.push(entry);
         }
       }
       requestAnimationFrame(sample);
@@ -239,4 +290,43 @@ test('[P0] the assistant status row shows one label with one class set from the 
   const view = signature('view');
   expect(handoff.length, `the hand-off frame drew no status row:\n${readable}`).toBeGreaterThan(0);
   expect(view, `the status row's elements changed across the hand-off:\n${readable}`).toEqual(handoff);
+});
+
+test('[P0] the first turn enters once and nothing remounts or reloads after the Home → project hand-off', async ({ page }) => {
+  await installMountLog(page);
+  await applyStandardMocks(page);
+  await routeSuccessfulRuns(page, { runId: 'home-handoff-mounts', events: 'pending' });
+  await gotoEntryHome(page);
+  await sendFromHome(page, 'Gamified habit app: draft the rewards screen.');
+
+  // Past the whole hand-off: the real view, its conversation resolved, the
+  // real first turn on screen.
+  await expect(page).toHaveURL(/\/conversations\//, { timeout: T.long });
+  await expect(page.locator('[data-testid="chat-log"] .msg.user').first()).toBeVisible({ timeout: T.long });
+  await expect(page.getByTestId('project-creation-pending-chat')).toHaveCount(0, { timeout: T.medium });
+  await page.waitForTimeout(800);
+
+  const log = await page.evaluate(() => window.__odMountLog ?? []);
+  const readable = log
+    .map((entry) => `${Math.round(entry.at)}ms ${entry.surface} pane#${entry.pane} rows=[${entry.rows.join(' ')}] entering=[${entry.entering.join(' ')}] ws=${entry.workspace}`)
+    .join('\n');
+  expect(log.length, `nothing was sampled:\n${readable}`).toBeGreaterThan(0);
+  expect(log[0]?.surface, `the pending frame was never sampled:\n${readable}`).toBe('pending');
+
+  // The pending frame's first rows are the only entrance. Any other row seen
+  // fading in is the turn flashing: the view taking over, the conversation id
+  // re-keying the pane, or the real rows replacing the optimistic ones.
+  const firstRows = new Set(log.find((entry) => entry.rows.length > 0)?.rows ?? []);
+  const replayed = Array.from(new Set(log.flatMap((entry) => entry.entering.filter((row) => !firstRows.has(row)))));
+  expect(replayed, `rows faded in again after the first paint:\n${readable}`).toEqual([]);
+
+  // The real view mounts its pane once; resolving the conversation id is not a
+  // conversation switch.
+  const viewPanes = Array.from(new Set(log.filter((entry) => entry.surface === 'view').map((entry) => entry.pane)));
+  expect(viewPanes, `the real view remounted its chat pane:\n${readable}`).toHaveLength(1);
+
+  // A project born from the Home send has no files; the workspace says so from
+  // the first frame and never detours through "Loading…".
+  const workspaces = Array.from(new Set(log.map((entry) => entry.workspace)));
+  expect(workspaces, `the workspace column changed state across the hand-off:\n${readable}`).not.toContain('design-files-loading');
 });
