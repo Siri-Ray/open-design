@@ -13375,10 +13375,12 @@ export function ProjectView({
       ? 'conversation-unavailable'
       : activeConversationId ?? 'conversation-unavailable';
   // A project born from the Home send starts with no files, and the pending
-  // frame already said so. Keep saying it until the first listing lands
-  // instead of flipping to "Loading…" in between. An imported working folder
+  // frame already drew the empty state. Keep drawing it (inert) until the
+  // first listing is accepted instead of flipping to "Loading…" in between;
+  // the authority gate itself is untouched, so no CTA acts before that read
+  // (Home attachments are still uploading then). An imported working folder
   // may hold files, so it keeps the honest loading state.
-  const [createdEmptyFromHome] = useState(
+  const [emptyLookBeforeFirstListing] = useState(
     () => creationHandoff !== null && !project.metadata?.baseDir,
   );
   const ignoreStopBeforeFirstRun = useCallback(() => undefined, []);
@@ -14027,7 +14029,8 @@ export function ProjectView({
           projectName={currentProject.name}
           viewerOnly={projectMutationReadOnly}
           materializationPending={projectCollab.materializationPending}
-          filesAuthoritative={committedFilesGeneration > 0 || createdEmptyFromHome}
+          filesAuthoritative={committedFilesGeneration > 0}
+          emptyLookBeforeFirstListing={emptyLookBeforeFirstListing}
           readonlyNotice={
             projectCollab.materializationPending
               ? t('designFiles.syncing')

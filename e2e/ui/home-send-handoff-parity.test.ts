@@ -137,7 +137,7 @@ async function installMountLog(page: Page): Promise<void> {
           );
           if (fading) entering.push(id);
         }
-        const workspace = ['design-files-loading', 'design-files-empty', 'pending-design-files-empty']
+        const workspace = ['design-files-loading', 'design-files-empty', 'design-files-empty-unconfirmed', 'pending-design-files-empty']
           .find((testId) => document.querySelector(`[data-testid="${testId}"]`)) ?? 'other';
         const entry = { at: performance.now(), surface, pane: idOf(pane), rows, entering, workspace } as const;
         const key = JSON.stringify({ ...entry, at: 0 });
