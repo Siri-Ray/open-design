@@ -1,7 +1,7 @@
 
 // @vitest-environment jsdom
 
-import { StrictMode } from 'react';
+import { StrictMode, useLayoutEffect } from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { WorkspaceCollabContext } from '@open-design/contracts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -2303,6 +2303,43 @@ describe('WorkspaceTabsBar dock dropdown recent-projects catalog', () => {
     expect(onOpenProject).toHaveBeenCalledTimes(1);
     expect(onOpenProject).toHaveBeenCalledWith('project-beta', undefined, expect.anything());
     expect(screen.queryByRole('listbox')).toBeNull();
+  });
+
+  // Review on #8384: the catalog must be scope-safe in the very commit that
+  // changes the workspace (or signs out), not one passive effect later. The
+  // probe reads the menu in a layout effect of that same commit.
+  it.each([
+    ['another workspace', { ...teamContext, workspaceId: 'ws-team-other', workspaceMemberId: 'wm-other-self' }],
+    ['a sign-out', null],
+  ] as const)('never paints the previous workspace\'s shared rows after %s', async (_label, nextContext) => {
+    const painted: string[] = [];
+    function CommitProbe({ context }: { context: WorkspaceCollabContext | null }) {
+      useLayoutEffect(() => {
+        painted.push(dock.textContent ?? '');
+      }, [context]);
+      return null;
+    }
+    const tree = (context: WorkspaceCollabContext | null) => (
+      <>
+        <WorkspaceTabsBar
+          route={{ ...projectRoute }}
+          projects={[{ ...project, workspaceId: 'ws-team-3303' }]}
+          workspaceContext={context}
+        />
+        <CommitProbe context={context} />
+      </>
+    );
+    const { rerender } = render(tree(teamContext));
+    fireEvent.click(await screen.findByTestId('workspace-tabs-dropdown-trigger'));
+    await waitFor(() => {
+      expect(screen.getByRole('listbox').textContent).toContain('Shared By Teammate');
+    });
+
+    painted.length = 0;
+    rerender(tree(nextContext as WorkspaceCollabContext | null));
+
+    expect(painted.length).toBeGreaterThan(0);
+    expect(painted[0]).not.toContain('Shared By Teammate');
   });
 
   it('includes team projects shared by teammates, as the rail does', async () => {

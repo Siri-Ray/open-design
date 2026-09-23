@@ -1195,21 +1195,32 @@ export function WorkspaceTabsBar({
   // the team hub's catalog — read once per dropdown open (coalesced and cached
   // by the catalog module, so this is not a second poll) rather than through
   // `useTeamProjects`, which would keep polling on the project route.
-  const [teamCatalog, setTeamCatalog] = useState<readonly TeamProject[]>([]);
-  // The catalog belongs to one workspace; never list another's shared rows
-  // while the next read is in flight.
+  //
+  // The catalog belongs to the workspace it was read for, so it is stored with
+  // that scope and only read back while the scope is still current. Deriving
+  // it in render (not clearing it from an effect) keeps a previous workspace's
+  // shared rows out of the very render in which the workspace changes or the
+  // account signs out.
   const teamCatalogScopeKey = workspaceContext ? workspaceIdentityCacheKey(workspaceContext) : null;
-  useEffect(() => {
-    setTeamCatalog([]);
-  }, [teamCatalogScopeKey]);
+  const [scopedTeamCatalog, setScopedTeamCatalog] = useState<{
+    scopeKey: string;
+    rows: readonly TeamProject[];
+  } | null>(null);
+  const teamCatalog = useMemo<readonly TeamProject[]>(
+    () => scopedTeamCatalog && scopedTeamCatalog.scopeKey === teamCatalogScopeKey
+      ? scopedTeamCatalog.rows
+      : [],
+    [scopedTeamCatalog, teamCatalogScopeKey],
+  );
   useEffect(() => {
     if (!dockMenuOpen || !workspaceContextHasTeamIdentity(workspaceContext) || !workspaceContext) {
       return undefined;
     }
     let cancelled = false;
+    const scopeKey = workspaceIdentityCacheKey(workspaceContext);
     fetchTeamProjectsCatalog({ context: workspaceContext })
       .then((catalog) => {
-        if (!cancelled) setTeamCatalog(catalog);
+        if (!cancelled) setScopedTeamCatalog({ scopeKey, rows: catalog });
       })
       .catch((error: unknown) => {
         // Off-team / offline / no hub: the rows read as unshared and owned,
