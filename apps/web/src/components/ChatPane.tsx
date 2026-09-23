@@ -6701,6 +6701,7 @@ const UserMessage = memo(UserMessageImpl);
       className={`msg user${highlighted ? ' is-chat-rail-highlighted' : ''}${enterQuietly ? ' msg--quiet-enter' : ''}`}
       data-testid="user-message"
       data-chat-message-id={message.id}
+      data-entrance={enterQuietly ? 'quiet' : 'animated'}
     >
       <span className="sr-only">{t('chat.you')}</span>
       {/* CURRENT workspace targets and applied plugin/scenario snapshots still

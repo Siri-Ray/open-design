@@ -65,7 +65,9 @@ function pane(messages: ChatMessage[], quietEntrance: boolean) {
 function userRowQuiet(container: HTMLElement, id: string): boolean {
   const row = container.querySelector(`[data-chat-message-id="${id}"]`);
   expect(row, `user row ${id} is not rendered`).not.toBeNull();
-  return row!.classList.contains('msg--quiet-enter');
+  const entrance = row!.getAttribute('data-entrance');
+  expect(['quiet', 'animated']).toContain(entrance);
+  return entrance === 'quiet';
 }
 
 function assistantRowQuiet(container: HTMLElement, id: string): boolean {
