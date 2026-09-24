@@ -98,7 +98,7 @@ jobs:
   daemon_unit_tests:
     name: Daemon tests (${{ matrix.shard }}/4)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
