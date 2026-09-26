@@ -9,6 +9,12 @@ import { redactJsonText, redactJsonValue, type RedactionOptions } from './redact
 
 export const DIAGNOSTIC_CHUNK_BYTES = 4 * 1024 * 1024;
 export const DIAGNOSTIC_MAX_BYTES = 100 * 1024 * 1024;
+/**
+ * Prefix of the daemon's per-delivery receipt log line. Automatic bundles drop
+ * these lines: otherwise every upload re-ships the receipts of all earlier
+ * uploads and, on a busy device, they crowd the real log out of the tail.
+ */
+export const DIAGNOSTIC_DELIVERY_LOG_PREFIX = '[diagnostics] incident delivered';
 export interface AutomaticDiagnosticManifest {
   version: 1;
   incidentId: string;
@@ -54,7 +60,9 @@ export async function buildAutomaticDiagnostics(input: {
       if (file.error) { notes.push({ name: source.name, reason: 'source_unavailable' }); continue; }
       if (size > limit) notes.push({ name: source.name, reason: 'tail_truncated' });
       // Text logs can contain JSONL credentials: redact each complete JSON record structurally.
-      const content = String(file.content ?? '').split('\n').map((line) => redactJsonText(line, input.redaction)).join('\n');
+      const content = String(file.content ?? '').split('\n')
+        .filter((line) => !line.startsWith(DIAGNOSTIC_DELIVERY_LOG_PREFIX))
+        .map((line) => redactJsonText(line, input.redaction)).join('\n');
       const encoded = JSON.stringify({ type: 'file', name: source.name, content }) + '\n';
       const bytes = Buffer.byteLength(encoded);
       if (bytes > remaining) { notes.push({ name: source.name, reason: 'incident_size_limit' }); continue; }
