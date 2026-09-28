@@ -40,7 +40,10 @@ Both metrics and content must be true at registration and each transport step.
 Malformed preferences fail closed. Disabling cancels transport, clears pending
 content and invalidates its leases. File watermarks prevent a later opt-in from
 uploading old text; an old source whose boundary cannot be proved is omitted and
-marked partial. Already transmitted remote bytes expire under the remote policy.
+marked partial. A baselined file keeps its offset when rotated to another path. On
+Windows, file-system tunneling gives a log re-created under the rotated name the
+creation time of its predecessor, so a new file identity carrying a baselined
+creation time counts as created after the boundary. Already transmitted remote bytes expire under the remote policy.
 
 Pending content expires after 7 days; delivered local content after 24 hours. The
 queue budgets payloads plus serialized metadata within 1 GiB, reserving 100 MiB

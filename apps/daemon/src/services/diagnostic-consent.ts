@@ -48,13 +48,20 @@ export class DiagnosticConsentFence {
   }
   async apply(sources: LogSource[]): Promise<AutomaticDiagnosticSource[]> {
     const result: AutomaticDiagnosticSource[] = [];
+    const baselined = Object.values(this.state.offsets);
     for (const source of sources) {
       const info = await stat(source.absolutePath).catch(() => null);
-      const offset = this.state.offsets[source.absolutePath];
+      const recorded = this.state.offsets[source.absolutePath];
+      const sameFile = (offset: Offset | undefined) => !!info && !!offset && info.ino === offset.ino && info.birthtimeMs === offset.birthtime;
+      // A rotated log (latest.log -> previous.log) keeps its identity under a new path.
+      const offset = sameFile(recorded) ? recorded : baselined.find(sameFile);
       if (!this.state.enabled) result.push({ ...source, omitReason: 'consent_disabled' });
-      else if (info && offset && info.ino === offset.ino && info.birthtimeMs === offset.birthtime) {
-        result.push({ ...source, startOffset: offset.size });
-      } else if (info && info.birthtimeMs >= this.state.since) result.push(source);
+      else if (info && offset) result.push({ ...source, startOffset: offset.size });
+      else if (info && info.birthtimeMs >= this.state.since) result.push(source);
+      // Windows file-system tunneling gives a file re-created under a rotated name the
+      // creation time of the file that previously held it. A new identity carrying a
+      // baselined creation time was therefore created after the boundary.
+      else if (info && baselined.some((known) => known.birthtime === info.birthtimeMs)) result.push(source);
       else result.push({ ...source, omitReason: 'pre_consent_source' });
     }
     return result;
