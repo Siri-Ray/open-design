@@ -25,3 +25,18 @@ it('streams text only, redacts JSONL secrets, and reports omissions and truncati
   expect(result.manifest.completeness).toBe('partial');
   expect(result.manifest.compressedBytes).toBe(Buffer.concat(chunks).length);
 });
+
+it('keeps only selected lines of a shared log and notes when none belong to the incident', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'diagnostic-auto-')); dirs.push(dir);
+  await writeFile(join(dir, 'shared'), '{"run":"a","message":"mine"}\n{"run":"b","message":"someone else"}\n');
+  const pick = (run: string) => (lines: string[]) => lines.filter((line) => line.includes(`"run":"${run}"`));
+  const result = await buildAutomaticDiagnostics({ directory: join(dir, 'bundle'), incidentId: 'incident-b', summary: {}, sources: [
+    { name: 'shared.jsonl', absolutePath: join(dir, 'shared'), kind: 'text', selectLines: pick('a') },
+    { name: 'shared-again.jsonl', absolutePath: join(dir, 'shared'), kind: 'text', selectLines: pick('c') },
+  ] });
+  const chunks = await Promise.all(result.manifest.chunks.map((c) => readFile(join(dir, 'bundle', String(c.index)))));
+  const records = gunzipSync(Buffer.concat(chunks)).toString().trim().split('\n').map((line) => JSON.parse(line));
+  expect(records.find((r) => r.name === 'shared.jsonl').content).toContain('mine');
+  expect(JSON.stringify(records)).not.toContain('someone else');
+  expect(records.at(-1).notes).toEqual([{ name: 'shared-again.jsonl', reason: 'no_matching_records' }]);
+});

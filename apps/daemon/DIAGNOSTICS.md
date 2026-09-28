@@ -33,7 +33,12 @@ unchanged and the relay writes a new immutable manifest generation.
 `packages/diagnostics` writes a gzip JSONL archive as at-most-4-MiB chunks. Text is
 redacted before compression. Native dumps, binary attachments, environment dumps
 and unrelated agents' CLI logs are excluded. The incident Run is selected explicitly;
-host text logs and that agent's log tails supplement it. Missing/truncated sources
+host text logs and that agent's log tails supplement it. For AMR, only the records of
+the incident Run and the OpenCode sessions it owns are taken from the shared
+`$AMR_HOME/logs/agent-runtime.jsonl`; AMR's per-conversation OpenCode session logs are
+not located yet and are noted as `source_not_located`. A source first listed after
+opting in (for example after an upgrade) gets a consent boundary at its current size on
+the next start instead of being omitted forever. Missing/truncated sources
 are reported as partial. Fault summaries include version/runtime context.
 
 Both metrics and content must be true at registration and each transport step.
