@@ -95,3 +95,26 @@ it.each([false, true])('recognizes an admitted identity after restart and rotati
   const [rebased] = await rotatedOnly.apply([rotatedSource]);
   expect(rebased).toMatchObject({ startOffset: 'first consented session\n'.length });
 });
+
+it('keeps a session log admitted after rotation even when that session had no incident', async () => {
+  const latest = join(dir, 'latest.log'); const previous = join(dir, 'previous.log');
+  await optedIn(latest);
+  const inherited = identities.get(latest)!.birthtimeMs;
+  const sources = [
+    { name: 'logs/daemon/latest.log', absolutePath: latest, kind: 'text' as const },
+    { name: 'logs/daemon/previous.log', absolutePath: previous, kind: 'text' as const },
+  ];
+  // Launch 2: rotation, then the daemon starts and observes its logs; no incident follows.
+  await writeFile(previous, 'written before consent\n'); identities.set(previous, { ino: 1, birthtimeMs: inherited });
+  await writeFile(latest, 'second session\n'); identities.set(latest, { ino: 2, birthtimeMs: inherited });
+  await new DiagnosticConsentFence(dir, true).observe(sources);
+  // Launch 3 (e.g. after a crash): the second session's log is now previous.log.
+  await writeFile(previous, 'second session\n'); identities.set(previous, { ino: 2, birthtimeMs: inherited });
+  await writeFile(latest, 'third session\n'); identities.set(latest, { ino: 3, birthtimeMs: inherited });
+  const relaunched = new DiagnosticConsentFence(dir, true);
+  await relaunched.observe(sources);
+  const [current, rotated] = await relaunched.apply(sources);
+  expect(current).not.toHaveProperty('omitReason');
+  expect(rotated).not.toHaveProperty('omitReason');
+  expect(rotated?.startOffset ?? 0).toBe(0);
+});

@@ -31,6 +31,7 @@ export class AutomaticDiagnostics {
   private readonly relay: DiagnosticRelay | null;
   private readonly consentFence: DiagnosticConsentFence;
   private consentBarrier: Promise<void> = Promise.resolve();
+  private observedLogIdentities = false;
   constructor(private readonly options: Options) {
     this.outbox = new DiagnosticOutbox(options.dataRoot);
     this.consentFence = new DiagnosticConsentFence(this.outbox.directory, this.hasConsent());
@@ -138,6 +139,11 @@ export class AutomaticDiagnostics {
     await this.consentBarrier;
     await this.cleanup();
     if (!this.allowed()) return;
+    if (!this.observedLogIdentities && this.options.baselineSources) {
+      // Once per process, after the launcher has rotated this session's logs.
+      this.observedLogIdentities = true;
+      await this.consentFence.observe(await this.options.baselineSources()).catch(() => { /* retried next start */ });
+    }
     this.controller = new AbortController();
     const signal = this.controller.signal;
     // A bounded batch yields to normal daemon work even during a fault storm.

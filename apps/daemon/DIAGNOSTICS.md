@@ -43,8 +43,9 @@ uploading old text; an old source whose boundary cannot be proved is omitted and
 marked partial. A baselined file keeps its offset when rotated to another path.
 The consent fence admits a replacement identity with an inherited creation time
 only when it matches the baseline for that same source path. It saves admitted
-identities in the consent state so later rotations and daemon restarts can
-recognize them without accepting unrelated files with matching creation times.
+identities in the consent state, recorded at each daemon start as well as when an
+incident is collected, so later rotations and daemon restarts can recognize them
+without accepting unrelated files with matching creation times.
 Already transmitted remote bytes expire under the remote policy.
 
 Pending content expires after 7 days; delivered local content after 24 hours. The
