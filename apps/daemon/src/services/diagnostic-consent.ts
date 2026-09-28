@@ -86,6 +86,8 @@ export class DiagnosticConsentFence {
       // A rotated log (latest.log -> previous.log) keeps its identity under a new path.
       const offset = sameFile(recorded) ? recorded : baselined.find(sameFile);
       if (!this.state.enabled) result.push({ ...source, omitReason: 'consent_disabled' });
+      // A missing file is not evidence of a consent boundary.
+      else if (!info) result.push({ ...source, omitReason: 'source_not_found' });
       else if (info && offset) result.push({ ...source, startOffset: offset.size });
       else if (info && admitted.some(sameFile)) {
         const current = { size: 0, ino: info.ino, birthtime: info.birthtimeMs };

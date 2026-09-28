@@ -118,3 +118,9 @@ it('keeps a session log admitted after rotation even when that session had no in
   expect(rotated).not.toHaveProperty('omitReason');
   expect(rotated?.startOffset ?? 0).toBe(0);
 });
+
+it('reports a missing source as not found rather than as pre-consent', async () => {
+  const fence = await optedIn(join(dir, 'latest.log'));
+  const [result] = await fence.apply([{ name: 'logs/desktop/renderer.log', absolutePath: join(dir, 'renderer.log'), kind: 'text' }]);
+  expect(result).toMatchObject({ omitReason: 'source_not_found' });
+});
