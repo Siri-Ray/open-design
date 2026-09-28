@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, expect, it } from 'vitest';
@@ -63,4 +63,19 @@ it('gives a source added after opting in a boundary instead of omitting it forev
   expect((await reopened.apply([source]))[0]).toMatchObject({ omitReason: 'pre_consent_source' });
   await reopened.extend([source]);
   expect((await reopened.apply([source]))[0]).toMatchObject({ startOffset: size });
+});
+
+it('does not move the boundary of a rotated log that is already baselined under its old path', async () => {
+  const latest = join(root, 'latest.log'); const previous = join(root, 'previous.log');
+  await writeFile(latest, 'before the boundary\n');
+  const fence = new DiagnosticConsentFence(root, true);
+  await fence.baseline([{ name: 'logs/daemon/latest.log', absolutePath: latest, kind: 'text' }]);
+  await appendFile(latest, 'after the boundary\n');
+  await rename(latest, previous);
+  const restarted = new DiagnosticConsentFence(root, true);
+  (restarted as unknown as { state: { since: number } }).state.since = Date.now() + 60_000;
+  const source = { name: 'logs/daemon/previous.log', absolutePath: previous, kind: 'text' as const };
+  await restarted.extend([source]);
+  const persisted = JSON.parse(await readFile(join(root, 'consent.json'), 'utf8')) as { offsets: Record<string, unknown> };
+  expect(persisted.offsets[previous]).toBeUndefined();
 });

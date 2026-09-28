@@ -46,6 +46,9 @@ export class DiagnosticConsentFence {
         const info = await stat(source.absolutePath);
         // A file created after opting in is already admitted whole.
         if (info.birthtimeMs >= generation.since) continue;
+        // A rotated or re-created log shares a baselined creation time; its boundary is
+        // decided from that baseline, never from its current size.
+        if (Object.values(generation.offsets).some((known) => known.birthtime === info.birthtimeMs)) continue;
         generation.offsets[source.absolutePath] = { size: info.size, ino: info.ino, birthtime: info.birthtimeMs };
         added = true;
       } catch { /* a future file will be admitted only if created after the boundary */ }
