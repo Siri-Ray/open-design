@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import type { AutomaticDiagnosticSource, LogSource } from '@open-design/diagnostics';
 
 interface Offset { size: number; ino: number; birthtime: number }
-interface ConsentState { enabled: boolean; since: number; offsets: Record<string, Offset> }
+interface ConsentState { enabled: boolean; since: number; offsets: Record<string, Offset>; admitted?: Record<string, Offset> }
 
 /** File watermarks prevent a later opt-in from backfilling text produced while opted out. */
 export class DiagnosticConsentFence {
@@ -48,21 +48,38 @@ export class DiagnosticConsentFence {
   }
   async apply(sources: LogSource[]): Promise<AutomaticDiagnosticSource[]> {
     const result: AutomaticDiagnosticSource[] = [];
-    const baselined = Object.values(this.state.offsets);
+    const generation = this.state;
+    const baselined = Object.values(generation.offsets);
+    const admitted = Object.values(generation.admitted ?? {});
+    const updates: Record<string, Offset> = {};
     for (const source of sources) {
       const info = await stat(source.absolutePath).catch(() => null);
-      const recorded = this.state.offsets[source.absolutePath];
+      if (this.state !== generation) {
+        return sources.map((entry) => ({ ...entry, omitReason: this.state.enabled ? 'pre_consent_source' : 'consent_disabled' }));
+      }
+      const recorded = generation.offsets[source.absolutePath];
       const sameFile = (offset: Offset | undefined) => !!info && !!offset && info.ino === offset.ino && info.birthtimeMs === offset.birthtime;
       // A rotated log (latest.log -> previous.log) keeps its identity under a new path.
       const offset = sameFile(recorded) ? recorded : baselined.find(sameFile);
       if (!this.state.enabled) result.push({ ...source, omitReason: 'consent_disabled' });
       else if (info && offset) result.push({ ...source, startOffset: offset.size });
-      else if (info && info.birthtimeMs >= this.state.since) result.push(source);
+      else if (info && admitted.some(sameFile)) {
+        updates[source.absolutePath] = { size: 0, ino: info.ino, birthtime: info.birthtimeMs };
+        result.push({ ...source, startOffset: 0 });
+      } else if (info && info.birthtimeMs >= this.state.since) result.push(source);
       // Windows file-system tunneling gives a file re-created under a rotated name the
-      // creation time of the file that previously held it. A new identity carrying a
-      // baselined creation time was therefore created after the boundary.
-      else if (info && baselined.some((known) => known.birthtime === info.birthtimeMs)) result.push(source);
-      else result.push({ ...source, omitReason: 'pre_consent_source' });
+      // creation time of the file that previously held that same path. Birth times
+      // from other paths are not proof of lineage.
+      else if (info && recorded && recorded.birthtime === info.birthtimeMs) {
+        updates[source.absolutePath] = { size: 0, ino: info.ino, birthtime: info.birthtimeMs };
+        result.push(source);
+      } else result.push({ ...source, omitReason: 'pre_consent_source' });
+    }
+    if (Object.keys(updates).length > 0) {
+      // Keep the original watermarks; admitted identities need no byte exclusion
+      // when encountered at a rotated path, including after a daemon restart.
+      generation.admitted = { ...generation.admitted, ...updates };
+      this.persist();
     }
     return result;
   }

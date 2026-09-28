@@ -51,13 +51,47 @@ it('admits a log re-created under a rotated name that inherited the prior creati
   // The rotated file keeps its identity, so only bytes after the boundary are read.
   expect(rotated).toMatchObject({ startOffset: 'written before consent\n'.length });
   expect(rotated).not.toHaveProperty('omitReason');
+  const restarted = new DiagnosticConsentFence(dir, true);
+  const [retained] = await restarted.apply([{ name: 'logs/daemon/previous.log', absolutePath: previous, kind: 'text' }]);
+  expect(retained).toMatchObject({ startOffset: 'written before consent\n'.length });
+  expect(retained).not.toHaveProperty('omitReason');
 });
 
-it('keeps omitting an unrelated file created before consent', async () => {
+it.each([0, -1])('keeps omitting an unrelated pre-consent file with birth-time delta %i', async (delta) => {
   const latest = join(dir, 'latest.log'); const other = join(dir, 'other.log');
   const fence = await optedIn(latest);
   await writeFile(other, 'older private text\n');
-  identities.set(other, { ino: 3, birthtimeMs: identities.get(latest)!.birthtimeMs - 1 });
+  identities.set(other, { ino: 3, birthtimeMs: identities.get(latest)!.birthtimeMs + delta });
   const [result] = await fence.apply([{ name: 'logs/other.log', absolutePath: other, kind: 'text' }]);
   expect(result).toMatchObject({ omitReason: 'pre_consent_source' });
+});
+
+it.each([false, true])('recognizes an admitted identity after restart and rotation (previous first: %s)', async (previousFirst) => {
+  const latest = join(dir, 'latest.log'); const previous = join(dir, 'previous.log');
+  const fence = await optedIn(latest);
+  const inherited = identities.get(latest)!.birthtimeMs;
+  const source = { name: 'logs/daemon/latest.log', absolutePath: latest, kind: 'text' as const };
+  const rotatedSource = { name: 'logs/daemon/previous.log', absolutePath: previous, kind: 'text' as const };
+  await writeFile(latest, 'first consented session\n');
+  identities.set(latest, { ino: 2, birthtimeMs: inherited });
+  await fence.apply([source]);
+  await writeFile(previous, 'first consented session\n');
+  identities.set(previous, { ino: 2, birthtimeMs: inherited });
+  await writeFile(latest, 'second consented session\n');
+  identities.set(latest, { ino: 3, birthtimeMs: inherited });
+  const restarted = new DiagnosticConsentFence(dir, true);
+  const results = await restarted.apply(previousFirst ? [rotatedSource, source] : [source, rotatedSource]);
+  for (const result of results) {
+    expect(result).not.toHaveProperty('omitReason');
+    expect(result.startOffset ?? 0).toBe(0);
+  }
+  // The rotated identity remains recognized on a subsequent restart.
+  const rotatedOnly = new DiagnosticConsentFence(dir, true);
+  expect((await rotatedOnly.apply([rotatedSource]))[0]).toMatchObject({ startOffset: 0 });
+  rotatedOnly.change(false);
+  rotatedOnly.change(true);
+  expect((await rotatedOnly.apply([rotatedSource]))[0]).toMatchObject({ omitReason: 'pre_consent_source' });
+  await rotatedOnly.baseline([rotatedSource]);
+  const [rebased] = await rotatedOnly.apply([rotatedSource]);
+  expect(rebased).toMatchObject({ startOffset: 'first consented session\n'.length });
 });
