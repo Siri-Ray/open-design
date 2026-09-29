@@ -982,6 +982,36 @@ describe('OD Next planning coordinator', () => {
     expect(final.reasonCodes).not.toContain('od_next_question_form_unrenderable');
   });
 
+  it('repairs a planning reply whose runtime-state blocks disagree instead of blocking the task', () => {
+    // Production AMR runs failed with OD_NEXT_CONTINUATION_FAILED when the
+    // model emitted two different Runtime State blocks next to a valid plan:
+    // nothing was written yet, so one serialization repair is safe.
+    prepareStrategyRequest(db, {
+      taskExecutionId: 'task-1',
+      preference: 'full_plan',
+      directEdit: directEligible,
+      intake: intakePassed,
+      updatedAt: 110,
+    });
+    const plan = planContract(snapshot);
+    const repair = finalizeStrategyPlanningTurn(db, {
+      taskExecutionId: 'task-1',
+      runId: 'run-request',
+      protocol: protocol([
+        block('open-design-plan-contract', plan),
+        block('open-design-runtime-state', runtimeState({ outcome: 'plan_ready', executionMode: 'simple' })),
+        block('open-design-runtime-state', runtimeState({ outcome: 'plan_ready', executionMode: null })),
+      ].join('\n')),
+      repairRun: { runId: 'run-repair', sourceRunId: 'run-request' },
+      toolUseCount: 2,
+      executionPreflight: executionPassed,
+      updatedAt: 120,
+    });
+    expect(repair.action).toBe('contract_repair');
+    expect(repair.reasonCodes).toContain('od_next_protocol_runtime_state_duplicate');
+    expect(repair.task).toMatchObject({ inputStage: 'contract_repair', planContractRepairAttempts: 1 });
+  });
+
   it('allows one serialization-only repair only with a durable semantic hash anchor', () => {
     prepareStrategyRequest(db, {
       taskExecutionId: 'task-1',
