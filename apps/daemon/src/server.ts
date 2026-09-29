@@ -13950,6 +13950,7 @@ export async function startServer({
     };
     let forcedChildShutdownTimers = [];
     let acpAttemptTermination = null;
+    let acpCompletionShutdownRequested = false;
     const beginAcpAttemptTermination = (
       reason = 'acp_terminal',
       { gracefulWaitMs = 0 } = {},
@@ -15739,10 +15740,13 @@ export async function startServer({
         onCliReady: () => noteCliReadyAt(),
         onSessionInit: () => noteSessionInitDoneAt(),
         onPromptComplete: () => clearFirstOutputWatchdog(),
-        onTerminal: (kind) => beginAcpAttemptTermination(
-          `acp_${kind}`,
-          { gracefulWaitMs: kind === 'completed' ? 500 : 0 },
-        ),
+        onTerminal: (kind) => {
+          if (kind === 'completed') acpCompletionShutdownRequested = true;
+          return beginAcpAttemptTermination(
+            `acp_${kind}`,
+            { gracefulWaitMs: kind === 'completed' ? 500 : 0 },
+          );
+        },
         send: (event, data, meta) => {
           if (event === 'error') {
             clearFirstOutputWatchdog();
@@ -16475,12 +16479,11 @@ export async function startServer({
       // signal exit). `completedSuccessfully()` reports whether the ACP
       // session resolved without a fatal error or abort.
       //
-      // Scope the override narrowly to the exact forced-shutdown shape this
-      // PR introduces: code is null AND signal is SIGTERM AND the ACP
-      // session reported clean completion. Any other post-response failure
-      // (non-zero exit code, SIGKILL, SIGSEGV, etc.) still propagates as
-      // `failed`, preserving the existing close-status behavior for genuine
-      // post-response process problems.
+      // The override covers SIGTERM (or vela's code 130) after clean
+      // completion, and any exit once the daemon itself began shutting the
+      // completed attempt down (`acpCompletionShutdownRequested`; Windows
+      // reports that kill as code 1 with no signal). Other post-response
+      // failures still propagate as `failed`.
       const acpCleanCompletion =
         typeof acpSession?.completedSuccessfully === 'function' &&
         acpSession.completedSuccessfully();
@@ -16490,6 +16493,7 @@ export async function startServer({
         code,
         signal,
         acpCleanCompletion,
+        acpCompletionShutdownRequested,
         artifactQuietShutdownRequested,
         turnCompletedCleanly: !!run.turnCompletedCleanly,
         artifactProducedThisRun:
