@@ -659,6 +659,71 @@ describe('chat run service shutdown', () => {
     });
   });
 
+  it('reports a daemon signal to a completed child that outlives the grace wait', async () => {
+    const childPid = 40_600;
+    const child = new FakeChildProcess({ closeOn: 'SIGTERM', pid: childPid });
+    platformMocks.listProcessSnapshots.mockResolvedValue([{ pid: childPid, ppid: 1, command: 'vela' }]);
+    platformMocks.stopProcesses.mockImplementation(async () => {
+      child.exitCode = 1;
+      child.emit('exit', 1, null);
+      child.emit('close', 1, null);
+      return { alreadyStopped: false, forcedPids: [], matchedPids: [childPid], remainingPids: [], stoppedPids: [childPid] };
+    });
+    const runs = createRuns();
+    const run = runs.create({ projectId: 'project-1', conversationId: 'conv-1' });
+    run.status = 'running';
+    const onChildSignal = vi.fn();
+
+    await runs.terminateProcessTree(run, child, null, { gracefulWaitMs: 20, onChildSignal });
+
+    expect(onChildSignal).toHaveBeenCalledTimes(1);
+    expect(platformMocks.stopProcesses).toHaveBeenCalledWith([childPid], expect.anything());
+  });
+
+  it('does not report a daemon signal when the child exits on its own during the grace wait', async () => {
+    const childPid = 40_700;
+    const child = new FakeChildProcess({ closeOn: 'SIGTERM', pid: childPid });
+    platformMocks.listProcessSnapshots.mockResolvedValue([{ pid: childPid, ppid: 1, command: 'vela' }]);
+    platformMocks.stopProcesses.mockResolvedValue({
+      alreadyStopped: true, forcedPids: [], matchedPids: [], remainingPids: [], stoppedPids: [],
+    });
+    const runs = createRuns();
+    const run = runs.create({ projectId: 'project-1', conversationId: 'conv-1' });
+    run.status = 'running';
+    const onChildSignal = vi.fn();
+    setTimeout(() => {
+      child.exitCode = 1;
+      child.emit('exit', 1, null);
+      child.emit('close', 1, null);
+    }, 5);
+
+    await runs.terminateProcessTree(run, child, null, { gracefulWaitMs: 200, onChildSignal });
+
+    expect(onChildSignal).not.toHaveBeenCalled();
+  });
+
+  it('reports a daemon signal on the pid-less path only while the child is alive', async () => {
+    const runs = createRuns();
+    const alive = new FakeChildProcess({ closeOn: 'SIGTERM' });
+    const aliveRun = runs.create({ projectId: 'project-1', conversationId: 'conv-1' });
+    const signalled = vi.fn();
+    await runs.terminateProcessTree(aliveRun, alive, null, { gracefulWaitMs: 10, onChildSignal: signalled });
+    expect(signalled).toHaveBeenCalledTimes(1);
+    expect(alive.signals).toEqual(['SIGTERM']);
+
+    const exiting = new FakeChildProcess({ closeOn: 'SIGTERM' });
+    const exitingRun = runs.create({ projectId: 'project-1', conversationId: 'conv-2' });
+    const notSignalled = vi.fn();
+    setTimeout(() => {
+      exiting.exitCode = 1;
+      exiting.emit('exit', 1, null);
+      exiting.emit('close', 1, null);
+    }, 5);
+    await runs.terminateProcessTree(exitingRun, exiting, null, { gracefulWaitMs: 200, onChildSignal: notSignalled });
+    expect(notSignalled).not.toHaveBeenCalled();
+    expect(exiting.signals).toEqual([]);
+  });
+
   it('filters active runs by conversation within the same project', () => {
     const runs = createRuns();
     const runA = runs.create({ projectId: 'project-1', conversationId: 'conv-a' });

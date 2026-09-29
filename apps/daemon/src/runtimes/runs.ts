@@ -2218,12 +2218,17 @@ export function createChatRunService({
    * bounded SIGTERM/SIGKILL escalation while the direct child is still alive.
    * The captured child/pgid key makes repeated verdict/close callbacks
    * idempotent and prevents a retry generation from targeting its successor.
+   *
+   * `onChildSignal` runs just before the first signal goes to a direct child
+   * that is still alive, i.e. only when the daemon, not the child itself,
+   * ends it. A child that exits during `gracefulWaitMs` never triggers it.
    */
   const terminateProcessTree = (run, child, processGroupId, {
     gracefulWaitMs = 0,
     termGraceMs = cancelGraceMs(),
     killGraceMs = forceWaitMs(),
     reason = 'run_terminal',
+    onChildSignal = undefined as (() => void) | undefined,
   } = {}) => {
     const key = child ?? processGroupId;
     run.processTreeTerminations ??= new Map();
@@ -2244,6 +2249,7 @@ export function createChatRunService({
           return { quiescent: true, forced: false, remainingPids: [] };
         }
         if (gracefulWaitMs > 0) closeRunStdin(run);
+        if (!childHasExited(child)) onChildSignal?.();
         signalProcessGroup(processGroupId, 'SIGTERM');
         if (await waitForProcessGroupExit(processGroupId, termGraceMs)) {
           return { quiescent: true, forced: false, remainingPids: [] };
@@ -2265,6 +2271,7 @@ export function createChatRunService({
           return { quiescent: true, forced: false, remainingPids: [] };
         }
         if (gracefulWaitMs > 0) closeRunStdin(run);
+        if (!childHasExited(child)) onChildSignal?.();
         signalChildProcess(child, null, 'SIGTERM');
         if (await waitForChildExit(child, termGraceMs)) {
           return { quiescent: true, forced: false, remainingPids: [] };
@@ -2293,6 +2300,7 @@ export function createChatRunService({
       const terminationPids = pids.length > 0 || childExitedDuringGrace
         ? pids
         : [child.pid];
+      if (!childExitedDuringGrace && !childHasExited(child)) onChildSignal?.();
       const result = await stopProcesses(terminationPids, { termGraceMs, killGraceMs });
 
       const verificationSnapshots = await listProcessSnapshots();

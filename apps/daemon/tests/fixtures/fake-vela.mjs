@@ -75,8 +75,11 @@
  *                                   reproduces how a Windows child looks after
  *                                   the host kills it by pid: code 1, no signal
  *   FAKE_VELA_EXIT_DELAY_AFTER_EOF_MS – keep running this long after stdin EOF
- *                                   before exiting 0, modelling vela's own
+ *                                   before exiting, modelling vela's own
  *                                   post-turn shutdown work
+ *   FAKE_VELA_EXIT_CODE_AFTER_EOF – exit with this code (default 0) once stdin
+ *                                   EOF handling finishes, modelling vela
+ *                                   failing on its own after a clean turn
  *   FAKE_VELA_DESCENDANT_ACTIVITY_FILE – when set, spawn a SIGTERM-ignoring
  *                                   descendant that appends activity ticks to
  *                                   this file while the ACP prompt is stalled
@@ -129,6 +132,7 @@ const EXIT_CODE_ON_SIGTERM = env.FAKE_VELA_EXIT_CODE_ON_SIGTERM === undefined
   ? null
   : Number(env.FAKE_VELA_EXIT_CODE_ON_SIGTERM);
 const EXIT_DELAY_AFTER_EOF_MS = Number(env.FAKE_VELA_EXIT_DELAY_AFTER_EOF_MS) || 0;
+const EXIT_CODE_AFTER_EOF = Number(env.FAKE_VELA_EXIT_CODE_AFTER_EOF) || 0;
 const DESCENDANT_ACTIVITY_FILE = env.FAKE_VELA_DESCENDANT_ACTIVITY_FILE || '';
 const DESCENDANT_PID_FILE = env.FAKE_VELA_DESCENDANT_PID_FILE || '';
 const PROMPT_RESULT_DELAY_MS = Number(env.FAKE_VELA_PROMPT_RESULT_DELAY_MS) || 0;
@@ -493,8 +497,8 @@ stdin.on('end', () => {
   stdout.end();
   // Mirror real ACP runtimes that exit on EOF so the host's child.on('close')
   // fires promptly and the chat run can finalize.
-  if (EXIT_DELAY_AFTER_EOF_MS > 0) setTimeout(() => process.exit(0), EXIT_DELAY_AFTER_EOF_MS);
-  else process.exit(0);
+  if (EXIT_DELAY_AFTER_EOF_MS > 0) setTimeout(() => process.exit(EXIT_CODE_AFTER_EOF), EXIT_DELAY_AFTER_EOF_MS);
+  else process.exit(EXIT_CODE_AFTER_EOF);
 });
 
 // `vela login`: the daemon's /api/integrations/vela/login route spawns this

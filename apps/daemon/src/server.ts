@@ -13953,7 +13953,7 @@ export async function startServer({
     let acpCompletionShutdownRequested = false;
     const beginAcpAttemptTermination = (
       reason = 'acp_terminal',
-      { gracefulWaitMs = 0 } = {},
+      { gracefulWaitMs = 0, onChildSignal = undefined as (() => void) | undefined } = {},
     ) => {
       if (acpAttemptTermination) return acpAttemptTermination;
       acpAttemptTermination = design.runs.terminateProcessTree(
@@ -13965,6 +13965,7 @@ export async function startServer({
           termGraceMs: inactivityKillGraceMs,
           killGraceMs: inactivityKillGraceMs,
           reason,
+          onChildSignal,
         },
       );
       return acpAttemptTermination;
@@ -15740,13 +15741,18 @@ export async function startServer({
         onCliReady: () => noteCliReadyAt(),
         onSessionInit: () => noteSessionInitDoneAt(),
         onPromptComplete: () => clearFirstOutputWatchdog(),
-        onTerminal: (kind) => {
-          if (kind === 'completed') acpCompletionShutdownRequested = true;
-          return beginAcpAttemptTermination(
-            `acp_${kind}`,
-            { gracefulWaitMs: kind === 'completed' ? 500 : 0 },
-          );
-        },
+        onTerminal: (kind) => beginAcpAttemptTermination(
+          `acp_${kind}`,
+          kind === 'completed'
+            ? {
+              gracefulWaitMs: 500,
+              // Only an exit the daemon causes speaks for the completed
+              // turn; vela exiting non-zero on its own during the grace
+              // wait is still its own failure.
+              onChildSignal: () => { acpCompletionShutdownRequested = true; },
+            }
+            : { gracefulWaitMs: 0 },
+        ),
         send: (event, data, meta) => {
           if (event === 'error') {
             clearFirstOutputWatchdog();
@@ -16480,10 +16486,11 @@ export async function startServer({
       // session resolved without a fatal error or abort.
       //
       // The override covers SIGTERM (or vela's code 130) after clean
-      // completion, and any exit once the daemon itself began shutting the
-      // completed attempt down (`acpCompletionShutdownRequested`; Windows
-      // reports that kill as code 1 with no signal). Other post-response
-      // failures still propagate as `failed`.
+      // completion, and any exit after the daemon itself signalled the
+      // completed attempt (`acpCompletionShutdownRequested`; Windows reports
+      // that kill as code 1 with no signal). Other post-response failures,
+      // including a non-zero exit during the grace wait, still propagate as
+      // `failed`.
       const acpCleanCompletion =
         typeof acpSession?.completedSuccessfully === 'function' &&
         acpSession.completedSuccessfully();
