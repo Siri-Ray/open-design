@@ -3435,6 +3435,48 @@ process.exit(0);
     );
   });
 
+  // A service-shaped verdict (here RATE_LIMITED) must keep the provider's
+  // isRetryable: false too, not only the generic execution-failed path.
+  it('keeps a non-retryable OpenCode HTTP 429 verdict out of the same-run retry (OPEND-3527)', async () => {
+    const { OPENCODE_RATE_LIMIT_FRAME } = await import('./fixtures/opencode-provider-error-frames.js');
+    const frame = JSON.stringify({
+      ...OPENCODE_RATE_LIMIT_FRAME,
+      error: {
+        ...OPENCODE_RATE_LIMIT_FRAME.error,
+        data: { ...OPENCODE_RATE_LIMIT_FRAME.error.data, isRetryable: false },
+      },
+    });
+    await withFakeAgent(
+      'opencode',
+      `
+console.log(${JSON.stringify(frame)});
+process.exit(0);
+`,
+      async () => {
+        const createResponse = await fetch(`${baseUrl}/api/runs`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ agentId: 'opencode', message: 'hello' }),
+        });
+        expect(createResponse.status).toBe(202);
+        const { runId } = await createResponse.json() as { runId: string };
+        await waitForRunStatus(baseUrl, runId);
+        const eventsController = new AbortController();
+        const eventsResponse = await fetch(`${baseUrl}/api/runs/${runId}/events`, { signal: eventsController.signal });
+        const eventsBody = await readSseUntil(eventsResponse, 'event: end');
+        eventsController.abort();
+        const errorPayload = eventsBody
+          .split('\n\n')
+          .filter((block) => block.split('\n').includes('event: error'))
+          .map((block) => JSON.parse(block.slice(block.indexOf('data: ') + 6)) as { error?: { code?: string; retryable?: boolean } })
+          .at(-1);
+
+        expect(errorPayload?.error).toMatchObject({ code: 'RATE_LIMITED', retryable: false });
+        expect(eventsBody).not.toContain('run_retry_attempted');
+      },
+    );
+  });
+
   it('prefers a terminal Claude prompt-length error over auth-shaped stderr (#6979)', async () => {
     await withFakeAgent(
       'claude',
