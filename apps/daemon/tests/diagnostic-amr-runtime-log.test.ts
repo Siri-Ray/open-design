@@ -1,4 +1,4 @@
-import { appendFile, mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, mkdtemp, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, expect, it } from 'vitest';
@@ -26,7 +26,7 @@ it('selects the run and the OpenCode sessions it owns until another run takes on
 
 let root: string;
 const priorAmrHome = process.env.AMR_HOME;
-beforeEach(async () => { root = await mkdtemp(join(tmpdir(), 'amr-runtime-')); process.env.AMR_HOME = join(root, 'amr'); });
+beforeEach(async () => { root = await realpath(await mkdtemp(join(tmpdir(), 'amr-runtime-'))); process.env.AMR_HOME = join(root, 'amr'); });
 afterEach(async () => {
   if (priorAmrHome === undefined) delete process.env.AMR_HOME; else process.env.AMR_HOME = priorAmrHome;
   await rm(root, { recursive: true, force: true });
@@ -88,6 +88,10 @@ async function writeRuntimeLog(records: Record<string, unknown>[]): Promise<void
   await writeFile(join(root, 'amr', 'logs', 'agent-runtime.jsonl'), `${records.map(line).join('\n')}\n`);
 }
 const conversationLog = (name: string) => join(root, 'amr', 'opencode-sessions', name, 'data', 'opencode', 'log', 'opencode.log');
+async function writeConversationLog(name: string, text = 'timestamp=2026-09-30T00:00:00.000Z level=INFO message=x\n'): Promise<void> {
+  await mkdir(join(root, 'amr', 'opencode-sessions', name, 'data', 'opencode', 'log'), { recursive: true });
+  await writeFile(conversationLog(name), text);
+}
 
 it('collects the OpenCode log the run\'s session record names, instead of reporting it unlocated', async () => {
   const options = { runtime: null, projectRoot: root, runsDir: join(root, 'runs'), dataDir: join(root, 'data') };
@@ -95,6 +99,8 @@ it('collects the OpenCode log the run\'s session record names, instead of report
     { event: 'opencode_session_created', opencodeSessionId: 'ses_b', openDesignRunId: 'run-b', opencodeLogPath: conversationLog('other') },
     { event: 'opencode_session_loaded', opencodeSessionId: 'ses_a', openDesignRunId: 'run-a', opencodeLogPath: conversationLog('mine'), ts: '2026-09-30T01:00:00.000Z' },
   ]);
+  await writeConversationLog('mine');
+  await writeConversationLog('other');
   const sources = await buildAutomaticDiagnosticSources(options, { runId: 'run-a', agentId: 'amr' });
   const amr = sources.filter((s) => s.name.startsWith('agent-cli-logs/amr/'));
   expect(amr.map((s) => s.name)).toEqual(['agent-cli-logs/amr/agent-runtime.jsonl', 'agent-cli-logs/amr/opencode.log']);
@@ -108,6 +114,7 @@ it('keeps only the lines of the run\'s window from a conversation\'s shared Open
   await writeRuntimeLog([
     { event: 'opencode_session_loaded', opencodeSessionId: 'ses_a', openDesignRunId: 'run-a', opencodeLogPath: conversationLog('mine'), ts: '2026-09-30T01:00:00.000Z' },
   ]);
+  await writeConversationLog('mine');
   const source = (await buildAutomaticDiagnosticSources(options, { runId: 'run-a', agentId: 'amr' }))
     .find((s) => s.name === 'agent-cli-logs/amr/opencode.log')!;
   const selected = source.selectLines!([
@@ -165,4 +172,43 @@ it('puts the run\'s part of its OpenCode log into the uploaded bundle', async ()
     expect(file?.content).toContain('stream error');
     expect(file?.content).not.toContain('previous turn');
   } finally { await service.stop(); }
+});
+
+// A runtime record can only name OpenCode's log inside the AMR home. The check
+// has to hold for the file actually read, so an in-tree symlink that points
+// elsewhere must not make that target collectable.
+// File symlinks need elevated rights on Windows, as in run-deliverable-validation.
+it.skipIf(process.platform === 'win32')('does not collect an in-tree OpenCode log symlink whose target is outside the AMR home', async () => {
+  const { symlink } = await import('node:fs/promises');
+  const options = { runtime: null, projectRoot: root, runsDir: join(root, 'runs'), dataDir: join(root, 'data') };
+  const outside = join(root, 'outside', 'secret.txt');
+  await mkdir(join(root, 'outside'), { recursive: true });
+  await writeFile(outside, 'timestamp=2026-09-30T01:00:01.000Z level=INFO message="not an amr file"\n');
+  await mkdir(join(root, 'amr', 'opencode-sessions', 'mine', 'data', 'opencode', 'log'), { recursive: true });
+  await symlink(outside, conversationLog('mine'));
+  await writeRuntimeLog([
+    { event: 'opencode_session_loaded', opencodeSessionId: 'ses_a', openDesignRunId: 'run-a', opencodeLogPath: conversationLog('mine'), ts: '2026-09-30T01:00:00.000Z' },
+  ]);
+  const incident = await buildAutomaticDiagnosticSources(options, { runId: 'run-a', agentId: 'amr' });
+  const baseline = await buildAutomaticDiagnosticSources(options, { agentId: '*' });
+  expect([...incident, ...baseline].filter((s) => s.name.startsWith('agent-cli-logs/amr/opencode')
+    && !s.omitReason).map((s) => s.absolutePath)).toEqual([]);
+  expect(incident.find((s) => s.name === 'agent-cli-logs/amr/opencode')?.omitReason).toBe('source_not_located');
+});
+
+// Without a valid bound time the run's window in a conversation's shared log is
+// unknown; exporting from epoch zero would take earlier turns too.
+it.each([
+  ['missing', undefined],
+  ['malformed', 'not-a-time'],
+])('does not export a shared OpenCode log when the session record\'s timestamp is %s', async (_label, ts) => {
+  const options = { runtime: null, projectRoot: root, runsDir: join(root, 'runs'), dataDir: join(root, 'data') };
+  await mkdir(join(root, 'amr', 'opencode-sessions', 'mine', 'data', 'opencode', 'log'), { recursive: true });
+  await writeFile(conversationLog('mine'), 'timestamp=2026-09-30T00:10:00.000Z level=INFO message="earlier turn"\n');
+  await writeRuntimeLog([
+    { event: 'opencode_session_loaded', opencodeSessionId: 'ses_a', openDesignRunId: 'run-a', opencodeLogPath: conversationLog('mine'), ts }, // ts: undefined drops the key
+  ]);
+  const sources = await buildAutomaticDiagnosticSources(options, { runId: 'run-a', agentId: 'amr' });
+  expect(sources.find((s) => s.name === 'agent-cli-logs/amr/opencode.log')).toBeUndefined();
+  expect(sources.find((s) => s.name === 'agent-cli-logs/amr/opencode')?.omitReason).toBe('source_not_located');
 });

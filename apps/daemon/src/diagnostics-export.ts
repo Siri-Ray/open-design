@@ -1,4 +1,4 @@
-import { access, open } from 'node:fs/promises';
+import { access, open, realpath, stat } from 'node:fs/promises';
 import { homedir, userInfo } from 'node:os';
 import { dirname, join, resolve, sep } from 'node:path';
 
@@ -321,23 +321,45 @@ async function readTail(absolutePath: string, maxBytes: number): Promise<string>
 }
 
 /**
+ * The real path of a named OpenCode log when it is a regular file inside the AMR
+ * home. Both sides are resolved through symlinks, because every later read
+ * follows them: a lexical check alone would let an in-tree link export any file.
+ */
+async function containedOpenCodeLog(named: string, realRoot: string): Promise<string | null> {
+  const lexical = resolve(named);
+  if (!lexical.endsWith(sep + OPENCODE_LOG_SUFFIX)) return null;
+  const real = await realpath(lexical).catch(() => null);
+  if (!real || !real.startsWith(realRoot) || !real.endsWith(sep + OPENCODE_LOG_SUFFIX)) return null;
+  const info = await stat(real).catch(() => null);
+  return info?.isFile() ? real : null;
+}
+
+/**
  * OpenCode logs under a per-conversation AMR home the daemon cannot derive, so
- * Vela names the log in its session records. Only logs inside the AMR home are
- * accepted; the runtime log never makes an arbitrary file collectable.
+ * Vela names the log in its session records. Only regular files inside the AMR
+ * home are accepted; the runtime log never makes an arbitrary file collectable.
+ * A record without a valid time is skipped: the run's window in a shared log
+ * would be unknown.
  */
 async function readAmrOpenCodeLogRecords(runtimeLog: string, amrRoot: string): Promise<AmrOpenCodeLogRecord[]> {
   const text = await readTail(runtimeLog, TAIL_BYTES_PER_LOG).catch(() => '');
-  const root = resolve(amrRoot) + sep;
+  const realRootPath = await realpath(resolve(amrRoot)).catch(() => null);
+  if (!realRootPath) return [];
+  const realRoot = realRootPath + sep;
+  const contained = new Map<string, Promise<string | null>>();
   const records: AmrOpenCodeLogRecord[] = [];
   for (const line of text.split('\n')) {
     let record: Record<string, unknown>;
     try { record = JSON.parse(line) as Record<string, unknown>; } catch { continue; }
     if (record.event !== 'opencode_session_created' && record.event !== 'opencode_session_loaded') continue;
-    const logPath = typeof record.opencodeLogPath === 'string' ? resolve(record.opencodeLogPath) : '';
-    if (!logPath.startsWith(root) || !logPath.endsWith(sep + OPENCODE_LOG_SUFFIX)) continue;
+    if (typeof record.opencodeLogPath !== 'string') continue;
     const at = typeof record.ts === 'string' ? Date.parse(record.ts) : NaN;
-    records.push({ runId: typeof record.openDesignRunId === 'string' ? record.openDesignRunId : '', logPath,
-      at: Number.isFinite(at) ? at : 0 });
+    if (!Number.isFinite(at)) continue;
+    const named = record.opencodeLogPath;
+    if (!contained.has(named)) contained.set(named, containedOpenCodeLog(named, realRoot));
+    const logPath = await contained.get(named)!;
+    if (!logPath) continue;
+    records.push({ runId: typeof record.openDesignRunId === 'string' ? record.openDesignRunId : '', logPath, at });
   }
   return records;
 }
