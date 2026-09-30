@@ -663,7 +663,8 @@ describe('chat run service shutdown', () => {
     const childPid = 40_600;
     const child = new FakeChildProcess({ closeOn: 'SIGTERM', pid: childPid });
     platformMocks.listProcessSnapshots.mockResolvedValue([{ pid: childPid, ppid: 1, command: 'vela' }]);
-    platformMocks.stopProcesses.mockImplementation(async () => {
+    platformMocks.stopProcesses.mockImplementation(async (_pids, options) => {
+      options?.onSignal?.(childPid, 'SIGTERM');
       child.exitCode = 1;
       child.emit('exit', 1, null);
       child.emit('close', 1, null);
@@ -722,6 +723,59 @@ describe('chat run service shutdown', () => {
     await runs.terminateProcessTree(exitingRun, exiting, null, { gracefulWaitMs: 200, onChildSignal: notSignalled });
     expect(notSignalled).not.toHaveBeenCalled();
     expect(exiting.signals).toEqual([]);
+  });
+
+  // A signal the daemon only attempted is not a daemon-caused exit: the child
+  // may still die of its own failure afterwards, which must stay a failure.
+  it('does not report a daemon signal when the Windows stop path fails to dispatch it', async () => {
+    const childPid = 40_800;
+    const child = new FakeChildProcess({ closeOn: 'SIGTERM', pid: childPid });
+    platformMocks.listProcessSnapshots.mockResolvedValue([{ pid: childPid, ppid: 1, command: 'vela' }]);
+    platformMocks.stopProcesses.mockRejectedValue(Object.assign(new Error('operation not permitted'), { code: 'EPERM' }));
+    const runs = createRuns();
+    const run = runs.create({ projectId: 'project-1', conversationId: 'conv-1' });
+    run.status = 'running';
+    const onChildSignal = vi.fn();
+
+    await runs.terminateProcessTree(run, child, null, { gracefulWaitMs: 10, onChildSignal });
+
+    expect(onChildSignal).not.toHaveBeenCalled();
+  });
+
+  it('does not report a daemon signal when the child is gone before the Windows stop path signals it', async () => {
+    const childPid = 40_900;
+    const child = new FakeChildProcess({ closeOn: 'SIGTERM', pid: childPid });
+    platformMocks.listProcessSnapshots.mockResolvedValue([{ pid: childPid, ppid: 1, command: 'vela' }]);
+    // process.kill hit ESRCH: nothing was delivered, so no dispatch is reported.
+    platformMocks.stopProcesses.mockResolvedValue({
+      alreadyStopped: false, forcedPids: [], matchedPids: [childPid], remainingPids: [], stoppedPids: [childPid],
+    });
+    const runs = createRuns();
+    const run = runs.create({ projectId: 'project-1', conversationId: 'conv-1' });
+    run.status = 'running';
+    const onChildSignal = vi.fn();
+
+    await runs.terminateProcessTree(run, child, null, { gracefulWaitMs: 10, onChildSignal });
+
+    expect(onChildSignal).not.toHaveBeenCalled();
+  });
+
+  it('does not report a daemon signal when the pid-less kill is not delivered', async () => {
+    const child = new FakeChildProcess({ closeOn: 'SIGKILL' });
+    child.kill = (signal: string) => { child.signals.push(signal); return false; };
+    const runs = createRuns();
+    const run = runs.create({ projectId: 'project-1', conversationId: 'conv-1' });
+    const onChildSignal = vi.fn();
+    setTimeout(() => {
+      child.exitCode = 1;
+      child.emit('exit', 1, null);
+      child.emit('close', 1, null);
+    }, 40);
+
+    await runs.terminateProcessTree(run, child, null, { gracefulWaitMs: 10, termGraceMs: 200, onChildSignal });
+
+    expect(child.signals[0]).toBe('SIGTERM');
+    expect(onChildSignal).not.toHaveBeenCalled();
   });
 
   it('filters active runs by conversation within the same project', () => {
@@ -891,7 +945,7 @@ describe('chat run service shutdown', () => {
 
       expect(platformMocks.stopProcesses).toHaveBeenCalledWith(
         [descendantPid, childPid],
-        { termGraceMs: 30, killGraceMs: 500 },
+        { termGraceMs: 30, killGraceMs: 500, onSignal: expect.any(Function) },
       );
       expect(run.events).not.toContainEqual(expect.objectContaining({
         event: 'diagnostic',
