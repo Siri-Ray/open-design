@@ -15335,6 +15335,9 @@ export async function startServer({
         send('error', withAcpHandshakeFailureGuidance(
           createSseErrorPayload('AGENT_EXECUTION_FAILED', agentStreamError, {
             details: ev.raw ? { raw: ev.raw } : undefined,
+            // The provider's own verdict (OpenCode APIError isRetryable), when
+            // the stream reported one, so the failure is not retried blindly.
+            ...(typeof ev.retryable === 'boolean' ? { retryable: ev.retryable } : {}),
           }),
           agentFailureIdentity(def),
         ));
