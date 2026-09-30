@@ -79,3 +79,90 @@ it('does not move the boundary of a rotated log that is already baselined under 
   const persisted = JSON.parse(await readFile(join(root, 'consent.json'), 'utf8')) as { offsets: Record<string, unknown> };
   expect(persisted.offsets[previous]).toBeUndefined();
 });
+
+// OpenCode's own log lives under a per-conversation home the daemon cannot
+// derive; Vela's session records name it (opencodeLogPath), for a new and a
+// resumed session alike. The bundle takes the incident run's part of it.
+async function writeRuntimeLog(records: Record<string, unknown>[]): Promise<void> {
+  await mkdir(join(root, 'amr', 'logs'), { recursive: true });
+  await writeFile(join(root, 'amr', 'logs', 'agent-runtime.jsonl'), `${records.map(line).join('\n')}\n`);
+}
+const conversationLog = (name: string) => join(root, 'amr', 'opencode-sessions', name, 'data', 'opencode', 'log', 'opencode.log');
+
+it('collects the OpenCode log the run\'s session record names, instead of reporting it unlocated', async () => {
+  const options = { runtime: null, projectRoot: root, runsDir: join(root, 'runs'), dataDir: join(root, 'data') };
+  await writeRuntimeLog([
+    { event: 'opencode_session_created', opencodeSessionId: 'ses_b', openDesignRunId: 'run-b', opencodeLogPath: conversationLog('other') },
+    { event: 'opencode_session_loaded', opencodeSessionId: 'ses_a', openDesignRunId: 'run-a', opencodeLogPath: conversationLog('mine'), ts: '2026-09-30T01:00:00.000Z' },
+  ]);
+  const sources = await buildAutomaticDiagnosticSources(options, { runId: 'run-a', agentId: 'amr' });
+  const amr = sources.filter((s) => s.name.startsWith('agent-cli-logs/amr/'));
+  expect(amr.map((s) => s.name)).toEqual(['agent-cli-logs/amr/agent-runtime.jsonl', 'agent-cli-logs/amr/opencode.log']);
+  const opencode = amr.find((s) => s.name === 'agent-cli-logs/amr/opencode.log')!;
+  expect(opencode.absolutePath).toBe(conversationLog('mine'));
+  expect(opencode.selectLines).toBeTypeOf('function');
+});
+
+it('keeps only the lines of the run\'s window from a conversation\'s shared OpenCode log', async () => {
+  const options = { runtime: null, projectRoot: root, runsDir: join(root, 'runs'), dataDir: join(root, 'data') };
+  await writeRuntimeLog([
+    { event: 'opencode_session_loaded', opencodeSessionId: 'ses_a', openDesignRunId: 'run-a', opencodeLogPath: conversationLog('mine'), ts: '2026-09-30T01:00:00.000Z' },
+  ]);
+  const source = (await buildAutomaticDiagnosticSources(options, { runId: 'run-a', agentId: 'amr' }))
+    .find((s) => s.name === 'agent-cli-logs/amr/opencode.log')!;
+  const selected = source.selectLines!([
+    'timestamp=2026-09-30T00:10:00.000Z level=INFO message="earlier turn"',
+    '  earlier continuation',
+    'timestamp=2026-09-30T01:00:03.000Z level=INFO message="this turn"',
+    '  this continuation',
+    'timestamp=2026-09-30T01:02:00.000Z level=ERROR message="stream error"',
+  ]).join('\n');
+  expect(selected).not.toContain('earlier');
+  expect(selected).toContain('this turn');
+  expect(selected).toContain('this continuation');
+  expect(selected).toContain('stream error');
+});
+
+it('lists the OpenCode logs the runtime log names in the consent baseline', async () => {
+  const options = { runtime: null, projectRoot: root, runsDir: join(root, 'runs'), dataDir: join(root, 'data') };
+  await writeRuntimeLog([
+    { event: 'opencode_session_created', opencodeSessionId: 'ses_a', openDesignRunId: 'run-a', opencodeLogPath: conversationLog('mine') },
+    { event: 'opencode_session_loaded', opencodeSessionId: 'ses_a', openDesignRunId: 'run-c', opencodeLogPath: conversationLog('mine') },
+    { event: 'opencode_session_created', opencodeSessionId: 'ses_b', openDesignRunId: 'run-b', opencodeLogPath: conversationLog('other') },
+  ]);
+  await mkdir(join(root, 'amr', 'opencode-sessions', 'mine', 'data', 'opencode', 'log'), { recursive: true });
+  await writeFile(conversationLog('mine'), 'timestamp=2026-09-30T00:00:00.000Z level=INFO message=x\n');
+  const baseline = await buildAutomaticDiagnosticSources(options, { agentId: '*' });
+  expect(baseline.filter((s) => s.name.startsWith('agent-cli-logs/amr/opencode')).map((s) => s.absolutePath))
+    .toEqual([conversationLog('mine')]);
+});
+
+it('puts the run\'s part of its OpenCode log into the uploaded bundle', async () => {
+  const { AutomaticDiagnostics } = await import('../src/services/automatic-diagnostics.js');
+  const { readdirSync, readFileSync } = await import('node:fs');
+  const { gunzipSync } = await import('node:zlib');
+  const options = { runtime: null, projectRoot: root, runsDir: join(root, 'runs'), dataDir: join(root, 'data') };
+  const service = new AutomaticDiagnostics({ dataRoot: join(root, 'data'), relayOrigin: null, consent: () => true,
+    sources: (evidence) => buildAutomaticDiagnosticSources(options, evidence),
+    baselineSources: () => buildAutomaticDiagnosticSources(options, { agentId: '*' }) });
+  try {
+    await service.tick(); // consent baseline before any AMR file exists
+    const boundAt = new Date(Date.now() - 60_000).toISOString();
+    await writeRuntimeLog([{ event: 'opencode_session_loaded', opencodeSessionId: 'ses_a', openDesignRunId: 'run-a',
+      opencodeLogPath: conversationLog('mine'), ts: boundAt }]);
+    await mkdir(join(root, 'amr', 'opencode-sessions', 'mine', 'data', 'opencode', 'log'), { recursive: true });
+    await writeFile(conversationLog('mine'), [
+      `timestamp=${new Date(Date.now() - 3_600_000).toISOString()} level=INFO message="previous turn"`,
+      `timestamp=${new Date().toISOString()} level=ERROR message="stream error" providerID=amr`,
+    ].join('\n') + '\n');
+
+    const id = service.record({ sourceId: 'run:a', at: Date.now(), kind: 'terminal_failure', runId: 'run-a', agentId: 'amr' })!;
+    await service.tick();
+    const dir = join(service.outbox.directory, id);
+    const archive = Buffer.concat(readdirSync(dir).filter((n) => /^\d+$/.test(n)).sort((a, b) => +a - +b).map((n) => readFileSync(join(dir, n))));
+    const records = gunzipSync(archive).toString().trim().split('\n').map((l) => JSON.parse(l));
+    const file = records.find((r) => r.type === 'file' && r.name === 'agent-cli-logs/amr/opencode.log');
+    expect(file?.content).toContain('stream error');
+    expect(file?.content).not.toContain('previous turn');
+  } finally { await service.stop(); }
+});
