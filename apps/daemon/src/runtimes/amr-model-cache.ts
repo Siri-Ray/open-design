@@ -20,6 +20,7 @@ type Fetchers = {
 type CacheState = {
   remote: RemoteCacheEntry | null;
   inFlight: Promise<void> | null;
+  inFlightStartedAt: number;
   lastRemoteError: string | null;
 };
 
@@ -34,7 +35,10 @@ const DEFAULT_REMOTE_REFRESH_INTERVAL_MS = 10 * 60_000;
 
 // How long a run that asked for `default` waits for the caller's own catalog
 // before settling for the preset seed. `vela model list` answers in well under
-// this on a healthy network; the wait only applies while nothing is cached.
+// this on a healthy network; the wait only applies while nothing is cached, is
+// counted from the start of the remote refresh (so a run that looks the
+// catalog up twice, or several runs at once, share one wait), and is skipped
+// once the last refresh failed.
 export const AMR_DEFAULT_MODEL_CATALOG_WAIT_MS = 12_000;
 
 function errorMessage(error: unknown): string {
@@ -78,15 +82,19 @@ export class AmrModelLoadingCache {
    * default model when the caller's own catalog is moments away.
    */
   async getAuthoritative(cacheKey: string, fetchers: Fetchers, waitMs: number): Promise<AmrModelsResponse> {
-    const first = await this.get(cacheKey, fetchers);
-    if (first.source === 'remote') return first;
     const state = this.stateFor(cacheKey);
-    if (state.inFlight) {
+    // A failure seen before this call means the caller's catalog is not coming
+    // soon; the refresh `get` restarts runs in the background without a wait.
+    const lastRefreshFailed = !state.remote && !state.inFlight && state.lastRemoteError !== null;
+    const first = await this.get(cacheKey, fetchers);
+    if (first.source === 'remote' || lastRefreshFailed) return first;
+    const remainingMs = state.inFlightStartedAt + waitMs - Date.now();
+    if (state.inFlight && remainingMs > 0) {
       let timer: ReturnType<typeof setTimeout> | undefined;
       await Promise.race([
         state.inFlight,
         new Promise<void>((resolve) => {
-          timer = setTimeout(resolve, waitMs);
+          timer = setTimeout(resolve, remainingMs);
           timer.unref?.();
         }),
       ]);
@@ -118,6 +126,7 @@ export class AmrModelLoadingCache {
     const created: CacheState = {
       remote: null,
       inFlight: null,
+      inFlightStartedAt: 0,
       lastRemoteError: null,
     };
     this.states.set(cacheKey, created);
@@ -126,6 +135,7 @@ export class AmrModelLoadingCache {
 
   private startRefresh(state: CacheState, fetchRemote: () => Promise<RuntimeModelOption[]>): void {
     if (state.inFlight) return;
+    state.inFlightStartedAt = Date.now();
     state.inFlight = (async () => {
       try {
         const models = await fetchRemote();
