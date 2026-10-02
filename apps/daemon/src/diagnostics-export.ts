@@ -15,6 +15,7 @@ import {
   readRunAgentSession,
   AGENT_SESSION_TAIL_BYTES,
   readAgentSessionWindow,
+  selectAgentSessionLines,
   type AgentSessionAgent,
   type AgentSessionTimeWindow,
   type AutomaticDiagnosticSource,
@@ -50,6 +51,7 @@ import {
 import { diagnosticId } from './services/diagnostics-environment.js';
 import { daemonHealthPaths } from './services/daemon-health.js';
 import { readVelaLoginStatus } from './integrations/vela.js';
+import { exportOpenCodeSession, openCodeDatabaseExists } from './opencode-session-export.js';
 
 interface ResolvedDiagnosticsAgentEnvironment {
   amrHome: string | null;
@@ -342,6 +344,9 @@ export async function buildAutomaticDiagnosticSources(
       sources.push(...await buildRunAgentSessionSources(join(options.runsDir, incident.runId, 'events.jsonl'),
         incident.agentId, environment));
     }
+    if (incident.agentId === 'opencode' && incident.runId && options.runsDir) {
+      sources.push(...await buildRunOpenCodeSessionSources(join(options.runsDir, incident.runId, 'events.jsonl'), environment));
+    }
   }
   return sources;
 }
@@ -377,11 +382,37 @@ async function buildRunAgentSessionSources(
   }));
 }
 
+function openCodeXdgDataHome(environment: ResolvedDiagnosticsAgentEnvironment): string {
+  return environment.openCodeXdgDataHome ?? process.env.XDG_DATA_HOME?.trim() ?? join(homedir(), '.local', 'share');
+}
+
+/** The run's OpenCode session tree, exported from opencode.db at bundle time and fenced by record time. */
+async function buildRunOpenCodeSessionSources(
+  eventsPath: string,
+  environment: ResolvedDiagnosticsAgentEnvironment,
+): Promise<AutomaticDiagnosticSource[]> {
+  const placeholder = (omitReason: string): AutomaticDiagnosticSource[] =>
+    [{ name: 'agent-sessions/opencode', absolutePath: '', kind: 'text', omitReason }];
+  const session = await readRunAgentSession(eventsPath);
+  if (!session) return placeholder('session_id_unavailable');
+  const xdg = openCodeXdgDataHome(environment);
+  if (!openCodeDatabaseExists(xdg)) return placeholder('source_not_located');
+  return [{
+    name: `agent-sessions/opencode/${session.sessionId}.jsonl`,
+    absolutePath: join(xdg, 'opencode', 'opencode.db'),
+    kind: 'text',
+    tailBytes: AGENT_SESSION_TAIL_BYTES,
+    render: async (notBeforeMs) => exportOpenCodeSession(xdg, session.sessionId, [session], notBeforeMs),
+    selectLines: selectAgentSessionLines(session.startMs, session.endMs),
+  }];
+}
+
 /**
- * Native Claude Code / Codex sessions of the runs the export includes, one
- * entry per file. Runs that resume the same session share its file, so the
- * file keeps every such run's records. Each is reduced into `scratchDir`
- * (removed by the caller after zipping) so the ZIP's tail cap cannot drop them.
+ * Native sessions of the runs the export includes, one entry per file, written
+ * into `scratchDir` (removed by the caller after zipping): Claude Code / Codex
+ * session files reduced to the run's records, so the ZIP's tail cap cannot
+ * drop them, and OpenCode sessions exported from opencode.db. Runs that resume
+ * the same session share it, so the entry keeps every such run's records.
  */
 async function buildExportedRunSessionSources(
   runEventSources: LogSource[],
@@ -389,6 +420,9 @@ async function buildExportedRunSessionSources(
   scratchDir: string,
 ): Promise<LogSource[]> {
   const files = new Map<string, { source: LogSource; windows: AgentSessionTimeWindow[] }>();
+  const openCodeSessions = new Map<string, AgentSessionTimeWindow[]>();
+  const xdg = openCodeXdgDataHome(environment);
+  const openCodeDb = openCodeDatabaseExists(xdg);
   for (const runSource of runEventSources) {
     const session = await readRunAgentSession(runSource.absolutePath);
     if (!session) continue;
@@ -400,6 +434,10 @@ async function buildExportedRunSessionSources(
       if (file) file.windows.push(session);
       else files.set(source.absolutePath, { source, windows: [session] });
     }
+    if (found.length > 0 || !openCodeDb) continue;
+    const windows = openCodeSessions.get(session.sessionId);
+    if (windows) windows.push(session);
+    else openCodeSessions.set(session.sessionId, [session]);
   }
   const sources: LogSource[] = [];
   for (const { source, windows } of files.values()) {
@@ -414,6 +452,16 @@ async function buildExportedRunSessionSources(
     const absolutePath = join(scratchDir, `${sources.length}.jsonl`);
     await writeFile(absolutePath, selected);
     sources.push({ ...source, absolutePath });
+  }
+  for (const [sessionId, windows] of openCodeSessions) {
+    let exported = '';
+    try { exported = exportOpenCodeSession(xdg, sessionId, windows, null); } catch { continue; }
+    if (!exported) continue;
+    // Rows are already limited to the windows; this only stubs oversized lines.
+    const span = selectAgentSessionLines(Math.min(...windows.map((w) => w.startMs)), Math.max(...windows.map((w) => w.endMs)));
+    const absolutePath = join(scratchDir, `${sessionId}.jsonl`);
+    await writeFile(absolutePath, span(exported.split('\n')).join('\n'));
+    sources.push({ name: `agent-sessions/opencode/${sessionId}.jsonl`, absolutePath, kind: 'text', tailBytes: AGENT_SESSION_TAIL_BYTES });
   }
   return sources;
 }
