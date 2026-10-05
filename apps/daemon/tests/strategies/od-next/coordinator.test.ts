@@ -2136,6 +2136,60 @@ describe('OD Next planning coordinator', () => {
     expect(transition).toMatchObject({ start: true, stage: 'intent_resolution' });
   });
 
+  it('repairs duplicate runtime states once the intent-resolution turn answers produce', () => {
+    // AMR 0.24.1: 19 of 20 duplicate runtime-state failures went through the
+    // intent supplement first. The model answered `produce` with one clean
+    // block, then the original reply, still carrying the duplicate, was refused
+    // with "The parsed response was not eligible for contract repair."
+    prepareStrategyRequest(db, {
+      taskExecutionId: 'task-1', preference: 'full_plan', directEdit: directEligible,
+      intake: intakePassed, updatedAt: 110,
+    });
+    const withoutIntent = (executionMode: 'simple' | null) => {
+      const { executionIntent: _omitted, ...state } = runtimeState({ outcome: 'plan_ready', executionMode });
+      return state;
+    };
+    const planning = protocol([
+      block('open-design-plan-contract', planContract(snapshot)),
+      block('open-design-runtime-state', withoutIntent('simple')),
+      block('open-design-runtime-state', withoutIntent(null)),
+    ].join('\n')).finish();
+    expect(planning.agreedDuplicateExecutionIntent).toBeUndefined();
+    const stages: string[] = [];
+    const service = {
+      prepare(input: { meta: unknown; beforeClaimCommit?: (run: { id: string; status: string }) => void }) {
+        const run = { id: `run-${(input.meta as { stage: string }).stage}`, status: 'queued' };
+        db.transaction(() => input.beforeClaimCommit?.(run)).immediate();
+        return { kind: 'ready' as const, run, creationKind: 'created' as const, resumed: false };
+      },
+      start(run: { id: string; status: string }) { return run; },
+    };
+    const createMeta = (stage: string, instruction: string) => { stages.push(stage); return { stage, instruction }; };
+    const evidence = { physicalStatus: 'succeeded' as const, deliverableValid: false, filesWritten: 0, filesWrittenSource: 'filesystem' as const };
+    const asked = prepareAutomaticStrategyContinuation({
+      db, task: getStrategyTaskExecution(db, 'task-1')!, parsed: planning, toolUseCount: 0,
+      completionEvidence: evidence, executionPreflight: executionPassed, service, createMeta, updatedAt: 120,
+    });
+    expect(asked).toMatchObject({ start: true, stage: 'intent_resolution' });
+    startIntentResolution(db, 'task-1', 'run-intent_resolution');
+
+    const reply = protocol(block('open-design-runtime-state', runtimeState({ outcome: 'plan_ready', executionMode: 'simple' }))).finish();
+    expect(reply.issues).toEqual([]);
+    const transition = prepareAutomaticStrategyContinuation({
+      db, task: getStrategyTaskExecution(db, 'task-1')!, parsed: reply, toolUseCount: 0,
+      completionEvidence: evidence, executionPreflight: executionPassed, service, createMeta, updatedAt: 130,
+    });
+    expect(stages).toEqual(['intent_resolution', 'contract_repair']);
+    expect(transition).toMatchObject({
+      start: true,
+      stage: 'contract_repair',
+      result: {
+        action: 'contract_repair',
+        task: { inputStage: 'contract_repair', executionIntent: 'produce', planContractRepairAttempts: 1 },
+      },
+    });
+  });
+
   it('blocks Direct Edit completion without physical success and canonical delivery', () => {
     prepareStrategyRequest(db, {
       taskExecutionId: 'task-1', preference: 'auto', directEdit: directEligible,
