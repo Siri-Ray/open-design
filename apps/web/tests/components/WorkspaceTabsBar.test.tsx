@@ -2342,6 +2342,41 @@ describe('WorkspaceTabsBar dock dropdown recent-projects catalog', () => {
     expect(painted[0]).not.toContain('Shared By Teammate');
   });
 
+  // QA on #8384: with the account/workspace identity unresolved (the vela
+  // status read failed), route→tab sync is paused, so a picked project that had
+  // no tab landed its URL while the trigger kept naming the previous project.
+  it('names the picked project in the trigger while the identity is unresolved', async () => {
+    window.history.replaceState(null, '', '/projects/project-alpha');
+    const onOpenProject = vi.fn(async (id: string) => {
+      window.history.pushState(null, '', `/projects/${id}`);
+      return true;
+    });
+    const { rerender } = render(
+      <WorkspaceTabsBar
+        route={{ ...projectRoute }}
+        projects={[project, projectBeta]}
+        identityScopeKey={null}
+        onOpenProject={onOpenProject}
+      />,
+    );
+    fireEvent.click(await screen.findByTestId('workspace-tabs-dropdown-trigger'));
+    fireEvent.click(within(screen.getByRole('listbox')).getByRole('option', { name: /Project Beta/ }));
+    await waitFor(() => expect(onOpenProject).toHaveBeenCalledTimes(1));
+    rerender(
+      <WorkspaceTabsBar
+        route={{ ...projectRoute, projectId: 'project-beta' }}
+        projects={[project, projectBeta]}
+        identityScopeKey={null}
+        onOpenProject={onOpenProject}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('workspace-tabs-dropdown-trigger').textContent).toContain('Project Beta');
+    });
+    window.history.replaceState(null, '', '/');
+  });
+
   it('includes team projects shared by teammates, as the rail does', async () => {
     const onOpenProject = vi.fn(async () => true);
     render(

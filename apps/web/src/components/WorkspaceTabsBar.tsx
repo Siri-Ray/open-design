@@ -15,7 +15,7 @@ import {
 } from './workspaceTabsDock';
 import { useT } from '../i18n';
 import { scrollMovesAnchor } from '../lib/scroll-moves-anchor';
-import { buildPath, navigate, type EntryHomeView, type Route } from '../router';
+import { buildPath, navigate, parseRoute, type EntryHomeView, type Route } from '../router';
 import type { Project } from '../types';
 import {
   type ProjectDisplayStatus,
@@ -1917,8 +1917,7 @@ export function WorkspaceTabsBar({
    * Opens one switcher row (OPEND-3303). A project that already has a tab
    * re-activates it, keeping the file that tab last showed; any other project
    * opens through App's handler with its catalog title, exactly as the rail's
-   * 最近项目 row would, and the route change then adds its tab. Opening spends
-   * the project's ✓ in both cases.
+   * 最近项目 row would. Opening spends the project's ✓ in both cases.
    */
   function openCatalogProject(projectId: string) {
     const existingTab = state.tabs.find(
@@ -1929,20 +1928,42 @@ export function WorkspaceTabsBar({
       return;
     }
     acknowledgeProjectCompletion(projectId);
-    if (onOpenProject) {
-      void onOpenProject(
-        projectId,
-        undefined,
-        catalogProjectTitleHint({
-          projectId,
-          sharedProjects: sharedCatalogProjects,
-          teamProjects: teamCatalog,
-          workspaceContext,
-        }),
-      );
+    if (!onOpenProject) {
+      const target: Route = { kind: 'project', projectId, conversationId: null, fileName: null };
+      commitPickedProjectTab(target);
+      navigate(target);
       return;
     }
-    navigate({ kind: 'project', projectId, conversationId: null, fileName: null });
+    void Promise.resolve(onOpenProject(
+      projectId,
+      undefined,
+      catalogProjectTitleHint({
+        projectId,
+        sharedProjects: sharedCatalogProjects,
+        teamProjects: teamCatalog,
+        workspaceContext,
+      }),
+    )).then((accepted) => {
+      if (accepted === false) return;
+      // Only the route the handler actually landed on: a guard may have held
+      // the navigation, or the user may already be somewhere else.
+      const landed = parseRoute(window.location.pathname);
+      if (landed.kind === 'project' && landed.projectId === projectId) {
+        commitPickedProjectTab(landed);
+      }
+    });
+  }
+
+  /**
+   * A switcher pick commits its own tab, as `activateTab` does for a row that
+   * already has one. Route→tab sync pauses while the account/workspace
+   * identity is unresolved (`identityScopeKey === null`), so leaving a picked
+   * project to that sync would land its URL with the trigger still naming the
+   * previous project. Scope ownership is unchanged: persistence and scope
+   * snapshots still wait for the identity, exactly as for an activated tab.
+   */
+  function commitPickedProjectTab(target: Extract<Route, { kind: 'project' }>) {
+    setState((current) => syncStateToRoute(current, target));
   }
 
   // Corner-anchored radial fan menu on the "+" button: three concentric bands
