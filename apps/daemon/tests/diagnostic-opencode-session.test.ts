@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
@@ -127,4 +127,30 @@ it('puts the OpenCode session of an exported run into the manual diagnostics ZIP
   const text = await entry!.async('string');
   expect(text).toContain('child agent output');
   expect(text).not.toContain('not this run');
+});
+
+it('keeps an OpenCode failure that comes after 16 MiB of run events', async () => {
+  // A large tool result can push events.jsonl past the old 16 MiB scan; the
+  // run's end, and the session rows written near it, must still count.
+  const lateEnd = RUN_START + 20 * 60_000;
+  const runDir = join(root, 'runs', 'run-big');
+  await mkdir(runDir, { recursive: true });
+  const events = join(runDir, 'events.jsonl');
+  await writeFile(events, [
+    { id: 1, event: 'start', data: {}, timestamp: RUN_START },
+    { id: 2, event: 'agent', data: { type: 'status', label: 'running', sessionId: SESSION }, timestamp: RUN_START + 500 },
+  ].map((record) => JSON.stringify(record)).join('\n') + '\n');
+  for (let i = 0; i < 17; i++) {
+    await appendFile(events, JSON.stringify({ id: 10 + i, event: 'agent', data: { type: 'text_delta', delta: 'x'.repeat(1024 * 1024) }, timestamp: RUN_START + 1_000 + i }) + '\n');
+  }
+  await appendFile(events, JSON.stringify({ id: 99, event: 'end', data: { status: 'failed' }, timestamp: lateEnd }) + '\n');
+  await writeOpenCodeDb();
+  const db = new Database(join(root, 'xdg', 'opencode', 'opencode.db'));
+  db.prepare('INSERT INTO part VALUES (?, ?, ?, ?, ?, ?)').run('prt_late', 'msg_new', SESSION, lateEnd - 60_000, lateEnd - 60_000,
+    JSON.stringify({ type: 'tool', state: { status: 'error', error: 'late provider failure' } }));
+  db.close();
+
+  const sources = await buildAutomaticDiagnosticSources(options(), { runId: 'run-big', agentId: 'opencode' });
+  const text = await bundleText(sources.filter((s) => s.name.startsWith('agent-sessions/opencode')));
+  expect(text).toContain('late provider failure');
 });
