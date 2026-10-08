@@ -1,5 +1,6 @@
-import { open, readdir, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { createReadStream } from "node:fs";
+import { lstat, open, readdir, realpath } from "node:fs/promises";
+import { join, sep } from "node:path";
 
 import type { LogSource } from "./sources.js";
 
@@ -44,42 +45,36 @@ const SESSION_ID = /^[A-Za-z0-9_-]{8,128}$/;
 const SAFE_ENTRY = /^[A-Za-z0-9._-]+$/;
 const DEFAULT_MAX_SUBAGENTS = 16;
 export const AGENT_SESSION_TAIL_BYTES = 4 * 1024 * 1024;
-const RUN_EVENTS_SCAN_BYTES = 16 * 1024 * 1024;
+/** A run-event line longer than this (a large tool result) is skipped, not buffered. */
+const RUN_EVENT_MAX_LINE_BYTES = 1024 * 1024;
 const FIRST_LINE_BYTES = 64 * 1024;
 const MAX_PROJECT_DIRS = 5_000;
 const MAX_ROLLOUTS_PER_DAY = 2_000;
+/** Newest-first day directories searched for a thread's rollout, which may predate the run. */
+const MAX_ROLLOUT_DAY_DIRS = 120;
+const MAX_ARCHIVED_ROLLOUTS = 2_048;
 const DAY_MS = 24 * 60 * 60 * 1000;
 /** Lines longer than this are replaced by a stub that keeps their time and size. */
 export const AGENT_SESSION_MAX_LINE_BYTES = 256 * 1024;
 const WINDOW_MARGIN_MS = 5_000;
 
-/** The CLI session a run reported (`status` events carry `sessionId`) and the run's time span. */
+/**
+ * The CLI session a run reported (`status` events carry `sessionId`) and the
+ * run's time span. The whole file is streamed so a failure after a large tool
+ * result still sets the end; lines above RUN_EVENT_MAX_LINE_BYTES are skipped
+ * without being buffered.
+ */
 export async function readRunAgentSession(eventsPath: string): Promise<RunAgentSession | null> {
-  let text: string;
-  try {
-    const handle = await open(eventsPath, "r");
-    try {
-      const { size } = await handle.stat();
-      const length = Math.min(size, RUN_EVENTS_SCAN_BYTES);
-      const buffer = Buffer.alloc(length);
-      await handle.read(buffer, 0, length, 0);
-      text = buffer.toString("utf8");
-    } finally {
-      await handle.close();
-    }
-  } catch {
-    return null;
-  }
   let sessionId: string | null = null;
   let startMs = Number.POSITIVE_INFINITY;
   let endMs = Number.NEGATIVE_INFINITY;
-  for (const line of text.split("\n")) {
-    if (!line.trim()) continue;
+  const consider = (line: string) => {
+    if (!line.trim()) return;
     let record: { event?: unknown; data?: { type?: unknown; sessionId?: unknown }; timestamp?: unknown };
     try {
       record = JSON.parse(line);
     } catch {
-      continue;
+      return;
     }
     if (typeof record.timestamp === "number" && Number.isFinite(record.timestamp)) {
       startMs = Math.min(startMs, record.timestamp);
@@ -92,23 +87,82 @@ export async function readRunAgentSession(eventsPath: string): Promise<RunAgentS
     ) {
       sessionId = data.sessionId;
     }
+  };
+  try {
+    let pending: Buffer[] = [];
+    let pendingBytes = 0;
+    let overflow = false;
+    for await (const chunk of createReadStream(eventsPath) as AsyncIterable<Buffer>) {
+      let from = 0;
+      for (let newline = chunk.indexOf(10); newline !== -1; newline = chunk.indexOf(10, from)) {
+        if (!overflow) consider(Buffer.concat([...pending, chunk.subarray(from, newline)]).toString("utf8"));
+        pending = [];
+        pendingBytes = 0;
+        overflow = false;
+        from = newline + 1;
+      }
+      if (overflow || from >= chunk.length) continue;
+      pendingBytes += chunk.length - from;
+      if (pendingBytes > RUN_EVENT_MAX_LINE_BYTES) {
+        overflow = true;
+        pending = [];
+      } else {
+        pending.push(chunk.subarray(from));
+      }
+    }
+    if (!overflow && pending.length > 0) consider(Buffer.concat(pending).toString("utf8"));
+  } catch {
+    return null;
   }
   if (!sessionId || !Number.isFinite(startMs) || !Number.isFinite(endMs)) return null;
   return { sessionId, startMs, endMs };
 }
 
-async function listDir(dir: string): Promise<string[]> {
+/**
+ * Agent stores are another CLI's state, not ours: never follow a symlink below
+ * a store root, and check the real path stays under the root's real path.
+ */
+interface StoreRoot {
+  path: string;
+  real: string;
+}
+
+async function storeRoot(path: string): Promise<StoreRoot | null> {
   try {
-    return await readdir(dir);
+    return { path, real: await realpath(path) };
+  } catch {
+    return null;
+  }
+}
+
+async function inside(root: StoreRoot, path: string): Promise<boolean> {
+  try {
+    const real = await realpath(path);
+    return real === root.real || real.startsWith(root.real + sep);
+  } catch {
+    return false;
+  }
+}
+
+/** Plain (non-symlink) entries of a directory under the root. */
+async function listEntries(root: StoreRoot, dir: string, kind: "dir" | "file"): Promise<string[]> {
+  if (!(await inside(root, dir))) return [];
+  try {
+    const info = await lstat(dir);
+    if (!info.isDirectory() || (dir !== root.path && info.isSymbolicLink())) return [];
+    return (await readdir(dir, { withFileTypes: true }))
+      .filter((entry) => !entry.isSymbolicLink() && (kind === "dir" ? entry.isDirectory() : entry.isFile()))
+      .map((entry) => entry.name);
   } catch {
     return [];
   }
 }
 
-async function isFile(path: string): Promise<{ mtimeMs: number } | null> {
+async function isFile(root: StoreRoot, path: string): Promise<{ mtimeMs: number } | null> {
   try {
-    const info = await stat(path);
-    return info.isFile() ? { mtimeMs: info.mtimeMs } : null;
+    const info = await lstat(path);
+    if (!info.isFile() || !(await inside(root, path))) return null;
+    return { mtimeMs: info.mtimeMs };
   } catch {
     return null;
   }
@@ -131,12 +185,12 @@ async function readFirstLine(path: string): Promise<string> {
   }
 }
 
-async function newestJsonl(dir: string, max: number): Promise<Array<{ name: string; path: string }>> {
+async function newestJsonl(root: StoreRoot, dir: string, max: number): Promise<Array<{ name: string; path: string }>> {
   const found: Array<{ name: string; path: string; mtimeMs: number }> = [];
-  for (const name of await listDir(dir)) {
+  for (const name of await listEntries(root, dir, "file")) {
     if (!name.endsWith(".jsonl") || !SAFE_ENTRY.test(name)) continue;
     const path = join(dir, name);
-    const info = await isFile(path);
+    const info = await isFile(root, path);
     if (info) found.push({ name, path, mtimeMs: info.mtimeMs });
   }
   found.sort((a, b) => b.mtimeMs - a.mtimeMs);
@@ -150,15 +204,21 @@ async function claudeSessionSources(
   tailBytes: number,
 ): Promise<AgentSessionSource[]> {
   const projectsDir = join(claudeDir, "projects");
-  const projects = (await listDir(projectsDir)).filter((name) => SAFE_ENTRY.test(name)).slice(0, MAX_PROJECT_DIRS);
+  const root = await storeRoot(projectsDir);
+  if (!root) return [];
+  const projects = (await listEntries(root, projectsDir, "dir")).filter((name) => SAFE_ENTRY.test(name)).slice(0, MAX_PROJECT_DIRS);
   for (const project of projects) {
     const main = join(projectsDir, project, `${sessionId}.jsonl`);
-    if (!(await isFile(main))) continue;
+    if (!(await isFile(root, main))) continue;
     const sources: AgentSessionSource[] = [
       { agent: "claude", name: `agent-sessions/claude/${sessionId}.jsonl`, absolutePath: main, kind: "text", tailBytes },
     ];
-    const subagentDir = join(projectsDir, project, sessionId, "subagents");
-    for (const file of await newestJsonl(subagentDir, maxSubagents)) {
+    const sessionDir = join(projectsDir, project, sessionId);
+    const subagentDir = join(sessionDir, "subagents");
+    const subagents = (await listEntries(root, sessionDir, "dir")).includes("subagents")
+      ? await newestJsonl(root, subagentDir, maxSubagents)
+      : [];
+    for (const file of subagents) {
       sources.push({
         agent: "claude",
         name: `agent-sessions/claude/${sessionId}/subagents/${file.name}`,
@@ -183,26 +243,74 @@ function localDayDirs(sessionsDir: string, startMs: number, endMs: number): stri
   return [...new Set(dirs)];
 }
 
+function isRollout(name: string): boolean {
+  return name.startsWith("rollout-") && name.endsWith(".jsonl") && SAFE_ENTRY.test(name);
+}
+
+/**
+ * The thread's own rollout. Codex appends every turn of a thread, including one
+ * resumed days later, to the file filed under the date the thread started, so
+ * search day directories newest-first (bounded), then the flat archive.
+ */
+async function findMainRollout(codexHome: string, sessionId: string): Promise<{ root: StoreRoot; dir: string; name: string } | null> {
+  const suffix = `-${sessionId}.jsonl`;
+  const sessionsDir = join(codexHome, "sessions");
+  const sessions = await storeRoot(sessionsDir);
+  if (sessions) {
+    const newestFirst = async (dir: string) => (await listEntries(sessions, dir, "dir"))
+      .filter((name) => /^\d{1,4}$/.test(name))
+      .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
+    let scanned = 0;
+    for (const year of await newestFirst(sessionsDir)) {
+      for (const month of await newestFirst(join(sessionsDir, year))) {
+        for (const day of await newestFirst(join(sessionsDir, year, month))) {
+          if (scanned++ >= MAX_ROLLOUT_DAY_DIRS) return null;
+          const dir = join(sessionsDir, year, month, day);
+          const names = (await listEntries(sessions, dir, "file")).slice(0, MAX_ROLLOUTS_PER_DAY);
+          const name = names.find((entry) => isRollout(entry) && entry.endsWith(suffix));
+          if (name && (await isFile(sessions, join(dir, name)))) return { root: sessions, dir, name };
+        }
+      }
+    }
+  }
+  const archiveDir = join(codexHome, "archived_sessions");
+  const archive = await storeRoot(archiveDir);
+  if (archive) {
+    const names = await listEntries(archive, archiveDir, "file");
+    if (names.length <= MAX_ARCHIVED_ROLLOUTS) {
+      const name = names.find((entry) => isRollout(entry) && entry.endsWith(suffix));
+      if (name && (await isFile(archive, join(archiveDir, name)))) return { root: archive, dir: archiveDir, name };
+    }
+  }
+  return null;
+}
+
 async function codexSessionSources(
   codexHome: string,
   session: RunAgentSession,
   maxSubagents: number,
   tailBytes: number,
 ): Promise<AgentSessionSource[]> {
-  const main: AgentSessionSource[] = [];
-  const children: AgentSessionSource[] = [];
-  for (const dir of localDayDirs(join(codexHome, "sessions"), session.startMs, session.endMs)) {
-    const names = (await listDir(dir))
-      .filter((name) => name.startsWith("rollout-") && name.endsWith(".jsonl") && SAFE_ENTRY.test(name))
-      .slice(0, MAX_ROLLOUTS_PER_DAY);
+  const main = await findMainRollout(codexHome, session.sessionId);
+  if (!main) return [];
+  const sources: AgentSessionSource[] = [{
+    agent: "codex", name: `agent-sessions/codex/${main.name}`, absolutePath: join(main.dir, main.name), kind: "text", tailBytes,
+  }];
+  // Subagent threads start during the run, so they are filed under the run's
+  // dates (and the main rollout's directory, when it is in the dated tree).
+  const sessionsDir = join(codexHome, "sessions");
+  const sessions = await storeRoot(sessionsDir);
+  if (!sessions) return sources;
+  const dirs = new Set(localDayDirs(sessionsDir, session.startMs, session.endMs));
+  if (main.root.path === sessionsDir) dirs.add(main.dir);
+  let children = 0;
+  for (const dir of dirs) {
+    const names = (await listEntries(sessions, dir, "file")).filter(isRollout).slice(0, MAX_ROLLOUTS_PER_DAY);
     for (const name of names) {
+      if (children >= maxSubagents) return sources;
+      if (name === main.name) continue;
       const path = join(dir, name);
-      const source: AgentSessionSource = { agent: "codex", name: `agent-sessions/codex/${name}`, absolutePath: path, kind: "text", tailBytes };
-      if (name.endsWith(`-${session.sessionId}.jsonl`)) {
-        main.push(source);
-        continue;
-      }
-      if (children.length >= maxSubagents) continue;
+      if (!(await isFile(sessions, path))) continue;
       let meta: { type?: unknown; payload?: { session_id?: unknown; parent_thread_id?: unknown } };
       try {
         meta = JSON.parse(await readFirstLine(path));
@@ -214,11 +322,12 @@ async function codexSessionSources(
         meta?.type === "session_meta" && payload &&
         (payload.session_id === session.sessionId || payload.parent_thread_id === session.sessionId)
       ) {
-        children.push(source);
+        sources.push({ agent: "codex", name: `agent-sessions/codex/${name}`, absolutePath: path, kind: "text", tailBytes });
+        children += 1;
       }
     }
   }
-  return main.length > 0 ? [...main, ...children] : [];
+  return sources;
 }
 
 /**
