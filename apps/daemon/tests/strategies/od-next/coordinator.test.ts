@@ -2108,6 +2108,7 @@ describe('OD Next planning coordinator', () => {
       ...runtimeState({ outcome: 'completed', executionMode }), executionIntent: 'plan_only' as const,
     });
     const parsed = protocol([
+      'Here is the plan for the launch page; nothing will be written until you ask.',
       block('open-design-plan-contract', planContract(snapshot)),
       block('open-design-runtime-state', planOnly('simple')),
       block('open-design-runtime-state', planOnly(null)),
@@ -2134,6 +2135,36 @@ describe('OD Next planning coordinator', () => {
     });
     expect(stages).toEqual(['intent_resolution']);
     expect(transition).toMatchObject({ start: true, stage: 'intent_resolution' });
+
+    // The supplement's schema-validated plan_only state completes the
+    // planning-only task; the duplicate source has no state of its own.
+    startIntentResolution(db, 'task-1', 'run-intent_resolution');
+    const reply = protocol(block('open-design-runtime-state', planOnly('simple'))).finish();
+    expect(reply.issues).toEqual([]);
+    const completed = prepareAutomaticStrategyContinuation({
+      db,
+      task: getStrategyTaskExecution(db, 'task-1')!,
+      parsed: reply,
+      toolUseCount: 0,
+      completionEvidence: { physicalStatus: 'succeeded', deliverableValid: false, filesWritten: 0, filesWrittenSource: 'filesystem' },
+      executionPreflight: executionPassed,
+      service: {
+        prepare(input) {
+          const run = { id: `run-${(input.meta as { stage: string }).stage}`, status: 'queued' };
+          db.transaction(() => input.beforeClaimCommit?.(run)).immediate();
+          return { kind: 'ready', run, creationKind: 'created', resumed: false };
+        },
+        start(run) { return run; },
+      },
+      createMeta: (stage, instruction) => { stages.push(stage); return { stage, instruction }; },
+      updatedAt: 130,
+    });
+    expect(stages).toEqual(['intent_resolution']);
+    expect(completed).toMatchObject({
+      start: false,
+      result: { action: 'completed', task: { outcome: 'completed', executionIntent: 'plan_only' } },
+    });
+    expect(completed.result.task.planContract).toBeTruthy();
   });
 
   it('repairs duplicate runtime states once the intent-resolution turn answers produce', () => {

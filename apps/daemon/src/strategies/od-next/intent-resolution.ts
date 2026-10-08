@@ -137,6 +137,20 @@ function validateIntentResolutionReplyForRun(
     || reply.parsed.planContract || reply.parsed.repairPlanContract || reply.parsed.repairRuntimeState) {
     throw new TypeError('The parsed response was not eligible for contract repair.');
   }
+  // A source whose only defect is a repeated Runtime State block has no
+  // declaration of its own; the parser keeps neither copy. For planning-only
+  // work the supplement is the one place that can finish it, so its
+  // schema-validated state completes the task while the source Plan Contract
+  // is kept. Any other source defect stays fail-closed.
+  const duplicateOnly = !sourceState && source.parsed.issues.length > 0
+    && source.parsed.issues.every((issue) => issue.code === 'od_next_protocol_runtime_state_duplicate');
+  if (duplicateOnly && state.executionIntent === 'plan_only') {
+    return {
+      source,
+      executionIntent: state.executionIntent,
+      parsed: { ...source.parsed, runtimeState: state, issues: [] },
+    };
+  }
   return {
     source,
     executionIntent: state.executionIntent,
