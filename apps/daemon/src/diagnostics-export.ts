@@ -1,5 +1,5 @@
-import { access } from 'node:fs/promises';
-import { homedir, userInfo } from 'node:os';
+import { access, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { homedir, tmpdir, userInfo } from 'node:os';
 import { dirname, join } from 'node:path';
 
 import type { RequestHandler } from 'express';
@@ -13,7 +13,8 @@ import {
   DIAGNOSTICS_FILENAME_PREFIX,
   diagnosticsFileName,
   readRunAgentSession,
-  selectAgentSessionLines,
+  AGENT_SESSION_TAIL_BYTES,
+  readAgentSessionWindow,
   type AgentSessionAgent,
   type AutomaticDiagnosticSource,
   type LogSource,
@@ -367,14 +368,23 @@ async function buildRunAgentSessionSources(
     claudeConfigDir: environment.claudeConfigDir, codexHome: environment.codexHome,
   });
   if (found.length === 0) return placeholder('source_not_located');
-  const selectLines = selectAgentSessionLines(session.startMs, session.endMs);
-  return found.map(({ agent: _agent, ...source }) => ({ ...source, selectLines }));
+  // Select the run's records before any byte cap, fenced by the consent time.
+  return found.map(({ agent: _agent, ...source }) => ({
+    ...source,
+    render: (notBeforeMs: number | null) => readAgentSessionWindow(source.absolutePath, session.startMs, session.endMs,
+      { maxBytes: source.tailBytes ?? AGENT_SESSION_TAIL_BYTES, notBeforeMs }),
+  }));
 }
 
-/** Native Claude Code / Codex sessions of the runs the export includes, one entry per file. */
+/**
+ * Native Claude Code / Codex sessions of the runs the export includes, one
+ * entry per file. Each is reduced to the run's records into `scratchDir`
+ * (removed by the caller after zipping) so the ZIP's tail cap cannot drop them.
+ */
 async function buildExportedRunSessionSources(
   runEventSources: LogSource[],
   environment: ResolvedDiagnosticsAgentEnvironment,
+  scratchDir: string,
 ): Promise<LogSource[]> {
   const seen = new Set<string>();
   const sources: LogSource[] = [];
@@ -387,7 +397,17 @@ async function buildExportedRunSessionSources(
     for (const { agent: _agent, ...source } of found) {
       if (seen.has(source.absolutePath)) continue;
       seen.add(source.absolutePath);
-      sources.push(source);
+      let selected: string;
+      try {
+        selected = await readAgentSessionWindow(source.absolutePath, session.startMs, session.endMs,
+          { maxBytes: source.tailBytes ?? AGENT_SESSION_TAIL_BYTES });
+      } catch {
+        continue;
+      }
+      if (!selected) continue;
+      const absolutePath = join(scratchDir, `${sources.length}.jsonl`);
+      await writeFile(absolutePath, selected);
+      sources.push({ ...source, absolutePath });
     }
   }
   return sources;
@@ -396,6 +416,7 @@ async function buildExportedRunSessionSources(
 export function createDiagnosticsExportHandler(options: DiagnosticsHandlerOptions): RequestHandler {
   const evidence = options.evidence ?? getDiagnosticsEvidence() ?? createDiagnosticsEvidence();
   return async (_req, res) => {
+    const scratchDir = await mkdtemp(join(tmpdir(), 'od-diagnostics-sessions-'));
     try {
       const versionInfo = await readCurrentAppVersionInfo().catch(() => null);
       const home = homedir();
@@ -405,7 +426,7 @@ export function createDiagnosticsExportHandler(options: DiagnosticsHandlerOption
       const sources = [
         ...(await buildSidecarLogSources(options.runtime)),
         ...runEventSources,
-        ...(await buildExportedRunSessionSources(runEventSources, agentEnvironment)),
+        ...(await buildExportedRunSessionSources(runEventSources, agentEnvironment, scratchDir)),
         ...(await buildAgentCliLogSources({
           homeDir: home,
           dataDir: options.dataDir ?? null,
@@ -551,6 +572,8 @@ export function createDiagnosticsExportHandler(options: DiagnosticsHandlerOption
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       res.status(500).json({ error: 'DIAGNOSTICS_EXPORT_FAILED', message });
+    } finally {
+      await rm(scratchDir, { recursive: true, force: true }).catch(() => undefined);
     }
   };
 }

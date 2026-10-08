@@ -51,6 +51,7 @@ export {
 export {
   AGENT_SESSION_TAIL_BYTES,
   buildAgentSessionSources,
+  readAgentSessionWindow,
   readRunAgentSession,
   selectAgentSessionLines,
   type AgentSessionAgent,

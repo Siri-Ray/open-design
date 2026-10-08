@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import JSZip from 'jszip';
 import { afterEach, beforeEach, expect, it } from 'vitest';
+import { buildAutomaticDiagnostics } from '@open-design/diagnostics';
 import { buildAutomaticDiagnosticSources, createDiagnosticsExportHandler } from '../src/diagnostics-export.js';
 
 // Claude Code and Codex keep their own record of a session (main agent and
@@ -86,12 +87,12 @@ it('collects the run\'s Claude Code session and its subagents, limited to the ru
     `agent-sessions/claude/${CLAUDE_SESSION}/subagents/agent-a1.jsonl`,
   ]);
   const main = sessions.find((s) => s.name.endsWith(`${CLAUDE_SESSION}.jsonl`))!;
-  const kept = main.selectLines!((await import('node:fs')).readFileSync(main.absolutePath, 'utf8').trim().split('\n')).join('\n');
+  const kept = await main.render!(null);
   expect(kept).toContain('this turn');
   expect(kept).toContain('API Error: overloaded');
   expect(kept).not.toContain('earlier turn');
   const sub = sessions.find((s) => s.name.includes('subagents'))!;
-  const subKept = sub.selectLines!((await import('node:fs')).readFileSync(sub.absolutePath, 'utf8').trim().split('\n')).join('\n');
+  const subKept = await sub.render!(null);
   expect(subKept).toContain('subagent prompt');
   expect(subKept).toContain('subagent stalled');
 });
@@ -134,4 +135,59 @@ it('puts the native sessions of exported runs into the manual diagnostics ZIP', 
   expect(names).toContain(`agent-sessions/claude/${CLAUDE_SESSION}/subagents/agent-a1.jsonl`);
   expect(names).toContain(`agent-sessions/codex/rollout-2026-10-01T10-01-00-${CODEX_CHILD}.jsonl`);
   expect(names.some((name) => name.includes('unrelated'))).toBe(false);
+});
+
+// A session file is read through a byte cap. Select the run's records first,
+// then cap: a run that writes more than the cap after its first failure, or
+// ends with one huge tool result, must still carry that failure and a stub.
+async function writeBigClaudeSession(): Promise<void> {
+  const project = join(root, 'claude', 'projects', '-Users-me-project');
+  const records: unknown[] = [
+    { type: 'user', sessionId: CLAUDE_SESSION, timestamp: iso(RUN_START - 3_600_000), message: { content: 'earlier turn' } },
+    { type: 'assistant', sessionId: CLAUDE_SESSION, timestamp: iso(RUN_START + 2_000), message: { content: 'EARLY FAILURE: overloaded' } },
+  ];
+  for (let i = 0; i < 50; i++) {
+    records.push({ type: 'assistant', sessionId: CLAUDE_SESSION, timestamp: iso(RUN_START + 3_000 + i), message: { content: 'y'.repeat(100 * 1024) } });
+  }
+  records.push({ type: 'user', sessionId: CLAUDE_SESSION, timestamp: iso(RUN_START + 100_000), toolUseResult: 'z'.repeat(5 * 1024 * 1024) });
+  await write(join(project, `${CLAUDE_SESSION}.jsonl`), jsonl(records));
+}
+
+async function bundleText(sources: Awaited<ReturnType<typeof buildAutomaticDiagnosticSources>>): Promise<string> {
+  const { gunzipSync } = await import('node:zlib');
+  const { readFile } = await import('node:fs/promises');
+  const directory = join(root, 'bundle', String(Math.random()).slice(2));
+  const result = await buildAutomaticDiagnostics({ directory, incidentId: 'inc', summary: {}, sources });
+  const chunks = await Promise.all(result.manifest.chunks.map((c) => readFile(join(directory, String(c.index)))));
+  return gunzipSync(Buffer.concat(chunks)).toString();
+}
+
+it('keeps an early failure and stubs a huge line when a session outgrows the cap (automatic)', async () => {
+  await writeRun('run-big', CLAUDE_SESSION);
+  await writeBigClaudeSession();
+  const sources = await buildAutomaticDiagnosticSources(options(), { runId: 'run-big', agentId: 'claude' });
+  const text = await bundleText(sources.filter((s) => s.name === `agent-sessions/claude/${CLAUDE_SESSION}.jsonl`));
+  expect(text).toContain('EARLY FAILURE: overloaded');
+  expect(text).toMatch(/\\"truncated\\":\s*true/);
+  expect(text).not.toContain('earlier turn');
+});
+
+it('keeps an early failure and stubs a huge line when a session outgrows the cap (manual ZIP)', async () => {
+  await writeRun('run-big', CLAUDE_SESSION);
+  await writeBigClaudeSession();
+  const handler = createDiagnosticsExportHandler({ ...options() });
+  const res: { capturedStatus?: number; capturedPayload?: Buffer } & Record<string, unknown> = {};
+  Object.assign(res, {
+    status(code: number) { res.capturedStatus = code; return res; },
+    setHeader() { return res; },
+    end(payload: Buffer) { res.capturedPayload = payload; },
+    json() { return res; },
+  });
+  await handler({} as never, res as never, () => undefined);
+  expect(res.capturedStatus).toBe(200);
+  const zip = await JSZip.loadAsync(res.capturedPayload!);
+  const entry = await zip.file(`agent-sessions/claude/${CLAUDE_SESSION}.jsonl`)!.async('string');
+  expect(entry).toContain('EARLY FAILURE: overloaded');
+  expect(entry).toContain('"truncated":true');
+  expect(entry).not.toContain('earlier turn');
 });

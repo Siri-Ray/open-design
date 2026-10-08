@@ -139,6 +139,21 @@ describe("buildAgentSessionSources stays inside the agent stores", () => {
     expect(await buildAgentSessionSources(session(threadId), options())).toEqual([]);
   });
 
+  it("collects an archived Codex thread together with its archived child threads", async () => {
+    // Codex archiving moves a thread and its descendants into the flat archive.
+    const childId = "0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a60";
+    const archive = join(tempDir, ".codex", "archived_sessions");
+    await mkdir(archive, { recursive: true });
+    const mainName = `rollout-2026-10-01T10-00-00-${threadId}.jsonl`;
+    const childName = `rollout-2026-10-01T10-01-00-${childId}.jsonl`;
+    await writeFile(join(archive, mainName), JSON.stringify({ timestamp: at(START + 1), type: "session_meta", payload: { id: threadId, session_id: threadId } }) + "\n");
+    await writeFile(join(archive, childName), JSON.stringify({ timestamp: at(START + 2), type: "session_meta", payload: { id: childId, session_id: threadId, parent_thread_id: threadId } }) + "\n");
+    await writeFile(join(archive, "rollout-2026-10-01T10-02-00-0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a61.jsonl"),
+      JSON.stringify({ timestamp: at(START + 3), type: "session_meta", payload: { id: "other", session_id: "other" } }) + "\n");
+    const sources = await buildAgentSessionSources(session(threadId), options());
+    expect(sources.map((source) => source.name)).toEqual([`agent-sessions/codex/${mainName}`, `agent-sessions/codex/${childName}`]);
+  });
+
   it("finds a Codex thread resumed days after its rollout was filed", async () => {
     // Codex appends a resumed turn to the rollout under the date the thread started.
     const started = join(tempDir, ".codex", "sessions", "2026", "09", "20");

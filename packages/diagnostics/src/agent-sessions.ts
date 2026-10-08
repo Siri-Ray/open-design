@@ -297,20 +297,26 @@ async function codexSessionSources(
     agent: "codex", name: `agent-sessions/codex/${main.name}`, absolutePath: join(main.dir, main.name), kind: "text", tailBytes,
   }];
   // Subagent threads start during the run, so they are filed under the run's
-  // dates (and the main rollout's directory, when it is in the dated tree).
+  // dates (and the main rollout's directory). Codex archives a thread with its
+  // descendants, so an archived main rollout has its children in the archive.
+  const places: Array<{ root: StoreRoot; dir: string }> = [];
   const sessionsDir = join(codexHome, "sessions");
   const sessions = await storeRoot(sessionsDir);
-  if (!sessions) return sources;
-  const dirs = new Set(localDayDirs(sessionsDir, session.startMs, session.endMs));
-  if (main.root.path === sessionsDir) dirs.add(main.dir);
+  if (sessions) {
+    const dirs = new Set(localDayDirs(sessionsDir, session.startMs, session.endMs));
+    if (main.root.path === sessionsDir) dirs.add(main.dir);
+    for (const dir of dirs) places.push({ root: sessions, dir });
+  }
+  if (main.root.path !== sessionsDir) places.push({ root: main.root, dir: main.dir });
   let children = 0;
-  for (const dir of dirs) {
-    const names = (await listEntries(sessions, dir, "file")).filter(isRollout).slice(0, MAX_ROLLOUTS_PER_DAY);
+  for (const { root, dir } of places) {
+    const names = (await listEntries(root, dir, "file")).filter(isRollout);
+    if (names.length > MAX_ARCHIVED_ROLLOUTS) continue;
     for (const name of names) {
       if (children >= maxSubagents) return sources;
       if (name === main.name) continue;
       const path = join(dir, name);
-      if (!(await isFile(sessions, path))) continue;
+      if (!(await isFile(root, path))) continue;
       let meta: { type?: unknown; payload?: { session_id?: unknown; parent_thread_id?: unknown } };
       try {
         meta = JSON.parse(await readFirstLine(path));
@@ -403,4 +409,146 @@ export function selectAgentSessionLines(startMs: number, endMs: number) {
     if (keeping === null) kept.push(...pending);
     return kept;
   };
+}
+
+/** Of an oversized line only this much is held, enough to read its timestamp for the stub. */
+const OVERSIZED_LINE_HEAD_BYTES = 64 * 1024;
+const TIMESTAMP_FIELD = /"timestamp"\s*:\s*(?:"([^"]{1,64})"|(-?\d{1,16}(?:\.\d+)?))/;
+
+function stubTime(head: string): number | null {
+  const match = TIMESTAMP_FIELD.exec(head);
+  if (!match) return null;
+  const ms = match[1] !== undefined ? Date.parse(match[1]) : Number(match[2]);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+export interface AgentSessionWindowOptions {
+  /** Cap on the returned text; when the run's records exceed it, the middle is omitted. */
+  maxBytes: number;
+  /** Records older than this (the consent boundary) are never returned. */
+  notBeforeMs?: number | null;
+}
+
+/**
+ * Streams a session file and returns only the run's records, selected before
+ * any byte cap so a long run keeps its first failure. Lines above
+ * AGENT_SESSION_MAX_LINE_BYTES become a stub (time and size) without being
+ * buffered. Past `maxBytes` the first and last halves are kept and one record
+ * says how much was omitted between them.
+ */
+export async function readAgentSessionWindow(
+  path: string,
+  startMs: number,
+  endMs: number,
+  options: AgentSessionWindowOptions,
+): Promise<string> {
+  const notBefore = options.notBeforeMs ?? Number.NEGATIVE_INFINITY;
+  const from = Math.max(startMs - WINDOW_MARGIN_MS, notBefore);
+  const to = endMs + WINDOW_MARGIN_MS;
+  const headBudget = Math.floor(options.maxBytes / 2);
+  const tailBudget = Math.max(0, options.maxBytes - headBudget - 256);
+  const head: string[] = [];
+  let headBytes = 0;
+  let headFull = false;
+  const tail: string[] = [];
+  let tailBytes = 0;
+  let omittedLines = 0;
+  let omittedBytes = 0;
+  const emit = (line: string) => {
+    const bytes = Buffer.byteLength(line, "utf8") + 1;
+    if (!headFull && headBytes + bytes <= headBudget) {
+      head.push(line);
+      headBytes += bytes;
+      return;
+    }
+    headFull = true;
+    tail.push(line);
+    tailBytes += bytes;
+    while (tailBytes > tailBudget && tail.length > 0) {
+      const dropped = tail.shift()!;
+      const droppedBytes = Buffer.byteLength(dropped, "utf8") + 1;
+      tailBytes -= droppedBytes;
+      omittedLines += 1;
+      omittedBytes += droppedBytes;
+    }
+  };
+  let pending: string[] = [];
+  let pendingBytes = 0;
+  let keeping: boolean | null = null;
+  const consider = (line: string, at: number | null) => {
+    if (at === null) {
+      if (keeping === null) {
+        pending.push(line);
+        pendingBytes += Buffer.byteLength(line, "utf8") + 1;
+        while (pendingBytes > options.maxBytes && pending.length > 0) {
+          pendingBytes -= Buffer.byteLength(pending.shift()!, "utf8") + 1;
+        }
+      } else if (keeping) {
+        emit(line);
+      }
+      return;
+    }
+    keeping = at >= from && at <= to;
+    if (keeping) {
+      for (const queued of pending) emit(queued);
+      emit(line);
+    }
+    pending = [];
+    pendingBytes = 0;
+  };
+  const complete = (raw: string) => {
+    if (!raw.trim()) return;
+    let record: unknown = null;
+    try {
+      record = JSON.parse(raw);
+    } catch {
+      record = null;
+    }
+    consider(raw, lineTime(record));
+  };
+  const oversized = (headText: string, bytes: number) => {
+    const at = stubTime(headText);
+    consider(JSON.stringify({ truncated: true, bytes, ...(at === null ? {} : { timestamp: new Date(at).toISOString() }) }), at);
+  };
+
+  let parts: Buffer[] = [];
+  let partBytes = 0;
+  let lineBytes = 0;
+  let overflowHead: string | null = null;
+  for await (const chunk of createReadStream(path) as AsyncIterable<Buffer>) {
+    let from = 0;
+    while (from < chunk.length) {
+      const newline = chunk.indexOf(10, from);
+      const end = newline === -1 ? chunk.length : newline;
+      const piece = chunk.subarray(from, end);
+      lineBytes += piece.length;
+      if (overflowHead === null) {
+        parts.push(piece);
+        partBytes += piece.length;
+        if (partBytes > AGENT_SESSION_MAX_LINE_BYTES) {
+          overflowHead = Buffer.concat(parts).subarray(0, OVERSIZED_LINE_HEAD_BYTES).toString("utf8");
+          parts = [];
+          partBytes = 0;
+        }
+      }
+      if (newline === -1) break;
+      if (overflowHead === null) complete(Buffer.concat(parts).toString("utf8"));
+      else oversized(overflowHead, lineBytes);
+      parts = [];
+      partBytes = 0;
+      lineBytes = 0;
+      overflowHead = null;
+      from = newline + 1;
+    }
+  }
+  if (overflowHead !== null) oversized(overflowHead, lineBytes);
+  else if (partBytes > 0) complete(Buffer.concat(parts).toString("utf8"));
+  // A file without any timestamp cannot be placed in time: keep it whole,
+  // unless a consent boundary applies, which it could not be proven against.
+  if (keeping === null && !Number.isFinite(notBefore)) for (const queued of pending) emit(queued);
+
+  const out = [...head];
+  if (omittedLines > 0) out.push(JSON.stringify({ truncated: "middle", omittedLines, omittedBytes }));
+  out.push(...tail);
+  return out.join("\n");
 }
