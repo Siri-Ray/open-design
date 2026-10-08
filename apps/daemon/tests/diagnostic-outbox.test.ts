@@ -55,7 +55,7 @@ it('expires pending incidents and evicts oldest content to enforce the byte budg
   expect(store.get(first.id)?.reason).toBe('capacity_evicted');
 });
 
-it('keeps a loss report for a lost bundle across restart and hands it out once', () => {
+it('keeps a loss report for a lost bundle across restart until it is acknowledged', () => {
   const { dir, store } = fixture();
   const lost = store.enqueue('run:lost', '{"runId":"run-lost","kind":"terminal_failure"}', 1);
   store.claim(2);
@@ -64,8 +64,11 @@ it('keeps a loss report for a lost bundle across restart and hands it out once',
   store.discard(revoked.id, 'consent_disabled', 5);
   store.close();
   const reopened = new DiagnosticOutbox(dir); stores.push(reopened);
-  expect(reopened.takeLossReports()).toEqual([expect.objectContaining({
+  const expected = [expect.objectContaining({
     incidentId: lost.id, reason: 'relay_413', runId: 'run-lost', kind: 'terminal_failure', attempts: 1, state: 'collect', ageMs: 2,
-  })]);
-  expect(reopened.takeLossReports()).toEqual([]);
+  })];
+  expect(reopened.peekLossReports()).toEqual(expected);
+  expect(reopened.peekLossReports()).toEqual(expected);
+  reopened.ackLossReport(lost.id);
+  expect(reopened.peekLossReports()).toEqual([]);
 });

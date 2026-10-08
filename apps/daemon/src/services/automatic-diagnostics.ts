@@ -20,7 +20,12 @@ interface Options {
   context?(): unknown;
   onDelivered?(incidentId: string, receipt: string, evidence: FaultEvidence): void;
   /** A bundle left the queue undelivered, or is still failing after several attempts. */
-  onUndelivered?(report: DiagnosticUndeliveredReport): void;
+  /**
+   * A discarded bundle's report is removed from the outbox only after this
+   * settles; a rejection, or a stop while it is pending, keeps it for the next
+   * drain. Report it with a stable id, since it can be handed out again.
+   */
+  onUndelivered?(report: DiagnosticUndeliveredReport): void | Promise<void>;
   fetcher?: typeof fetch;
 }
 
@@ -156,27 +161,51 @@ export class AutomaticDiagnostics {
     if (!this.outbox.bindDevice(item, device.device_id)) throw new DiagnosticRelayError('stale_incident');
     return device;
   }
-  private reportLosses(): void {
-    if (!this.options.onUndelivered) return;
+  private async reportLosses(): Promise<void> {
+    const handOff = this.options.onUndelivered;
+    if (!handOff) return;
+    let reports: DiagnosticLossReport[];
     try {
-      for (const report of this.outbox.takeLossReports()) this.options.onUndelivered({ ...report, outcome: 'discarded' });
-    } catch { /* a report is diagnostic only */ }
+      reports = this.outbox.peekLossReports();
+    } catch {
+      return; /* a report is diagnostic only */
+    }
+    const signal = this.controller.signal;
+    for (const report of reports) {
+      if (signal.aborted) return;
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const onAbort = () => reject(signal.reason);
+          signal.addEventListener('abort', onAbort, { once: true });
+          Promise.resolve(handOff({ ...report, outcome: 'discarded' })).then(resolve, reject)
+            .finally(() => signal.removeEventListener('abort', onAbort));
+        });
+      } catch {
+        return; // keep this and later reports for the next drain
+      }
+      if (signal.aborted) return;
+      try {
+        this.outbox.ackLossReport(report.incidentId);
+      } catch {
+        return;
+      }
+    }
   }
   private reportRetrying(item: DiagnosticIncident, reason: string): void {
     if (!this.options.onUndelivered || item.attempts !== DIAGNOSTIC_RETRY_REPORT_ATTEMPTS) return;
     try {
       const summary = JSON.parse(item.summary) as Partial<FaultEvidence>;
-      this.options.onUndelivered({ outcome: 'retrying', incidentId: item.id, reason,
+      void Promise.resolve(this.options.onUndelivered({ outcome: 'retrying', incidentId: item.id, reason,
         runId: typeof summary.runId === 'string' ? summary.runId : null,
         kind: typeof summary.kind === 'string' ? summary.kind : null,
         state: item.state === 'collect' ? 'collect' : 'pending', attempts: item.attempts, bytes: item.bytes,
-        ageMs: Math.max(0, Date.now() - item.createdAt) });
+        ageMs: Math.max(0, Date.now() - item.createdAt) })).catch(() => {});
     } catch { /* a report is diagnostic only */ }
   }
   private async drain(): Promise<void> {
     await this.consentBarrier;
     await this.cleanup();
-    this.reportLosses();
+    await this.reportLosses();
     if (!this.allowed()) return;
     if (!this.observedLogIdentities && this.options.baselineSources) {
       // Once per process, after the launcher has rotated this session's logs.
@@ -235,7 +264,7 @@ export class AutomaticDiagnostics {
       }
     }
     await this.cleanup();
-    this.reportLosses();
+    await this.reportLosses();
   }
   async stop(): Promise<void> {
     if (this.stopped) return;

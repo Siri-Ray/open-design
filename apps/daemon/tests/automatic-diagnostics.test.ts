@@ -134,3 +134,49 @@ it('reports a bundle that expired undelivered, keeping its run after the content
   expect(f.service.outbox.get(id)?.summary).toBe('{}');
   expect(f.reports).toEqual([expect.objectContaining({ incidentId: id, outcome: 'discarded', reason: 'pending_expired', runId: 'run-old' })]);
 });
+
+// The loss report is the only durable trace of a lost bundle. It must stay in
+// the outbox until the analytics hand-off settles: a daemon stop while the
+// hand-off is pending, or a rejected hand-off, must leave it for the next drain.
+function relayRejecting(root: string, onUndelivered: (report: any) => unknown) {
+  const fetcher = vi.fn(async () => new Response('{}', { status: 413 })) as unknown as typeof fetch;
+  return new AutomaticDiagnostics({ dataRoot: root, relayOrigin: 'https://relay.test', consent: () => true,
+    sources: async () => [], fetcher, onUndelivered: onUndelivered as never });
+}
+it('keeps a loss report whose hand-off is still pending when the daemon stops', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'od-auto-loss-pending-'));
+  cleanup.push(async () => { rmSync(root, { recursive: true, force: true }); });
+  let calls = 0;
+  const first = relayRejecting(root, () => { calls += 1; return new Promise(() => {}); });
+  const id = first.record({ sourceId: 'run:big', at: Date.now(), kind: 'terminal_failure', runId: 'run-big' })!;
+  // Drive collect and the rejected upload until the hand-off starts; it never settles.
+  await vi.waitFor(() => { void first.tick(); expect(calls).toBe(1); }, { timeout: 5_000, interval: 20 });
+  await first.stop();
+
+  const delivered: any[] = [];
+  const second = relayRejecting(root, async (report) => { delivered.push(report); });
+  cleanup.push(async () => { await second.stop(); });
+  await second.tick();
+  expect(delivered).toEqual([expect.objectContaining({ incidentId: id, outcome: 'discarded', reason: 'relay_413' })]);
+  await second.tick();
+  expect(delivered).toHaveLength(1);
+});
+it('keeps a loss report whose hand-off rejects and sends it on the next drain', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'od-auto-loss-reject-'));
+  const delivered: any[] = [];
+  let fail = true;
+  const service = relayRejecting(root, async (report) => {
+    if (fail) throw new Error('analytics unavailable');
+    delivered.push(report);
+  });
+  cleanup.push(async () => { await service.stop(); rmSync(root, { recursive: true, force: true }); });
+  const id = service.record({ sourceId: 'run:big', at: Date.now(), kind: 'terminal_failure', runId: 'run-big' })!;
+  await service.tick(); // collect
+  await service.tick(); // upload rejected, hand-off rejects
+  expect(delivered).toEqual([]);
+  fail = false;
+  await service.tick();
+  expect(delivered).toEqual([expect.objectContaining({ incidentId: id, outcome: 'discarded' })]);
+  await service.tick();
+  expect(delivered).toHaveLength(1);
+});

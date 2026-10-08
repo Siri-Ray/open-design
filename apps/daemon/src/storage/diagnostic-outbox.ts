@@ -139,14 +139,13 @@ export class DiagnosticOutbox {
       .run(reason, id);
     if (changed.changes) this.db.prepare('INSERT INTO loss_counts(reason,count) VALUES (?,1) ON CONFLICT(reason) DO UPDATE SET count=count+1').run(reason);
   }
-  /** Loss reports not yet handed out, oldest first; each is returned once. */
-  takeLossReports(limit = 50): DiagnosticLossReport[] {
-    return this.db.transaction(() => {
-      const rows = this.db.prepare('SELECT * FROM loss_reports ORDER BY rowid LIMIT ?').all(limit) as DiagnosticLossReport[];
-      const remove = this.db.prepare('DELETE FROM loss_reports WHERE incidentId=?');
-      for (const row of rows) remove.run(row.incidentId);
-      return rows;
-    }).immediate();
+  /** Loss reports not yet acknowledged, oldest first. A report stays until ackLossReport. */
+  peekLossReports(limit = 50): DiagnosticLossReport[] {
+    return this.db.prepare('SELECT * FROM loss_reports ORDER BY rowid LIMIT ?').all(limit) as DiagnosticLossReport[];
+  }
+  /** Drops a report once its hand-off has completed. */
+  ackLossReport(incidentId: string): void {
+    this.db.prepare('DELETE FROM loss_reports WHERE incidentId=?').run(incidentId);
   }
   /** Returns directories to remove. Persist tombstones before deleting files so restart is safe. */
   prune(now = Date.now(), consent = true, reserveBytes = 0): string[] {
