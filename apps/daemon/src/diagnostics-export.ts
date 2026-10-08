@@ -16,6 +16,7 @@ import {
   AGENT_SESSION_TAIL_BYTES,
   readAgentSessionWindow,
   type AgentSessionAgent,
+  type AgentSessionTimeWindow,
   type AutomaticDiagnosticSource,
   type LogSource,
 } from '@open-design/diagnostics';
@@ -371,14 +372,15 @@ async function buildRunAgentSessionSources(
   // Select the run's records before any byte cap, fenced by the consent time.
   return found.map(({ agent: _agent, ...source }) => ({
     ...source,
-    render: (notBeforeMs: number | null) => readAgentSessionWindow(source.absolutePath, session.startMs, session.endMs,
+    render: (notBeforeMs: number | null) => readAgentSessionWindow(source.absolutePath, [session],
       { maxBytes: source.tailBytes ?? AGENT_SESSION_TAIL_BYTES, notBeforeMs }),
   }));
 }
 
 /**
  * Native Claude Code / Codex sessions of the runs the export includes, one
- * entry per file. Each is reduced to the run's records into `scratchDir`
+ * entry per file. Runs that resume the same session share its file, so the
+ * file keeps every such run's records. Each is reduced into `scratchDir`
  * (removed by the caller after zipping) so the ZIP's tail cap cannot drop them.
  */
 async function buildExportedRunSessionSources(
@@ -386,8 +388,7 @@ async function buildExportedRunSessionSources(
   environment: ResolvedDiagnosticsAgentEnvironment,
   scratchDir: string,
 ): Promise<LogSource[]> {
-  const seen = new Set<string>();
-  const sources: LogSource[] = [];
+  const files = new Map<string, { source: LogSource; windows: AgentSessionTimeWindow[] }>();
   for (const runSource of runEventSources) {
     const session = await readRunAgentSession(runSource.absolutePath);
     if (!session) continue;
@@ -395,20 +396,24 @@ async function buildExportedRunSessionSources(
       homeDir: homedir(), claudeConfigDir: environment.claudeConfigDir, codexHome: environment.codexHome,
     });
     for (const { agent: _agent, ...source } of found) {
-      if (seen.has(source.absolutePath)) continue;
-      seen.add(source.absolutePath);
-      let selected: string;
-      try {
-        selected = await readAgentSessionWindow(source.absolutePath, session.startMs, session.endMs,
-          { maxBytes: source.tailBytes ?? AGENT_SESSION_TAIL_BYTES });
-      } catch {
-        continue;
-      }
-      if (!selected) continue;
-      const absolutePath = join(scratchDir, `${sources.length}.jsonl`);
-      await writeFile(absolutePath, selected);
-      sources.push({ ...source, absolutePath });
+      const file = files.get(source.absolutePath);
+      if (file) file.windows.push(session);
+      else files.set(source.absolutePath, { source, windows: [session] });
     }
+  }
+  const sources: LogSource[] = [];
+  for (const { source, windows } of files.values()) {
+    let selected: string;
+    try {
+      selected = await readAgentSessionWindow(source.absolutePath, windows,
+        { maxBytes: source.tailBytes ?? AGENT_SESSION_TAIL_BYTES });
+    } catch {
+      continue;
+    }
+    if (!selected) continue;
+    const absolutePath = join(scratchDir, `${sources.length}.jsonl`);
+    await writeFile(absolutePath, selected);
+    sources.push({ ...source, absolutePath });
   }
   return sources;
 }

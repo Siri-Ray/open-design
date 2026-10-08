@@ -422,6 +422,12 @@ function stubTime(head: string): number | null {
   return Number.isFinite(ms) ? ms : null;
 }
 
+/** A run's time span; records within it (plus a small margin) belong to the run. */
+export interface AgentSessionTimeWindow {
+  startMs: number;
+  endMs: number;
+}
+
 export interface AgentSessionWindowOptions {
   /** Cap on the returned text; when the run's records exceed it, the middle is omitted. */
   maxBytes: number;
@@ -434,17 +440,20 @@ export interface AgentSessionWindowOptions {
  * any byte cap so a long run keeps its first failure. Lines above
  * AGENT_SESSION_MAX_LINE_BYTES become a stub (time and size) without being
  * buffered. Past `maxBytes` the first and last halves are kept and one record
- * says how much was omitted between them.
+ * says how much was omitted between them. Several runs can resume the same
+ * session, so a record is kept when it falls in any of `windows`.
  */
 export async function readAgentSessionWindow(
   path: string,
-  startMs: number,
-  endMs: number,
+  windows: readonly AgentSessionTimeWindow[],
   options: AgentSessionWindowOptions,
 ): Promise<string> {
   const notBefore = options.notBeforeMs ?? Number.NEGATIVE_INFINITY;
-  const from = Math.max(startMs - WINDOW_MARGIN_MS, notBefore);
-  const to = endMs + WINDOW_MARGIN_MS;
+  const spans = windows.map(({ startMs, endMs }) => ({
+    from: Math.max(startMs - WINDOW_MARGIN_MS, notBefore),
+    to: endMs + WINDOW_MARGIN_MS,
+  }));
+  const inRun = (at: number) => spans.some(({ from, to }) => at >= from && at <= to);
   const headBudget = Math.floor(options.maxBytes / 2);
   const tailBudget = Math.max(0, options.maxBytes - headBudget - 256);
   const head: string[] = [];
@@ -488,7 +497,7 @@ export async function readAgentSessionWindow(
       }
       return;
     }
-    keeping = at >= from && at <= to;
+    keeping = inRun(at);
     if (keeping) {
       for (const queued of pending) emit(queued);
       emit(line);

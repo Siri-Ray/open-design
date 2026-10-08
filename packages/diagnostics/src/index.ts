@@ -57,5 +57,7 @@ export {
   type AgentSessionAgent,
   type AgentSessionLookupOptions,
   type AgentSessionSource,
+  type AgentSessionTimeWindow,
+  type AgentSessionWindowOptions,
   type RunAgentSession,
 } from "./agent-sessions.js";

@@ -191,3 +191,38 @@ it('keeps an early failure and stubs a huge line when a session outgrows the cap
   expect(entry).toContain('"truncated":true');
   expect(entry).not.toContain('earlier turn');
 });
+
+// A resumed conversation is one native session file shared by several runs.
+// Exporting those runs must keep each run's records, not only the newest one's.
+it('keeps every exported run\'s records when the runs resume the same native session', async () => {
+  const LATER = RUN_START + 2 * 3_600_000;
+  await writeRun('run-first', CLAUDE_SESSION);
+  await write(join(root, 'runs', 'run-later', 'events.jsonl'), jsonl([
+    { id: 1, event: 'start', data: {}, timestamp: LATER },
+    { id: 2, event: 'agent', data: { type: 'status', label: 'initializing', sessionId: CLAUDE_SESSION }, timestamp: LATER + 1_000 },
+    { id: 3, event: 'end', data: { status: 'failed' }, timestamp: LATER + 300_000 },
+  ]));
+  await write(join(root, 'claude', 'projects', '-Users-me-project', `${CLAUDE_SESSION}.jsonl`), jsonl([
+    { type: 'assistant', sessionId: CLAUDE_SESSION, timestamp: iso(RUN_START + 60_000), message: { content: 'FIRST RUN FAILURE' } },
+    { type: 'user', sessionId: CLAUDE_SESSION, timestamp: iso(RUN_START + 3_600_000), message: { content: 'between the runs' } },
+    { type: 'assistant', sessionId: CLAUDE_SESSION, timestamp: iso(LATER + 60_000), message: { content: 'LATER RUN FAILURE' } },
+  ]));
+  const handler = createDiagnosticsExportHandler({ ...options() });
+  const res: { capturedStatus?: number; capturedPayload?: Buffer } & Record<string, unknown> = {};
+  Object.assign(res, {
+    status(code: number) { res.capturedStatus = code; return res; },
+    setHeader() { return res; },
+    end(payload: Buffer) { res.capturedPayload = payload; },
+    json() { return res; },
+  });
+  await handler({} as never, res as never, () => undefined);
+  expect(res.capturedStatus).toBe(200);
+  const zip = await JSZip.loadAsync(res.capturedPayload!);
+  const entries = Object.keys(zip.files).filter((name) => name.startsWith(`agent-sessions/claude/${CLAUDE_SESSION}`));
+  expect(entries).toEqual([`agent-sessions/claude/${CLAUDE_SESSION}.jsonl`]);
+  const entry = await zip.file(entries[0]!)!.async('string');
+  expect(entry).toContain('FIRST RUN FAILURE');
+  expect(entry).toContain('LATER RUN FAILURE');
+  expect(entry).not.toContain('between the runs');
+  expect(entry.indexOf('FIRST RUN FAILURE')).toBeLessThan(entry.indexOf('LATER RUN FAILURE'));
+});
