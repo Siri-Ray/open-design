@@ -154,3 +154,37 @@ it('keeps an OpenCode failure that comes after 16 MiB of run events', async () =
   const text = await bundleText(sources.filter((s) => s.name.startsWith('agent-sessions/opencode')));
   expect(text).toContain('late provider failure');
 });
+
+it('keeps every exported run\'s rows when the runs resume the same OpenCode session', async () => {
+  const later = RUN_START + 2 * 3_600_000;
+  await writeRun('run-oc');
+  await mkdir(join(root, 'runs', 'run-oc-later'), { recursive: true });
+  await writeFile(join(root, 'runs', 'run-oc-later', 'events.jsonl'), [
+    { id: 1, event: 'start', data: {}, timestamp: later },
+    { id: 2, event: 'agent', data: { type: 'status', label: 'running', sessionId: SESSION }, timestamp: later + 500 },
+    { id: 3, event: 'end', data: { status: 'failed' }, timestamp: later + 300_000 },
+  ].map((record) => JSON.stringify(record)).join('\n') + '\n');
+  await writeOpenCodeDb();
+  const db = new Database(join(root, 'xdg', 'opencode', 'opencode.db'));
+  db.prepare('INSERT INTO message VALUES (?, ?, ?, ?, ?)').run('msg_between', SESSION, RUN_START + 3_600_000, RUN_START + 3_600_000,
+    JSON.stringify({ role: 'user', text: 'between the runs' }));
+  db.prepare('INSERT INTO part VALUES (?, ?, ?, ?, ?, ?)').run('prt_later', 'msg_new', SESSION, later + 60_000, later + 60_000,
+    JSON.stringify({ type: 'tool', state: { status: 'error', error: 'later run failure' } }));
+  db.close();
+
+  const handler = createDiagnosticsExportHandler({ ...options() });
+  const res: { capturedStatus?: number; capturedPayload?: Buffer } & Record<string, unknown> = {};
+  Object.assign(res, {
+    status(code: number) { res.capturedStatus = code; return res; },
+    setHeader() { return res; },
+    end(payload: Buffer) { res.capturedPayload = payload; },
+    json() { return res; },
+  });
+  await handler({} as never, res as never, () => undefined);
+  expect(res.capturedStatus).toBe(200);
+  const zip = await JSZip.loadAsync(res.capturedPayload!);
+  const text = await zip.file(`agent-sessions/opencode/${SESSION}.jsonl`)!.async('string');
+  expect(text).toContain('Provider returned error');
+  expect(text).toContain('later run failure');
+  expect(text).not.toContain('between the runs');
+});
