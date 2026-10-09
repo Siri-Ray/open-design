@@ -7966,7 +7966,12 @@ export async function startServer({
         if (status !== 'failed' && status !== 'canceled') return;
         strategyWriteEvidence.finish(run);
         try {
-          reconcileStrategyTaskRunTerminal(db, { runId: run.id, status });
+          reconcileStrategyTaskRunTerminal(db, {
+            runId: run.id,
+            status,
+            source: 'live_run_end',
+            runTerminalTrigger: run.terminalTrigger ?? null,
+          });
           const latestTask = getStrategyTaskExecutionByRunId(db, run.id);
           if (latestTask) run.strategyTask = projectStrategyTask(latestTask, run.id);
         } catch (error) {
@@ -17216,6 +17221,7 @@ export async function startServer({
               reconcileStrategyTaskRunTerminal(db, {
                 runId: continuation.run.id,
                 status: 'failed',
+                source: 'continuation_start_failed',
               });
               const latestTask = getStrategyTaskExecutionByRunId(db, continuation.run.id);
               if (latestTask) {
