@@ -563,6 +563,7 @@ import {
 import { createOdNextRunProtocol } from './strategies/od-next/protocol.js';
 import {
   blockAutomaticContinuation,
+  odNextNativeSessionGuardReason,
   prepareAutomaticStrategyContinuation,
   projectStrategyTask,
   odNextTurnMayInferDirectEditCompletion,
@@ -858,6 +859,7 @@ import {
   updateRoutine,
   updateRoutineRun,
   clearAgentSession,
+  getAgentSessionRecord,
   upsertAgentSession,
   upsertDeployment,
   upsertMessage,
@@ -12051,17 +12053,6 @@ export async function startServer({
           invalidationReason: null,
         }
       : resolvedAgentResumeCtx;
-    if (
-      strategyTaskAtStart
-      && !isOdNextInitialRun
-      && !agentResumeCtx.isResuming
-    ) {
-      const blocked = blockAutomaticContinuation(db, { runId: run.id });
-      if (blocked) run.strategyTask = projectStrategyTask(blocked, run.id);
-      throw new Error(
-        'OD Next continuation requires the locked native session; cold re-seeding is forbidden.',
-      );
-    }
     const publishNativeSessionRecoveryMetadata = () => {
       if (!run.nativeSessionRecovery) return;
       design.runs.emit(run, 'diagnostic', {
@@ -12069,13 +12060,6 @@ export async function startServer({
         nativeSessionRecovery: run.nativeSessionRecovery,
       });
     };
-    // Physical attempts share run.events, so scanning that logical-run tail can
-    // assign attempt A's usage to attempt B's different session. Keep only this
-    // attempt's usage frames here; a fresh startChatRun closure starts empty.
-    const physicalSessionUsage = createPhysicalAgentSessionUsageTracker(
-      pendingNativeSessionContinue?.lastInputTokens ?? null,
-    );
-    const observedInputTokensForSession = physicalSessionUsage.inputTokens;
     run.nativeSessionRecovery = initialNativeSessionRecoveryMetadata({
       agent: def,
       supportsSessionResume: agentSupportsSessionResume,
@@ -12084,7 +12068,43 @@ export async function startServer({
       storedSessionId: agentResumeCtx.storedSessionId,
       invalidationReason: agentResumeCtx.invalidationReason,
     });
+    // Published before the OD Next continuity guard below, so a blocked
+    // continuation still records which resume decision it was refused on.
     publishNativeSessionRecoveryMetadata();
+    if (
+      strategyTaskAtStart
+      && !isOdNextInitialRun
+      && !agentResumeCtx.isResuming
+    ) {
+      const guardReason = odNextNativeSessionGuardReason({
+        supportsSessionResume: agentSupportsSessionResume,
+        storedSessionId: agentResumeCtx.storedSessionId,
+        invalidationReason: agentResumeCtx.invalidationReason,
+      });
+      const storedSessionModel = agentSupportsSessionResume && run.conversationId
+        ? getAgentSessionRecord(db, run.conversationId, def.id)?.model ?? null
+        : null;
+      design.runs.emit(run, 'diagnostic', {
+        type: 'od_next_native_session_guard',
+        guardReason,
+        agentId: def.id,
+        storedSessionPresent: agentResumeCtx.storedSessionId != null,
+        currentModel: safeModel ?? null,
+        storedModel: storedSessionModel,
+      });
+      const blocked = blockAutomaticContinuation(db, { runId: run.id, guardReason });
+      if (blocked) run.strategyTask = projectStrategyTask(blocked, run.id);
+      throw new Error(
+        'OD Next continuation requires the locked native session; cold re-seeding is forbidden.',
+      );
+    }
+    // Physical attempts share run.events, so scanning that logical-run tail can
+    // assign attempt A's usage to attempt B's different session. Keep only this
+    // attempt's usage frames here; a fresh startChatRun closure starts empty.
+    const physicalSessionUsage = createPhysicalAgentSessionUsageTracker(
+      pendingNativeSessionContinue?.lastInputTokens ?? null,
+    );
+    const observedInputTokensForSession = physicalSessionUsage.inputTokens;
     /*
      * The plan the previous turn last declared — whole, finished rows included.
      *
