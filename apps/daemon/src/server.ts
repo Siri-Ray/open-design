@@ -541,6 +541,7 @@ import {
 import { createOdNextRunProtocol } from './strategies/od-next/protocol.js';
 import {
   endFailedAutomaticContinuation,
+  odNextNativeSessionGuardReason,
   prepareAutomaticStrategyContinuation,
   projectStrategyTask,
 } from './strategies/od-next/automatic-simple-production.js';
@@ -830,6 +831,7 @@ import {
   updateRoutine,
   updateRoutineRun,
   clearAgentSession,
+  getAgentSessionRecord,
   upsertAgentSession,
   upsertDeployment,
   upsertMessage,
@@ -12550,13 +12552,47 @@ export async function startServer({
           invalidationReason: null,
         }
       : resolvedAgentResumeCtx;
+    const publishNativeSessionRecoveryMetadata = () => {
+      if (!run.nativeSessionRecovery) return;
+      design.runs.emit(run, 'diagnostic', {
+        type: 'native_session_recovery',
+        nativeSessionRecovery: run.nativeSessionRecovery,
+      });
+    };
+    run.nativeSessionRecovery = initialNativeSessionRecoveryMetadata({
+      agent: def,
+      supportsSessionResume: agentSupportsSessionResume,
+      isResuming: agentResumeCtx.isResuming,
+      resumeSessionId: agentResumeCtx.resumeSessionId,
+      storedSessionId: agentResumeCtx.storedSessionId,
+      invalidationReason: agentResumeCtx.invalidationReason,
+    });
+    // Published before the OD Next continuity guard below, so a refused
+    // continuation still records which resume decision it was refused on.
+    publishNativeSessionRecoveryMetadata();
     if (
       strategyTaskAtStart
       && !isOdNextInitialRun
       && !agentResumeCtx.isResuming
       && !strategyRunMapping?.coldStartFinalText
     ) {
-      const ended = endFailedAutomaticContinuation(db, { runId: run.id });
+      const guardReason = odNextNativeSessionGuardReason({
+        supportsSessionResume: agentSupportsSessionResume,
+        storedSessionId: agentResumeCtx.storedSessionId,
+        invalidationReason: agentResumeCtx.invalidationReason,
+      });
+      const storedSessionModel = agentSupportsSessionResume && run.conversationId
+        ? getAgentSessionRecord(db, run.conversationId, def.id)?.model ?? null
+        : null;
+      design.runs.emit(run, 'diagnostic', {
+        type: 'od_next_native_session_guard',
+        guardReason,
+        agentId: def.id,
+        storedSessionPresent: agentResumeCtx.storedSessionId != null,
+        currentModel: safeModel ?? null,
+        storedModel: storedSessionModel,
+      });
+      const ended = endFailedAutomaticContinuation(db, { runId: run.id, guardReason });
       if (ended) run.strategyTask = projectStrategyTask(ended, run.id);
       throw new Error(
         'OD Next continuation requires the locked native session; cold re-seeding is forbidden.',
@@ -12574,13 +12610,6 @@ export async function startServer({
         promptSha256: strategyRunMapping.finalText.sha256,
       });
     }
-    const publishNativeSessionRecoveryMetadata = () => {
-      if (!run.nativeSessionRecovery) return;
-      design.runs.emit(run, 'diagnostic', {
-        type: 'native_session_recovery',
-        nativeSessionRecovery: run.nativeSessionRecovery,
-      });
-    };
     // Physical attempts share run.events, so scanning that logical-run tail can
     // assign attempt A's usage to attempt B's different session. Keep only this
     // attempt's usage frames here; a fresh startChatRun closure starts empty.
@@ -12588,15 +12617,6 @@ export async function startServer({
       pendingNativeSessionContinue?.lastInputTokens ?? null,
     );
     const observedInputTokensForSession = physicalSessionUsage.inputTokens;
-    run.nativeSessionRecovery = initialNativeSessionRecoveryMetadata({
-      agent: def,
-      supportsSessionResume: agentSupportsSessionResume,
-      isResuming: agentResumeCtx.isResuming,
-      resumeSessionId: agentResumeCtx.resumeSessionId,
-      storedSessionId: agentResumeCtx.storedSessionId,
-      invalidationReason: agentResumeCtx.invalidationReason,
-    });
-    publishNativeSessionRecoveryMetadata();
     /*
      * The plan the previous turn last declared — whole, finished rows included.
      *
