@@ -196,6 +196,26 @@ it.skipIf(process.platform === 'win32')('does not collect an in-tree OpenCode lo
   expect(incident.find((s) => s.name === 'agent-cli-logs/amr/opencode')?.omitReason).toBe('source_not_located');
 });
 
+// realpath() keeps a hard link's in-tree pathname, so containment alone would
+// accept an in-tree name for a file that also lives outside the AMR home.
+it('does not collect an in-tree OpenCode log hard link to a file outside the AMR home', async () => {
+  const { link } = await import('node:fs/promises');
+  const options = { runtime: null, projectRoot: root, runsDir: join(root, 'runs'), dataDir: join(root, 'data') };
+  const outside = join(root, 'outside', 'secret.txt');
+  await mkdir(join(root, 'outside'), { recursive: true });
+  await writeFile(outside, 'timestamp=2026-09-30T01:00:01.000Z level=INFO message="not an amr file"\n');
+  await mkdir(join(root, 'amr', 'opencode-sessions', 'mine', 'data', 'opencode', 'log'), { recursive: true });
+  await link(outside, conversationLog('mine'));
+  await writeRuntimeLog([
+    { event: 'opencode_session_loaded', opencodeSessionId: 'ses_a', openDesignRunId: 'run-a', opencodeLogPath: conversationLog('mine'), ts: '2026-09-30T01:00:00.000Z' },
+  ]);
+  const incident = await buildAutomaticDiagnosticSources(options, { runId: 'run-a', agentId: 'amr' });
+  const baseline = await buildAutomaticDiagnosticSources(options, { agentId: '*' });
+  expect([...incident, ...baseline].filter((s) => s.name.startsWith('agent-cli-logs/amr/opencode')
+    && !s.omitReason).map((s) => s.absolutePath)).toEqual([]);
+  expect(incident.find((s) => s.name === 'agent-cli-logs/amr/opencode')?.omitReason).toBe('source_not_located');
+});
+
 // Without a valid bound time the run's window in a conversation's shared log is
 // unknown; exporting from epoch zero would take earlier turns too.
 it.each([

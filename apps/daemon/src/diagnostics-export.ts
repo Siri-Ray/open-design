@@ -324,6 +324,8 @@ async function readTail(absolutePath: string, maxBytes: number): Promise<string>
  * The real path of a named OpenCode log when it is a regular file inside the AMR
  * home. Both sides are resolved through symlinks, because every later read
  * follows them: a lexical check alone would let an in-tree link export any file.
+ * realpath() keeps a hard link's in-tree name, so a file with more than one link
+ * is refused too: one of its other names may lie outside the home.
  */
 async function containedOpenCodeLog(named: string, realRoot: string): Promise<string | null> {
   const lexical = resolve(named);
@@ -331,7 +333,7 @@ async function containedOpenCodeLog(named: string, realRoot: string): Promise<st
   const real = await realpath(lexical).catch(() => null);
   if (!real || !real.startsWith(realRoot) || !real.endsWith(sep + OPENCODE_LOG_SUFFIX)) return null;
   const info = await stat(real).catch(() => null);
-  return info?.isFile() ? real : null;
+  return info?.isFile() && info.nlink === 1 ? real : null;
 }
 
 /**
