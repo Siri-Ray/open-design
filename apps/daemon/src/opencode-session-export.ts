@@ -1,7 +1,11 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
-import type { AgentSessionTimeWindow } from '@open-design/diagnostics';
+import {
+  AGENT_SESSION_MAX_LINE_BYTES,
+  AGENT_SESSION_TAIL_BYTES,
+  type AgentSessionTimeWindow,
+} from '@open-design/diagnostics';
 
 /**
  * OpenCode 1.x stores sessions in one SQLite database (`<XDG_DATA_HOME>/opencode/opencode.db`):
@@ -29,17 +33,34 @@ function payload(data: unknown): unknown {
   try { return JSON.parse(data); } catch { return data; }
 }
 
+interface RowMeta {
+  kind: 'message' | 'part';
+  id: string;
+  message_id: string | null;
+  session_id: string;
+  time_created: number;
+  /** Byte length of the row's `data`, read without loading the payload into JS. */
+  bytes: number | null;
+}
+
 /**
  * Rows of `sessionId` and its descendant sessions written during any of
  * `windows` (several runs can resume one session) and not before
  * `notBeforeMs`, oldest first. Session rows carry only ids and the parent
  * link, not titles.
+ *
+ * Bounded before anything is materialized: rows are first listed by time and
+ * payload size only; a payload above AGENT_SESSION_MAX_LINE_BYTES is never
+ * read and becomes a stub that keeps its id, time and size. Past `maxBytes`
+ * the first and last halves are kept and one record says how much was
+ * omitted between them, as readAgentSessionWindow does for session files.
  */
 export function exportOpenCodeSession(
   xdgDataHome: string,
   sessionId: string,
   windows: readonly AgentSessionTimeWindow[],
   notBeforeMs: number | null,
+  maxBytes: number = AGENT_SESSION_TAIL_BYTES,
 ): string {
   if (windows.length === 0) return '';
   const db = new Database(openCodeDatabasePath(xdgDataHome), { readonly: true, fileMustExist: true, timeout: 1_000 });
@@ -57,21 +78,62 @@ export function exportOpenCodeSession(
     const marks = ids.map(() => '?').join(',');
     const sessions = db.prepare(`SELECT id, parent_id FROM session WHERE id IN (${marks})`).all(...ids) as
       Array<{ id: string; parent_id: string | null }>;
-    const messages = db.prepare(`SELECT id, session_id, time_created, data FROM message
-      WHERE session_id IN (${marks}) AND (${during}) ORDER BY time_created LIMIT ?`)
-      .all(...ids, ...bounds, MAX_MESSAGES) as Array<{ id: string; session_id: string; time_created: number; data: unknown }>;
-    const parts = db.prepare(`SELECT id, message_id, session_id, time_created, data FROM part
-      WHERE session_id IN (${marks}) AND (${during}) ORDER BY time_created LIMIT ?`)
-      .all(...ids, ...bounds, MAX_PARTS) as Array<{ id: string; message_id: string; session_id: string; time_created: number; data: unknown }>;
-    const records = [
-      ...messages.map((row) => ({ at: row.time_created, record: { kind: 'message', id: row.id, sessionId: row.session_id,
-        timestamp: new Date(row.time_created).toISOString(), data: payload(row.data) } })),
-      ...parts.map((row) => ({ at: row.time_created, record: { kind: 'part', id: row.id, messageId: row.message_id,
-        sessionId: row.session_id, timestamp: new Date(row.time_created).toISOString(), data: payload(row.data) } })),
-    ].sort((a, b) => a.at - b.at);
-    if (records.length === 0) return '';
-    const header = sessions.map((row) => JSON.stringify({ kind: 'session', id: row.id, parentId: row.parent_id }));
-    return [...header, ...records.map(({ record }) => JSON.stringify(record))].join('\n') + '\n';
+    // Metadata only: octet_length() sizes each payload inside SQLite, so no
+    // row's data reaches JS until it is known to fit.
+    const rows = db.prepare(`SELECT kind, id, message_id, session_id, time_created, bytes FROM (
+        SELECT * FROM (SELECT 'message' AS kind, id, NULL AS message_id, session_id, time_created, octet_length(data) AS bytes
+          FROM message WHERE session_id IN (${marks}) AND (${during}) ORDER BY time_created LIMIT ?)
+        UNION ALL
+        SELECT * FROM (SELECT 'part' AS kind, id, message_id, session_id, time_created, octet_length(data) AS bytes
+          FROM part WHERE session_id IN (${marks}) AND (${during}) ORDER BY time_created LIMIT ?)
+      ) ORDER BY time_created, kind = 'part', id`)
+      .all(...ids, ...bounds, MAX_MESSAGES, ...ids, ...bounds, MAX_PARTS) as RowMeta[];
+    if (rows.length === 0) return '';
+    const readData = {
+      message: db.prepare('SELECT data FROM message WHERE id = ?').pluck(),
+      part: db.prepare('SELECT data FROM part WHERE id = ?').pluck(),
+    };
+    const render = (row: RowMeta): string => {
+      const base = {
+        kind: row.kind, id: row.id, ...(row.kind === 'part' ? { messageId: row.message_id } : {}),
+        sessionId: row.session_id, timestamp: new Date(row.time_created).toISOString(),
+      };
+      const stub = (bytes: number) => JSON.stringify({ ...base, truncated: true, bytes });
+      const bytes = row.bytes ?? 0;
+      if (bytes > AGENT_SESSION_MAX_LINE_BYTES) return stub(bytes);
+      const line = JSON.stringify({ ...base, data: payload(readData[row.kind].get(row.id)) });
+      // Escaping can grow a payload that was just under the limit.
+      return Buffer.byteLength(line) > AGENT_SESSION_MAX_LINE_BYTES ? stub(bytes) : line;
+    };
+    const size = (line: string) => Buffer.byteLength(line) + 1;
+
+    const headBudget = Math.floor(maxBytes / 2);
+    const tailBudget = Math.max(0, maxBytes - headBudget - 256);
+    const head = sessions.map((row) => JSON.stringify({ kind: 'session', id: row.id, parentId: row.parent_id }));
+    let headBytes = head.reduce((sum, line) => sum + size(line), 0);
+    let next = 0;
+    for (; next < rows.length; next++) {
+      const line = render(rows[next]!);
+      if (headBytes + size(line) > headBudget) break;
+      head.push(line);
+      headBytes += size(line);
+    }
+    const tail: string[] = [];
+    let tailBytes = 0;
+    let last = rows.length - 1;
+    for (; last >= next; last--) {
+      const line = render(rows[last]!);
+      if (tailBytes + size(line) > tailBudget) break;
+      tail.push(line);
+      tailBytes += size(line);
+    }
+    tail.reverse();
+    if (last >= next) {
+      let omittedBytes = 0;
+      for (let i = next; i <= last; i++) omittedBytes += rows[i]!.bytes ?? 0;
+      head.push(JSON.stringify({ truncated: 'middle', omittedLines: last - next + 1, omittedBytes }));
+    }
+    return [...head, ...tail].join('\n') + '\n';
   } finally {
     db.close();
   }

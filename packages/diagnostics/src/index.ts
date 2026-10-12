@@ -49,6 +49,7 @@ export {
 } from "./agent-logs.js";
 
 export {
+  AGENT_SESSION_MAX_LINE_BYTES,
   AGENT_SESSION_TAIL_BYTES,
   buildAgentSessionSources,
   readAgentSessionWindow,

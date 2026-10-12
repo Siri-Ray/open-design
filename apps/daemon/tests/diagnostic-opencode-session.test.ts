@@ -4,8 +4,9 @@ import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import JSZip from 'jszip';
 import { afterEach, beforeEach, expect, it } from 'vitest';
-import { buildAutomaticDiagnostics } from '@open-design/diagnostics';
+import { AGENT_SESSION_TAIL_BYTES, buildAutomaticDiagnostics } from '@open-design/diagnostics';
 import { buildAutomaticDiagnosticSources, createDiagnosticsExportHandler } from '../src/diagnostics-export.js';
+import { exportOpenCodeSession } from '../src/opencode-session-export.js';
 import { DiagnosticConsentFence } from '../src/services/diagnostic-consent.js';
 
 // OpenCode 1.x keeps sessions (and the child sessions its task tool spawns) in
@@ -187,4 +188,52 @@ it('keeps every exported run\'s rows when the runs resume the same OpenCode sess
   expect(text).toContain('Provider returned error');
   expect(text).toContain('later run failure');
   expect(text).not.toContain('between the runs');
+});
+
+it('stubs oversized OpenCode rows without reading them, keeping the export within its byte budget', async () => {
+  // A tool can write a part of many megabytes; the export must not load or
+  // serialize those payloads, only say when and how large they were.
+  await writeOpenCodeDb();
+  const db = new Database(join(root, 'xdg', 'opencode', 'opencode.db'));
+  const part = db.prepare('INSERT INTO part VALUES (?, ?, ?, ?, ?, ?)');
+  const sizes = [8, 12, 16, 20].map((mb) => mb * 1024 * 1024);
+  sizes.forEach((size, i) => {
+    const at = RUN_START + 60_000 + i * 20_000;
+    part.run(`prt_big_${i}`, 'msg_new', SESSION, at, at, JSON.stringify({ type: 'tool', state: { output: 'x'.repeat(size) } }));
+  });
+  db.close();
+
+  const text = exportOpenCodeSession(join(root, 'xdg'), SESSION, [{ startMs: RUN_START, endMs: RUN_END }], null);
+  expect(Buffer.byteLength(text)).toBeLessThanOrEqual(AGENT_SESSION_TAIL_BYTES);
+  const records = text.trim().split('\n').map((line) => JSON.parse(line) as Record<string, unknown>);
+  sizes.forEach((size, i) => {
+    const stub = records.find((record) => record.id === `prt_big_${i}`);
+    expect(stub).toMatchObject({ kind: 'part', truncated: true, timestamp: new Date(RUN_START + 60_000 + i * 20_000).toISOString() });
+    expect(stub!.bytes).toBeGreaterThanOrEqual(size);
+    expect(stub).not.toHaveProperty('data');
+  });
+  expect(text).toContain('Provider returned error');
+  const times = records.filter((record) => record.kind !== 'session').map((record) => Date.parse(String(record.timestamp)));
+  expect(times).toEqual([...times].sort((a, b) => a - b));
+});
+
+it('keeps the first and last OpenCode rows and says what was omitted when the run exceeds the budget', async () => {
+  await writeOpenCodeDb();
+  const db = new Database(join(root, 'xdg', 'opencode', 'opencode.db'));
+  const part = db.prepare('INSERT INTO part VALUES (?, ?, ?, ?, ?, ?)');
+  const count = 60;
+  for (let i = 0; i < count; i++) {
+    const at = RUN_START + 100_000 + i * 1_000;
+    part.run(`prt_mid_${i}`, 'msg_new', SESSION, at, at, JSON.stringify({ type: 'text', text: `row ${i} `.padEnd(150 * 1024, 'y') }));
+  }
+  db.close();
+
+  const text = exportOpenCodeSession(join(root, 'xdg'), SESSION, [{ startMs: RUN_START, endMs: RUN_END }], null);
+  expect(Buffer.byteLength(text)).toBeLessThanOrEqual(AGENT_SESSION_TAIL_BYTES);
+  const records = text.trim().split('\n').map((line) => JSON.parse(line) as Record<string, unknown>);
+  expect(text).toContain('Provider returned error');
+  expect(records.some((record) => record.id === `prt_mid_${count - 1}`)).toBe(true);
+  const middle = records.find((record) => record.truncated === 'middle');
+  expect(middle).toMatchObject({ truncated: 'middle' });
+  expect(middle!.omittedLines).toBeGreaterThan(0);
 });
