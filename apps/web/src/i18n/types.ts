@@ -3088,6 +3088,7 @@ export interface Dict {
   'chat.conversationsSearchPlaceholder': string;
   'chat.conversationsNoMatches': string;
   'chat.deleteConversation': string;
+  'chat.renameConversation': string;
   'chat.renameConversationLabel': string;
   'chat.deleteConversationConfirm': string;
   'chat.untitledConversation': string;
