@@ -235,6 +235,10 @@ import {
   ProjectCreateError,
 } from './state/projects';
 import { useModalWindowDragGuard } from './hooks/useModalWindowDragGuard';
+import {
+  holdProjectRunStatusReads,
+  releaseProjectRunStatusReads,
+} from './hooks/useProjectRunStatuses';
 import { resumeThumbnailLoads, suspendThumbnailLoads } from './lib/thumbnail-load-gate';
 import type {
   PluginShareAction,
@@ -3042,6 +3046,7 @@ function AppInner() {
   const rollbackOptimisticProjectCreation = useCallback(
     (projectId: string, stagedFiles: readonly File[], notice: string | null) => {
       clearLocalProject(projectId);
+      releaseProjectRunStatusReads(projectId);
       pendingProjectConversationIdsRef.current.delete(projectId);
       removeWorkspaceProjectTabs(projectId);
       setProjects((current) => current.filter((project) => project.id !== projectId));
@@ -3108,6 +3113,7 @@ function AppInner() {
           : {}),
       };
       rememberLocalProject(optimisticProjectId);
+      holdProjectRunStatusReads(optimisticProjectId);
       // A previous rollback's snapshot must not outlive the retry that
       // carries the same files; the new attempt owns them from here.
       clearHomeComposerAttachments();
@@ -3283,6 +3289,7 @@ function AppInner() {
           }
         : result.project;
       if (optimisticProjectId) {
+        releaseProjectRunStatusReads(optimisticProjectId);
         // The files now belong to this project (uploaded below); a later Home
         // visit must not revive them into the composer.
         clearHomeComposerAttachments();
