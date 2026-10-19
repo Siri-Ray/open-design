@@ -2,6 +2,7 @@
  * @module analytics/events/result-events
  * *_result event prop types (run, feedback, settings, packaged).
  */
+import type { ApiFailureReason, ApiFailureStage } from '../../api/failure-detail.js';
 import type {
   AnalyticsAttributionQuality,
   AnalyticsDistributionMechanism,
@@ -10,6 +11,7 @@ import type {
   AnalyticsPublisherClass,
   TrackingRuntimeType,
 } from '../public-params.js';
+import type { StrategySettlementFactsV2 } from '../../plugins/strategy-v2.js';
 import type { ReleaseChannel } from '@open-design/release';
 import type { ArtifactOriginEntrySurface, ArtifactOriginStatus } from '../../api/files.js';
 import type { AgentDiagnosticReason, AgentDiagnosticSeverity } from '../../api/registry.js';
@@ -356,6 +358,8 @@ export interface RunCreatedProps extends RunTaskLineageProps {
   // `TrackingDesignSystemRunEntryFrom` set; both unions stay
   // distinct so the dashboard can split funnels cleanly.
   entry_from?: TrackingRunEntrySource;
+  /** Explicit saved-comment attachments of this Run; not proof of a public-share comment. */
+  comment_ids?: string[];
   /** v4 name; entry_from remains during the compatibility window. */
   entry_source?: TrackingRunEntrySource;
   // Session-dimension run context (0-based `turn_index` within the browser
@@ -511,6 +515,10 @@ export interface RunCreatedProps extends RunTaskLineageProps {
    * common case.
    */
   od_next_blocked_reason_code?: string;
+  /** Orchestration action: question, continued, or ended. */
+  od_next_settlement_reason?: string;
+  /** Independent physical-run and reply facts, not a success verdict. */
+  od_next_settlement_facts?: StrategySettlementFactsV2;
 }
 
 export interface RunFinishedProps extends Omit<RunCreatedProps, 'area'> {
@@ -1042,12 +1050,25 @@ export interface SketchExportResultProps {
 
 export type TrackingDeployProvider = 'vercel' | 'cloudflare_pages';
 
+// Optional failure detail copied from the daemon's closed-token `failure`
+// field (see packages/contracts/src/api/failure-detail.ts). Present only on
+// failed attempts whose daemon response carried it; `error_code` keeps its
+// original meaning and values, so these fields only add resolution.
+export interface TrackingFailureDetailProps {
+  failed_stage?: ApiFailureStage;
+  failure_reason?: ApiFailureReason;
+  // HTTP status / error code returned by the upstream service (Vela API or
+  // deploy provider), when the daemon could read one.
+  upstream_status?: number;
+  upstream_error_code?: string;
+}
+
 // Fired from the deploy modal when a real publish attempt resolves — NOT when
 // the modal merely opens (that path is `artifact_export_result` with
 // export_format vercel/cloudflare_pages and only means "popover opened").
 // `result` is 'success' once the provider accepts the deploy (the link may
 // still be delayed/protected), 'failed' on a hard error or missing config.
-export interface ArtifactDeployResultProps {
+export interface ArtifactDeployResultProps extends TrackingFailureDetailProps {
   page_name: 'artifact';
   area: 'deploy_modal';
   artifact_id: string;
@@ -1072,7 +1093,19 @@ export interface ArtifactDeployResultProps {
 // for publish, or removal is confirmed for unpublish), regardless of whether a
 // newer request superseded this one in the UI. Clicking the publish button
 // reports separately as ui_click element 'publish_file'.
-export interface ArtifactPublishResultProps {
+/** Queue acceptance is separate from a click or a successful physical Run. */
+export interface ProjectCommentSendResultProps {
+  page_name: 'artifact';
+  area: 'comment_popover';
+  project_id: string;
+  project_kind: TrackingProjectKind | null;
+  result: 'accepted' | 'queued' | 'rejected';
+  submitted_comment_ids: string[];
+  /** Returned subset of explicitly saved comments; excludes temporary board notes. */
+  comment_ids: string[];
+}
+
+export interface ArtifactPublishResultProps extends TrackingFailureDetailProps {
   page_name: 'artifact';
   area: 'share_option_popover';
   artifact_id: string;
@@ -1083,8 +1116,17 @@ export interface ArtifactPublishResultProps {
   // confirmed (the one actionable failure), 'publish_failed' otherwise.
   error_code?: TrackingPublishErrorCode;
   publish_duration_ms: number;
+  /** Stable alias already known to this attempt, never a full public URL. */
+  publish_id?: string;
+  /** Only the committed receipt supplies version and time. */
+  share_version?: number;
+  published_at?: number;
   project_id: string;
   project_kind: TrackingProjectKind | null;
+  // The daemon's own error code (e.g. PUBLIC_FILE_PUBLISH_UNAVAILABLE,
+  // WORKSPACE_PROJECT_PUBLISH_DENIED) that `error_code` folds into
+  // 'publish_failed'. Token-shaped; absent when the daemon sent none.
+  daemon_error_code?: string;
 }
 
 // Outcome of an HTML file version restore from the version history modal.

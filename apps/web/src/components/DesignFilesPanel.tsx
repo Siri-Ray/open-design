@@ -2093,7 +2093,9 @@ function HtmlCardThumbnail({
         thumbnailIdentity.refreshKey,
       )?.source
       ?? getHtmlThumbnailSource(thumbnailIdentity);
-    return source === null ? null : buildSrcdoc(source, { baseHref });
+    // A thumbnail never owns playback. Only marked motion videos wait for a
+    // host grant, which this static card intentionally never provides.
+    return source === null ? null : buildSrcdoc(source, { baseHref, motionPreview: true });
   });
   const hostRef = useRef<HTMLDivElement | null>(null);
   const [scale, setScale] = useState<number | null>(null);
@@ -2140,7 +2142,7 @@ function HtmlCardThumbnail({
       )?.source
       ?? getHtmlThumbnailSource(thumbnailIdentity);
     if (cachedSource !== null) {
-      setSrcDoc(buildSrcdoc(cachedSource, { baseHref }));
+      setSrcDoc(buildSrcdoc(cachedSource, { baseHref, motionPreview: true }));
       return;
     }
     // Only an actual network load waits for viewport proximity (cached
@@ -2160,7 +2162,7 @@ function HtmlCardThumbnail({
         },
       ).then((html) => {
           if (cancelled || html === null) return;
-          const nextSrcDoc = buildSrcdoc(html, { baseHref });
+          const nextSrcDoc = buildSrcdoc(html, { baseHref, motionPreview: true });
           if (!cancelled) setSrcDoc(nextSrcDoc);
         })
         .catch(() => {

@@ -20,6 +20,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { EntryNavRail, resetWorkspaceDirectoryCache } from '../../src/components/EntryNavRail';
 import { I18nProvider } from '../../src/i18n';
+import { currentWorkspaceAccountGeneration } from '../../src/collab/workspace-identity';
+import { currentWorkspaceContextRequestToken, WORKSPACE_BILLING_REFRESH_EVENT } from '../../src/collab/useWorkspaceContext';
 
 const originalFetch = globalThis.fetch;
 
@@ -105,7 +107,7 @@ describe('account menu billing card — plan label (#146)', () => {
     const card = billingCard();
     expect(card.queryByText('团队版')).toBeNull();
     // `entry.billingTierFree` reads 免费 in zh-CN.
-    expect(card.getByText('免费')).toBeTruthy();
+    expect(card.getByText('免费版')).toBeTruthy();
   });
 
   it('labels a workspace that really holds a team subscription as 团队版', () => {
@@ -166,7 +168,11 @@ describe('account menu billing card — workspace-aware upgrade routing', () => 
     },
   ])(
     'routes a $name to the console plan surface',
-    ({ context: contextOverrides, billing: billingOverrides }) => {
+    async ({ context: contextOverrides, billing: billingOverrides }) => {
+      vi.useFakeTimers();
+      const dispatch = vi.spyOn(window, 'dispatchEvent');
+      const generation = currentWorkspaceAccountGeneration();
+      const requestToken = currentWorkspaceContextRequestToken();
       const openSpy = vi.spyOn(window, 'open').mockReturnValue(null);
       renderRail({
         context: context({
@@ -190,6 +196,17 @@ describe('account menu billing card — workspace-aware upgrade routing', () => 
         'https://open-design.ai/cloud/dashboard',
       );
       expect(target.searchParams.get('billing')).toBe('plan');
+      const billingRefreshes = () => dispatch.mock.calls.filter(([event]) => event.type === WORKSPACE_BILLING_REFRESH_EVENT);
+      await act(async () => { await vi.advanceTimersByTimeAsync(2999); });
+      expect(billingRefreshes()).toHaveLength(0);
+      expect(currentWorkspaceAccountGeneration()).toBe(generation);
+      expect(currentWorkspaceContextRequestToken()).toBe(requestToken);
+      await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+      expect(billingRefreshes()).toHaveLength(1);
+      // Opening billing (even a blocked popup) is not an account transition.
+      // These readers observe the real notifier; it is deliberately not mocked.
+      expect(currentWorkspaceAccountGeneration()).toBe(generation);
+      expect(currentWorkspaceContextRequestToken()).toBe(requestToken);
     },
   );
 
@@ -293,21 +310,34 @@ describe('account menu billing card — scoped USD balance (recvqgaMLxEdZX)', ()
     });
 
     const card = billingCard();
-    expect(card.getByText('额度')).toBeTruthy();
-    expect(card.getByText('$9.99')).toBeTruthy();
+    expect(card.getByText('钱包余额')).toBeTruthy();
+    // The design names the currency on this row (「US$9.99」, zh-CN).
+    expect(card.getByText('US$9.99')).toBeTruthy();
     expect(card.queryByText('999,330')).toBeNull();
     expect(card.queryByText('余额')).toBeNull();
     expect(card.queryByText(/积分/)).toBeNull();
   });
 
-  it('keeps a proven zero visible as $0.00', () => {
+  it('keeps a proven zero visible as US$0.00', () => {
     renderRail({
       context: context(),
       billing: billing({ totalAvailableCredits: 600_000 }),
       balanceUsd: '0',
     });
 
-    expect(billingCard().getByText('$0.00')).toBeTruthy();
+    expect(billingCard().getByText('US$0.00')).toBeTruthy();
+  });
+
+  it('preserves the team wallet battery icon and chevron', () => {
+    renderRail({
+      context: context(),
+      billing: billing({ totalAvailableCredits: 600_000 }),
+      balanceUsd: '12',
+    });
+
+    const row = billingCard().getByTestId('entry-nav-credits-row');
+    expect(row.querySelectorAll('svg')).toHaveLength(2);
+    expect(row.textContent?.trim()).toBe('钱包余额US$12.00');
   });
 });
 
