@@ -46,6 +46,7 @@ const NO_MESSAGES: ChatMessage[] = [];
 export function useCreationHandoffMessages(
   handoff: CreationHandoffInput | null,
   identity: AssistantIdentity,
+  messageIds: { user: string; assistant: string },
 ): ChatMessage[] {
   const files = handoff?.files;
   const [previewUrls, setPreviewUrls] = useState<ReadonlyArray<string | null>>([]);
@@ -67,13 +68,15 @@ export function useCreationHandoffMessages(
   if (handoff && sentAtRef.current === null) sentAtRef.current = Date.now();
 
   const prompt = handoff?.prompt ?? null;
+  const { user: userMessageId, assistant: assistantMessageId } = messageIds;
   return useMemo(() => {
     if (prompt === null) return NO_MESSAGES;
     return creationHandoffMessages({
+      messageIds: { user: userMessageId, assistant: assistantMessageId },
       prompt,
       attachments: creationHandoffAttachments(files ?? [], previewUrls),
       identity,
       at: sentAtRef.current ?? 0,
     });
-  }, [files, identity, previewUrls, prompt]);
+  }, [assistantMessageId, files, identity, previewUrls, prompt, userMessageId]);
 }

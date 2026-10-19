@@ -202,9 +202,6 @@ interface Props {
   // Consecutive messages from the same assistant share one identity header.
   // ChatPane sets this false after the first item in a contiguous run.
   showRole?: boolean;
-  // Skip the `msg-enter` fade; fixed for the row's lifetime (see ChatPane's
-  // `quietEntrance`).
-  enterQuietly?: boolean;
   // True only for the most recent assistant message.
   isLast?: boolean;
   // True only for the most recent assistant message that actually ran a turn —
@@ -310,7 +307,6 @@ const ASSISTANT_MESSAGE_COMPARED_PROPS: Array<keyof Props> = [
   'activePluginActionPaths',
   'hiddenPluginActionPaths',
   'showRole',
-  'enterQuietly',
   'isLast',
   'isLastTurn',
   'errorCardOwnerId',
@@ -420,7 +416,6 @@ function AssistantMessageImpl({
   onShareToOpenDesign,
   shareToOpenDesignBusy = false,
   showRole = true,
-  enterQuietly = false,
   isLast,
   isLastTurn,
   errorCardOwnerId = null,
@@ -1312,7 +1307,7 @@ function AssistantMessageImpl({
     <div
       id={`assistant-message-${message.id}`}
       data-testid="assistant-message"
-      className={`msg assistant${showRole ? '' : ' assistant-continuation'}${enterQuietly ? ' msg--quiet-enter' : ''}`}
+      className={`msg assistant${showRole ? '' : ' assistant-continuation'}`}
       /* 「接上一条,不再重复报名字」是状态,不是样式的私事 —— 给它自己的出口 */
       data-continuation={showRole ? 'false' : 'true'}
       data-assistant-message-id={message.id}

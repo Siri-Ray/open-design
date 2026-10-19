@@ -18,8 +18,6 @@ import type { ChatAttachment } from '@open-design/contracts';
 import type { ChatMessage } from '../../types';
 import { looksLikeImageName } from './staged-attachment';
 
-export const CREATION_HANDOFF_USER_MESSAGE_ID = 'creation-handoff:user';
-export const CREATION_HANDOFF_ASSISTANT_MESSAGE_ID = 'creation-handoff:assistant';
 
 /**
  * An attachment that is still a local `File`: it has no project raw URL yet,
@@ -66,6 +64,12 @@ export function creationHandoffAttachments(
 }
 
 export interface CreationHandoffTurnInput {
+  /**
+   * The ids the auto-sent turn will carry. The optimistic rows must be the
+   * real rows' ids, so the real turn takes over the same rows instead of
+   * replacing them (a replaced row remounts and replays its entrance).
+   */
+  messageIds: { user: string; assistant: string };
   prompt: string;
   attachments?: readonly LocalPreviewAttachment[];
   identity: AssistantIdentity;
@@ -83,7 +87,7 @@ export function creationHandoffMessages(input: CreationHandoffTurnInput): ChatMe
   const messages: ChatMessage[] = [];
   if (input.prompt || attachments.length > 0) {
     messages.push({
-      id: CREATION_HANDOFF_USER_MESSAGE_ID,
+      id: input.messageIds.user,
       role: 'user',
       content: input.prompt,
       createdAt: input.at,
@@ -91,7 +95,7 @@ export function creationHandoffMessages(input: CreationHandoffTurnInput): ChatMe
     });
   }
   messages.push({
-    id: CREATION_HANDOFF_ASSISTANT_MESSAGE_ID,
+    id: input.messageIds.assistant,
     role: 'assistant',
     content: '',
     agentId: input.identity.agentId,

@@ -947,15 +947,27 @@ interface Props {
    * this project can produce a post-run extraction. */
   onRunActivityChange?: (projectId: string, active: boolean) => void;
   /**
-   * The Home send this project was just created from, while its first
-   * transcript is still settling (OPEND-2170). Non-null keeps the hand-off's
-   * chat card on top of the chat column — the same prompt bubble and
-   * preparing row the pending frame already drew — so the column never shows
-   * the whole-pane spinner, the transcript skeleton, or an empty log between
-   * the create answering and the auto-sent turn painting. App clears it on
-   * `onCreationHandoffSettled`.
+   * The Home send this project was just created from (OPEND-3334). App mounts
+   * this view on the click, before `POST /api/projects` answers, and keeps
+   * the record until the first transcript settles (OPEND-2170):
+   *
+   * - `persisted: false` — the project row does not exist on the daemon yet.
+   *   Every project read is held ({@link projectReadsHeldForCreation}); the
+   *   view draws only what this tab already knows.
+   * - `conversationId` — the seed conversation's id, minted with the project
+   *   id, so the chat pane is keyed by its final conversation from the first
+   *   frame and never re-keys when the conversation list answers.
+   * - `prompt` / `files` — the optimistic first turn, drawn under the ids the
+   *   auto-send will use, so the real turn takes over the same rows.
+   *
+   * App clears it on `onCreationHandoffSettled`.
    */
-  creationHandoff?: { prompt: string; files?: readonly File[] } | null;
+  creationHandoff?: {
+    prompt: string;
+    files?: readonly File[];
+    conversationId?: string | null;
+    persisted: boolean;
+  } | null;
   /** The first transcript is on screen (or failed to load): drop the card. */
   onCreationHandoffSettled?: (projectId: string) => void;
 }
@@ -1397,6 +1409,16 @@ function stableIdentityDigest(value: string): string {
     hash = BigInt.asUintN(64, hash * 0x100000001b3n);
   }
   return hash.toString(36).padStart(13, '0');
+}
+
+/**
+ * Whether this view's project resources are off limits: a Home send's project
+ * whose create has not answered yet. Every project read waits on this.
+ */
+export function projectReadsHeldForCreation(
+  creationHandoff: { persisted: boolean } | null | undefined,
+): boolean {
+  return Boolean(creationHandoff && !creationHandoff.persisted);
 }
 
 function homeAutoSendIdentity(projectId: string): Pick<
@@ -2154,6 +2176,11 @@ export function ProjectView({
   onCreationHandoffSettled,
 }: Props) {
   const { locale, t } = useI18n();
+  // A Home send mounts this view before the project row exists on the daemon
+  // (OPEND-3334). Until it does, no project resource is read: every read
+  // would 404, and an unpersisted project must not fan out conversation,
+  // file, or presence requests. The view draws only what this tab knows.
+  const projectReadsHeld = projectReadsHeldForCreation(creationHandoff);
   const amrAuthRetryMountIdRef = useRef<string | null>(null);
   if (amrAuthRetryMountIdRef.current === null) {
     amrAuthRetryMountIdRef.current = randomUUID();
@@ -2225,6 +2252,7 @@ export function ProjectView({
     workspaceContext,
     project.workspaceId,
     initialWorkspaceScope,
+    !projectReadsHeld,
   );
   // The project's resolved scope when there is one. While that first read is
   // pending, the persisted project binding may witness the matching caller;
@@ -2410,7 +2438,7 @@ export function ProjectView({
   // Team collaboration: presence for a shared project. Dormant (no heartbeat,
   // renders nothing) unless the workspace context marks the viewer an active
   // team member — safe to mount unconditionally.
-  const projectCollab = useProjectCollab(project?.id ?? null, {
+  const projectCollab = useProjectCollab(projectReadsHeld ? null : project?.id ?? null, {
     workspaceContext: projectRunWorkspaceContext,
     workspaceContextLoading: projectWorkspaceScopeState.loading,
     initialMaterializationPending,
@@ -2483,6 +2511,7 @@ export function ProjectView({
     projectRunWorkspaceContext,
     project.workspaceId,
     initialProjectDetail,
+    !projectReadsHeld,
   );
   const detailedProject = projectDetail.project?.id === project.id ? projectDetail.project : null;
   const currentProject = reconcileProjectDetail(
@@ -2814,6 +2843,7 @@ export function ProjectView({
     project.id,
     designMdRefreshKey,
     projectRunWorkspaceContext,
+    !projectReadsHeld,
   );
   const finalize = useFinalizeProject(project.id, projectRunWorkspaceContext);
   const terminalLauncher = useTerminalLaunch();
@@ -3664,6 +3694,7 @@ export function ProjectView({
   // pre-conversations, or a freshly created one whose default seed got
   // dropped), create one on the fly.
   useEffect(() => {
+    if (projectReadsHeld) return;
     let cancelled = false;
     const revalidatingCurrentProject =
       conversationsLoadedProjectIdRef.current === project.id;
@@ -3768,6 +3799,7 @@ export function ProjectView({
     commitPreviewComments,
     conversationMaterializationGenerationController,
     project.id,
+    projectReadsHeld,
     projectRunAuthorityKey,
   ]);
 
@@ -4539,12 +4571,13 @@ export function ProjectView({
     options?: { freshProjectFiles?: boolean },
     onAcceptedFilesGeneration?: (generation: number) => void,
   ): Promise<ProjectFile[]> => {
+    if (projectReadsHeld) return [];
     const [nextFiles] = await Promise.all([
       refreshProjectFiles({ fresh: options?.freshProjectFiles }, onAcceptedFilesGeneration),
       refreshLiveArtifacts(),
     ]);
     return nextFiles;
-  }, [refreshLiveArtifacts, refreshProjectFiles]);
+  }, [projectReadsHeld, refreshLiveArtifacts, refreshProjectFiles]);
 
   const recordManualFileWrite = useCallback((file: ProjectFile) => {
     for (const [controller, run] of manualFileWritesByRunRef.current) {
@@ -13351,29 +13384,24 @@ export function ProjectView({
   // turn's first frame is already known: ChatPane draws it from these two
   // optimistic messages with its own components, so the real turn replaces
   // it like for like (OPEND-3334). Any real message wins at once.
+  const creationHandoffMessageIds = useMemo(() => {
+    const identity = homeAutoSendIdentity(project.id);
+    return { user: identity.userMessageId!, assistant: identity.assistantMessageId! };
+  }, [project.id]);
   const creationHandoffMessages = useCreationHandoffMessages(
     creationHandoff,
     selectedAssistantIdentity,
+    creationHandoffMessageIds,
   );
   const creationHandoffTurnShown = creationHandoffActive && messages.length === 0;
-  // The hand-off's pane mounts before the project's first conversation id
-  // resolves. That resolution is the same pane learning its id, not a
-  // conversation switch, so it must not re-key (and remount) the pane: the
-  // resolved id keeps the key the pane was mounted with. A later switch still
-  // re-keys as usual (OPEND-3334).
-  const [handoffPaneConversation, setHandoffPaneConversation] = useState<{
-    adopted: string | null;
-  } | null>(() => (creationHandoff !== null && !activeConversationId ? { adopted: null } : null));
-  if (handoffPaneConversation?.adopted === null && activeConversationId) {
-    setHandoffPaneConversation({ adopted: activeConversationId });
-  }
-  const handoffAdoptedConversationId = handoffPaneConversation
-    ? handoffPaneConversation.adopted ?? activeConversationId
-    : null;
+  // The pane mounts on the click, before the conversation list answers; the
+  // seed conversation's id is already known (minted with the project), so the
+  // pane is keyed by it from the first frame and the list's answer does not
+  // re-key it.
   const chatPaneConversationKey =
-    activeConversationId && activeConversationId === handoffAdoptedConversationId
-      ? 'conversation-unavailable'
-      : activeConversationId ?? 'conversation-unavailable';
+    activeConversationId
+    ?? creationHandoff?.conversationId
+    ?? 'conversation-unavailable';
   // A project born from the Home send starts with no files, and the pending
   // frame already drew the empty state. Keep drawing it (inert) until the
   // first listing is accepted instead of flipping to "Loading…" in between;
@@ -13694,11 +13722,9 @@ export function ProjectView({
               // The conversation id is part of the key so switching conversations
               // resets internal scroll/draft state inside ChatPane and ChatComposer.
               key={`${project.id}:${chatPaneConversationKey}:${chatSeed?.id ?? 'ready'}`}
+              // The optimistic first turn carries the auto-send's ids, so the
+              // real rows take over these rows in place (OPEND-3334).
               messages={creationHandoffTurnShown ? creationHandoffMessages : messages}
-              // The hand-off's first turn is already on screen (the pending
-              // frame drew it); neither this remount nor the real rows that
-              // replace the optimistic ones may fade it in again.
-              quietEntrance={creationHandoffActive}
               // The optimistic turn is a running turn: the composer shows the
               // same stop control the auto-sent turn will, so it does not swap
               // at the hand-off. There is no run to stop yet.
