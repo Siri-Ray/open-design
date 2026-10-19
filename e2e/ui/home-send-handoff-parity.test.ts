@@ -52,20 +52,44 @@ function deferred() {
   return { promise, resolve };
 }
 
-/** Hold POST /api/projects until released so the pending frame can be captured at rest. */
+/**
+ * Hold POST /api/projects until released so the pending phase can be captured
+ * at rest. Records the client-minted project id and every request the page
+ * makes before the create answers.
+ */
 async function holdProjectCreate(page: Page) {
   const release = deferred();
   let requested = false;
+  let projectId: string | null = null;
+  let answered = false;
+  const beforeAnswer: string[] = [];
+  page.on('request', (request) => {
+    if (answered) return;
+    const url = new URL(request.url());
+    beforeAnswer.push(`${request.method()} ${url.pathname}${url.search}`);
+  });
+  page.on('response', (response) => {
+    const request = response.request();
+    if (request.method() === 'POST' && new URL(request.url()).pathname === '/api/projects') {
+      answered = true;
+    }
+  });
   await page.route('**/api/projects', async (route) => {
     if (route.request().method() !== 'POST') {
       await route.fallback();
       return;
     }
     requested = true;
+    projectId = (route.request().postDataJSON() as { id?: string } | null)?.id ?? null;
     await release.promise;
     await route.continue();
   });
-  return { release: release.resolve, requested: () => requested };
+  return {
+    release: release.resolve,
+    requested: () => requested,
+    projectId: () => projectId,
+    requestsBeforeAnswer: () => [...beforeAnswer],
+  };
 }
 
 /**
@@ -256,6 +280,15 @@ test('[P0] the chat and workspace columns do not change across the Home → proj
     chat: await chat.screenshot({ animations: 'disabled' }),
     workspace: await workspace.screenshot({ animations: 'disabled' }),
   };
+
+  // Nothing project-scoped went out while the project did not exist: the view
+  // is mounted from the click, but holds its reads until the create answers.
+  const projectId = create.projectId();
+  expect(projectId, 'the create carried the client-minted id').toBeTruthy();
+  const earlyProjectReads = create
+    .requestsBeforeAnswer()
+    .filter((line) => line.includes(`/api/projects/${projectId}`) || line.includes(`projectId=${projectId}`));
+  expect(earlyProjectReads, 'project-scoped requests before the create answered').toEqual([]);
 
   await expectColumnParity(page, '.split-chat-slot', 'chat-column', { before: before.chat, after: after.chat });
   await expectColumnParity(page, '.split > .workspace', 'workspace-column', { before: before.workspace, after: after.workspace });
