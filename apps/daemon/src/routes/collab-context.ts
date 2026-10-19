@@ -5,6 +5,7 @@ import type {
   CollabCloudMembersResponse,
   TeamProject,
   WorkspaceBillingCatalog,
+  WorkspaceBillingPreflight,
   WorkspaceBillingCatalogResponse,
   WorkspaceBillingCheckoutResponse,
   WorkspaceBillingInterestRequest,
@@ -43,6 +44,9 @@ import {
 import {
   fetchBillingCheckoutUrl,
   fetchVelaBillingCatalog,
+  fetchVelaBillingPreflight,
+  fetchVelaBillingFundingCheck,
+  isVelaWorkspaceAuthorizationError,
   fetchVelaWorkspaceBillingProjection,
   fetchVelaBillingSummary,
   type VelaWorkspaceBillingProjection,
@@ -145,6 +149,10 @@ export interface RegisterCollabContextRoutesDeps {
   createInvite?: (input: CreateWorkspaceInviteInput) => Promise<CreateInviteOutcome>;
   /** Injectable for tests; defaults to the vela billing CLI 收口. */
   fetchBilling?: () => Promise<WorkspaceBillingSummary | null>;
+  fetchBillingFundingCheck?: (workspaceId: string, modelId: string | null) => Promise<WorkspaceBillingPreflight | null>;
+  fetchBillingPreflight?: (workspaceId: string, modelId: string | null) => Promise<WorkspaceBillingPreflight | null>;
+  /** Capability and gap-free upstream health for the currently verified identity. */
+  quotaRealtimeHealthy?: (workspaceId: string) => boolean;
   /** Injectable for tests; returns one backend-proven v2 workspace wallet. */
   fetchWorkspaceBalance?: (workspaceId: string) => Promise<WorkspaceWalletBalance | null>;
   /** Injectable for tests; returns the additive atomic plan+wallet projection. */
@@ -506,6 +514,9 @@ export function registerCollabContextRoutes(app: Express, deps: RegisterCollabCo
       const workspaceId = verified.context.workspaceId;
       const sse = createSseResponse(res);
       const sink: WorkspaceEventSink = (payload) => {
+        if (payload.type === 'coding-plan-usage-changed' &&
+            (payload.workspaceId !== workspaceId ||
+             payload.workspaceMemberId !== verified.context.workspaceMemberId)) return;
         const type =
           payload && typeof payload === 'object' && 'type' in payload
             ? String((payload as { type: unknown }).type)
@@ -864,6 +875,30 @@ export function registerCollabContextRoutes(app: Express, deps: RegisterCollabCo
     }
   });
 
+  // This upstream call authorizes the current member itself. It must not wait
+  // for the display-billing projection or spawn an agent run.
+  app.get('/api/workspace/billing/preflight', async (req, res) => {
+    const workspaceId = typeof req.query.workspaceId === 'string' ? req.query.workspaceId.trim() : '';
+    const modelId = typeof req.query.modelId === 'string' ? req.query.modelId.trim() || null : null;
+    if (!workspaceId || (modelId && modelId.length > 256)) {
+      return res.status(400).json({ error: 'invalid_billing_scope' });
+    }
+    try {
+      const preflight = await (deps.fetchBillingFundingCheck ?? ((id, model) =>
+        fetchVelaBillingFundingCheck(id, model, { configuredEnv: configuredEnv() })))(workspaceId, modelId);
+      if (!preflight || preflight.workspaceId !== workspaceId || preflight.modelId !== modelId) {
+        return res.status(503).json({ error: 'billing_preflight_unavailable' });
+      }
+      res.setHeader('Cache-Control', 'private, no-store');
+      return res.json({ preflight });
+    } catch (error) {
+      if (isVelaWorkspaceAuthorizationError(error)) {
+        return res.status(403).json({ error: 'workspace_not_authorized' });
+      }
+      return res.status(503).json({ error: 'billing_preflight_unavailable' });
+    }
+  });
+
   app.get('/api/workspace/billing', async (req, res) => {
     const scope = typeof req.query.scope === 'string' ? req.query.scope.trim() : '';
     const requestedWorkspaceId =
@@ -1015,6 +1050,19 @@ export function registerCollabContextRoutes(app: Express, deps: RegisterCollabCo
           }
         : {}),
     };
+    if (req.query.includePreflight === '1') {
+      const modelId = typeof req.query.modelId === 'string' ? req.query.modelId.trim() || null : null;
+      try {
+        const preflight = await (deps.fetchBillingPreflight ?? ((id, model) =>
+          fetchVelaBillingPreflight(id, model, { configuredEnv: configuredEnv() })))(requestedWorkspaceId, modelId);
+        body.preflight = preflight?.workspaceId === requestedWorkspaceId &&
+          preflight.workspaceMemberId === membership.workspaceMemberId ? preflight : null;
+      } catch (error) {
+        if (isVelaWorkspaceAuthorizationError(error)) return res.status(403).json({ error: 'workspace_not_authorized' });
+        throw error;
+      }
+      body.quotaRealtime = { healthy: deps.quotaRealtimeHealthy?.(requestedWorkspaceId) === true };
+    }
     return res.json(body);
   });
 

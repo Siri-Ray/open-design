@@ -1,3 +1,4 @@
+import { reportProjectFailure } from '../observability/experience-diagnostics';
 import {
   type DragEvent,
   type ReactNode,
@@ -165,6 +166,9 @@ interface Props {
    * tab without exposing those tabs in another scope.
    */
   identityScopeKey?: string | null;
+  /** A witnessed public URL may remain on its exact file route after sign-out;
+   * the old account's tabs must still be discarded. */
+  preserveSignedOutShareRoute?: boolean;
   /**
    * Workspace headers for the per-project run lookups behind the dropdown's
    * status glyphs and the hover preview's cover read. Optional: without it the
@@ -859,6 +863,7 @@ export function WorkspaceTabsBar({
   activeProjectWorkspaceId,
   onboardingCompleted = false,
   identityScopeKey,
+  preserveSignedOutShareRoute = false,
   workspaceContext = null,
   onRenameProject,
   onDuplicateProject,
@@ -1047,6 +1052,14 @@ export function WorkspaceTabsBar({
     () => new Map(projects.map((project) => [project.id, project])),
     [projects],
   );
+
+  useEffect(() => {
+    for (const tab of state.tabs) {
+      if (tab.kind !== 'project' || (!dockMenuOpen && tab.id !== state.activeTabId)) continue;
+      const project = projectById.get(tab.projectId);
+      if (project) reportProjectFailure(project, 'workspace_tabs');
+    }
+  }, [dockMenuOpen, state.tabs, state.activeTabId, projectById]);
 
   // Project-route dock (workspaceTabsDock.ts): when ProjectView registers a
   // dock element at the top of the chat column, the strip portals there and
@@ -1550,6 +1563,17 @@ export function WorkspaceTabsBar({
       setState(rehomed);
       return;
     }
+    // The anonymous scope can settle in multiple passes (account -> anon ->
+    // anonymous workspace). Keep only this witnessed public-link route while
+    // discarding every authenticated project tab on each pass.
+    if (nextAccountBucket === 'anon'
+      && preserveSignedOutShareRoute && route.kind === 'project') {
+      const anonymousTabs = freshHomeTabsState();
+      pendingScopeStateRef.current = { scopeKey: identityScopeKey, state: anonymousTabs };
+      pendingScopeRouteRef.current = null;
+      setState(anonymousTabs);
+      return;
+    }
 
     // Preserve the prior fail-closed authentication boundary: workspace
     // bouncing within one account is recoverable, but sign-out or an account
@@ -1574,6 +1598,7 @@ export function WorkspaceTabsBar({
     activeProjectWorkspaceId,
     identityScopeKey,
     onboardingActive,
+    preserveSignedOutShareRoute,
     persistedTabsStore,
     route,
   ]);
@@ -2675,6 +2700,8 @@ export function WorkspaceTabsBar({
       {deleteFlow.target && typeof document !== 'undefined' ? createPortal(
         <ProjectDeleteConfirmDialog
           projectName={deleteFlow.target.name}
+          activeShareCount={deleteFlow.activeShareCount}
+          shareReadStatus={deleteFlow.shareReadStatus}
           pending={deleteFlow.pending}
           failed={deleteFlow.failed}
           onCancel={deleteFlow.cancel}
