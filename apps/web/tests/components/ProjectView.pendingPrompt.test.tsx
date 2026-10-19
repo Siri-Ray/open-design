@@ -1820,7 +1820,7 @@ describe('ProjectView mounted from a Home send before the create answers (OPEND-
   });
 
   it('holds every project read and draws the optimistic turn under the auto-send ids', async () => {
-    const fetchSpy = vi.fn(async () => new Response('{}', { status: 200 }));
+    const fetchSpy = vi.fn(async (_input: string | URL | Request) => new Response('{}', { status: 200 }));
     vi.stubGlobal('fetch', fetchSpy);
     renderProjectView(project('p-new'), vi.fn(), { creationHandoff: pendingHandoff });
 
