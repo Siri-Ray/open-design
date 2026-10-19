@@ -383,6 +383,12 @@ interface Props {
   materializationPending?: boolean;
   /** See DesignFilesPanel's `filesAuthoritative`. */
   filesAuthoritative?: boolean;
+  /**
+   * The project row does not exist on the daemon yet (a Home send whose create
+   * has not answered, OPEND-3334): this workspace reads nothing of its own
+   * (folders, share status) until it does.
+   */
+  projectReadsHeld?: boolean;
   /** See DesignFilesPanel's `emptyLookBeforeFirstListing`. */
   emptyLookBeforeFirstListing?: boolean;
   /** Optional override for the read-only notice text. */
@@ -1402,6 +1408,7 @@ export function FileWorkspace({
   materializationPending = false,
   filesAuthoritative = true,
   emptyLookBeforeFirstListing = false,
+  projectReadsHeld = false,
   readonlyNotice,
   fileSyncBadge = null,
 }: Props) {
@@ -1786,6 +1793,7 @@ export function FileWorkspace({
   }, [projectId, workspaceContext]);
 
   useEffect(() => {
+    if (projectReadsHeld) return;
     let cancelled = false;
     // The synchronous clear happens during render (see projectFoldersProjectIdRef
     // above); here we only fetch the new project's folders.
@@ -1795,7 +1803,7 @@ export function FileWorkspace({
     return () => {
       cancelled = true;
     };
-  }, [projectId, workspaceContext]);
+  }, [projectId, projectReadsHeld, workspaceContext]);
 
   // True when the Design Files tab has nothing to attach: no files, no live
   // artifacts, no folders. Mirrors DesignFilesPanel's own empty-state gate so
@@ -3870,6 +3878,7 @@ export function FileWorkspace({
   }, [projectShareMenuOpen]);
 
   useEffect(() => {
+    if (projectReadsHeld) return;
     let cancelled = false;
     const refreshShareAccess = () => void projectIsSharedWithWorkspace(projectId, workspaceContext).then((shared) => {
       if (!cancelled) setProjectShareAccess(shared ? 'workspace' : 'private');
@@ -3880,7 +3889,7 @@ export function FileWorkspace({
       cancelled = true;
       window.removeEventListener(TEAM_PROJECTS_CHANGED_EVENT, refreshShareAccess);
     };
-  }, [projectId, projectShareMenuOpen, workspaceContext]);
+  }, [projectId, projectReadsHeld, projectShareMenuOpen, workspaceContext]);
 
   useEffect(() => {
     if (!projectShareMenuOpen) setProjectShareAccessMenuOpen(false);

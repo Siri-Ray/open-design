@@ -4318,6 +4318,7 @@ export function ProjectView({
   // load, every mutation flows through saveTabsState() which keeps DB +
   // local state coherent.
   useEffect(() => {
+    if (projectReadsHeld) return;
     let cancelled = false;
     const requestWorkspaceContext = projectRunWorkspaceContextRef.current;
     tabsLoadedRef.current = false;
@@ -4368,7 +4369,7 @@ export function ProjectView({
     return () => {
       cancelled = true;
     };
-  }, [project.id, projectRunAuthorityKey]);
+  }, [project.id, projectReadsHeld, projectRunAuthorityKey]);
 
   // Debounce the canonical (daemon + SQLite) tab-state write. The embedded
   // browser fans out url/title/favicon updates in bursts on a single page load
@@ -12742,7 +12743,11 @@ export function ProjectView({
     let isAutoSend = false;
     let amrGateWitness: AmrBalanceGateScope | undefined;
     try {
-      isAutoSend = Boolean(
+      // A Home send mounts this view before App has written the auto-send
+      // keys (they follow the create and the uploads, OPEND-3334). Its prompt
+      // is the first message, never a composer draft; the dispatch below
+      // still waits for the flag and re-reads the session values live.
+      isAutoSend = creationHandoff !== null || Boolean(
         window.sessionStorage.getItem(autoSendFirstMessageKey(project.id)),
       );
       amrGateWitness = readAutoSendAmrGateWitness(project.id);
@@ -12788,6 +12793,8 @@ export function ProjectView({
       : { projectId: project.id, value: project.pendingPrompt },
   );
   useEffect(() => {
+    // Clearing it is a write to the project row, which does not exist yet.
+    if (projectReadsHeld) return;
     const pendingPrompt = project.pendingPrompt;
     if (!pendingPrompt) return;
     if (autoSendFirstMessageRef.current) {
@@ -12801,7 +12808,7 @@ export function ProjectView({
         : { projectId: project.id, value: pendingPrompt },
     );
     onClearPendingPrompt();
-  }, [project.id, project.pendingPrompt, onClearPendingPrompt]);
+  }, [project.id, project.pendingPrompt, projectReadsHeld, onClearPendingPrompt]);
   const chatInitialDraft =
     chatSeed?.value ??
     (
@@ -13521,6 +13528,15 @@ export function ProjectView({
     if (!seed && attachments.length === 0) {
       return;
     }
+    // A view mounted from the click read no witness (App writes it after the
+    // create); read it now so Home's gate decision is still reused.
+    if (autoSendAmrGateWitnessRef.current === undefined) {
+      try {
+        autoSendAmrGateWitnessRef.current = readAutoSendAmrGateWitness(project.id);
+      } catch {
+        /* sessionStorage may be unavailable; handleSend runs its own gate. */
+      }
+    }
     const autoSendGateStillMatches =
       autoSendAmrGateWitnessRef.current !== undefined &&
       amrBalanceGateScopesMatch(
@@ -14060,6 +14076,7 @@ export function ProjectView({
           materializationPending={projectCollab.materializationPending}
           filesAuthoritative={committedFilesGeneration > 0}
           emptyLookBeforeFirstListing={emptyLookBeforeFirstListing}
+          projectReadsHeld={projectReadsHeld}
           readonlyNotice={
             projectCollab.materializationPending
               ? t('designFiles.syncing')

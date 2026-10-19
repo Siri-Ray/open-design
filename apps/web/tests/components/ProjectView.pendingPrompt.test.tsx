@@ -21,6 +21,7 @@ import {
   createConversation,
   listConversations,
   listMessages,
+  loadTabs,
   saveMessage,
 } from '../../src/state/projects';
 import { fetchPreviewComments, fetchProjectFiles } from '../../src/providers/registry';
@@ -1838,6 +1839,7 @@ describe('ProjectView mounted from a Home send before the create answers (OPEND-
     });
     expect(mockedListConversations).not.toHaveBeenCalled();
     expect(mockedFetchProjectFiles).not.toHaveBeenCalled();
+    expect(vi.mocked(loadTabs)).not.toHaveBeenCalled();
     const projectScoped = fetchSpy.mock.calls.filter(([input]) =>
       String(input).includes('/api/projects/p-new'));
     expect(projectScoped).toEqual([]);
