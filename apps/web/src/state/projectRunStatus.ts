@@ -48,16 +48,18 @@ interface RunFold {
 /**
  * What a finished run should be called.
  *
- * A `succeeded` run that ended with unfinished declared work must not read as
- * plain "done" — that is the exact lie #1247 / #1060 reported. The daemon draws
- * the same distinction in `projectDisplayStatusForRunRow`. Exported so the one
- * other surface that groups runs by outcome (the desktop pet's task centre)
- * applies the identical rule instead of restating it.
+ * The run record alone decides it (P0-24): a run that returned its final
+ * answer is `succeeded` even when declared todos are unfinished, a file failed
+ * to save, or the reply was cut short. `endedWithUnfinishedWork` is therefore
+ * deliberately ignored here — reading it as `incomplete` painted a delivered
+ * turn with the same mark as a failure. The daemon's `GET /api/projects`
+ * (`projectDisplayStatusForRunRow`) still reports `incomplete`; only the
+ * project list reads that, and it is out of this change's scope. Exported so
+ * the desktop pet's task centre applies the identical rule.
  */
 export function terminalRunDisplayStatus(
   run: ChatRunStatusResponse,
-): 'succeeded' | 'incomplete' | 'failed' | 'canceled' {
-  if (run.status === 'succeeded' && run.endedWithUnfinishedWork) return 'incomplete';
+): 'succeeded' | 'failed' | 'canceled' {
   return run.status as 'succeeded' | 'failed' | 'canceled';
 }
 
@@ -196,14 +198,18 @@ export function writeStoredAcknowledgedRuns(acknowledged: AcknowledgedRuns): voi
  * (OPEND-2795).
  *
  * An acknowledged ✓ is DROPPED (`undefined`: the row goes back to its default
- * mark), not drawn quieter. Every other status is live and stays: a running,
- * blocked or failed project is not a notice the user can spend.
+ * mark), not drawn quieter. A stopped run is dropped too: being stopped is not
+ * a failure (P0-24), and the interrupted badge it used to share with `failed`
+ * told users their stop had broken something. Every other status is live and
+ * stays: a running, blocked or failed project is not a notice the user can
+ * spend.
  */
 export function displayStatusForSummary(
   projectId: string,
   summary: ProjectRunSummary,
   acknowledged: AcknowledgedRuns,
 ): ProjectDisplayStatus | undefined {
+  if (summary.status === 'canceled') return undefined;
   if (
     summary.status === 'succeeded'
     && summary.latestTerminalRunId !== undefined

@@ -2442,9 +2442,9 @@ export function ChatPane({
    * 这一轮**确实到了终态失败**。
    *
    * `retryAssistant` 本身就是这个判据:它走
-   * `isRetryableAssistantTerminalFailure`,既认进程级 `runStatus:'failed'`,
-   * 也认「进程成了、东西没交出来」的 `no_result` / `delivery_failed` ——
-   * 恢复入口这一族本来就共用它当锚点,兜底卡没有理由另立一套。
+   * `isRetryableAssistantTerminalFailure`,只认运行记录的 `runStatus:'failed'`
+   * (P0-24:产物有没有交出来不改变本轮状态)—— 恢复入口这一族本来就共用它当锚点,
+   * 兜底卡没有理由另立一套。
    */
   const turnEndedInTerminalFailure = !!retryAssistant && !failedTurnIsAnEmptyResponse;
   const cardDescription = resolveRunErrorCardDescription({

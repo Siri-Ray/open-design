@@ -879,7 +879,10 @@ describe('ProjectView API empty response handling', () => {
     expect(view.container.querySelector('.project-instructions-modal-backdrop')).toBeNull();
   });
 
-  it('waits for delivery verification before playing the failure sound for a missing result', async () => {
+  // P0-24: the run record alone names the outcome. A missing result is still
+  // recorded as `no_result`, but the run succeeded, so its feedback is the
+  // completion sound, played once delivery verification has settled.
+  it('waits for delivery verification, then plays the completion sound for a missing result', async () => {
     mockedStreamViaDaemon.mockImplementation(async (options: DaemonStreamOptions) => {
       const { handlers } = options;
       handlers.onAgentEvent({
@@ -904,8 +907,8 @@ describe('ProjectView API empty response handling', () => {
         ),
       ).toBe(true);
     });
-    await waitFor(() => expect(mockedPlaySound).toHaveBeenCalledWith('failure-sound'));
-    expect(mockedPlaySound).not.toHaveBeenCalledWith('success-sound');
+    await waitFor(() => expect(mockedPlaySound).toHaveBeenCalledWith('success-sound'));
+    expect(mockedPlaySound).not.toHaveBeenCalledWith('failure-sound');
   });
 
   it('keeps API artifact completions on the succeeded path even when done text is empty', async () => {
@@ -1055,7 +1058,10 @@ describe('ProjectView API empty response handling', () => {
     expect(mockedWriteProjectTextFile).not.toHaveBeenCalled();
   });
 
-  it('marks an explicitly identified overwrite as failed when persistence does not deliver it', async () => {
+  // P0-24: the failed save is still recorded and reported in the transcript,
+  // but it does not turn the run into a failure, so the feedback is the
+  // completion sound.
+  it('records an explicitly identified overwrite as delivery_failed when persistence does not deliver it', async () => {
     const artifact =
       '<artifact identifier="index" type="text/html" title="Updated Home">' +
       '<!doctype html><html><head><title>Landing</title></head><body><main><h1>Landing page</h1><p>Generated design artifact with enough structure to persist.</p></main></body></html>' +
@@ -1096,8 +1102,8 @@ describe('ProjectView API empty response handling', () => {
     });
     expect(mockedWriteProjectTextFile.mock.calls[0]?.[1]).toBe('index.html');
     expect(screen.getAllByText(/couldn't save artifact/i).length).toBeGreaterThan(0);
-    await waitFor(() => expect(mockedPlaySound).toHaveBeenCalledWith('failure-sound'));
-    expect(mockedPlaySound).not.toHaveBeenCalledWith('success-sound');
+    await waitFor(() => expect(mockedPlaySound).toHaveBeenCalledWith('success-sound'));
+    expect(mockedPlaySound).not.toHaveBeenCalledWith('failure-sound');
   });
 
   it('opens the real HTML page instead of saving a pointer artifact as the preview entry', async () => {

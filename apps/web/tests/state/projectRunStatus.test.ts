@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { ChatRunStatusResponse } from '@open-design/contracts';
 
 import {
+  displayStatusForSummary,
   foldRunsToProjectRunSummaries,
   foldRunsToProjectStatuses,
 } from '../../src/state/projectRunStatus';
@@ -44,12 +45,23 @@ describe('foldRunsToProjectStatuses', () => {
     expect(statuses.get('working')).toBe('running');
   });
 
-  it('calls a succeeded run with unfinished declared work incomplete (#1247 / #1060)', () => {
+  it('calls a succeeded run with unfinished declared work succeeded (P0-24)', () => {
+    // The run record alone names the outcome: unfinished todos, a failed save
+    // or a cut-short reply never turn a delivered run into a needs-attention
+    // mark that looks like a failure.
     const statuses = foldRunsToProjectStatuses([
       run({ status: 'succeeded', endedWithUnfinishedWork: true }),
     ]);
 
-    expect(statuses.get('p1')).toBe('incomplete');
+    expect(statuses.get('p1')).toBe('succeeded');
+  });
+
+  it('lets a pending question outrank a succeeded run that left work unfinished', () => {
+    // Before P0-24 such a run read `incomplete`, which the question could not
+    // override, so a project waiting on the user showed the failure-like mark.
+    const runs = [run({ status: 'succeeded', endedWithUnfinishedWork: true })];
+
+    expect(foldRunsToProjectStatuses(runs, ['p1']).get('p1')).toBe('awaiting_input');
   });
 
   it('lets a pending question outrank a succeeded run', () => {
@@ -160,5 +172,21 @@ describe('foldRunsToProjectRunSummaries', () => {
     const statuses = foldRunsToProjectStatuses(runs, ['ok']);
     const summaries = foldRunsToProjectRunSummaries(runs, ['ok']);
     expect([...summaries].map(([id, summary]) => [id, summary.status])).toEqual([...statuses]);
+  });
+});
+
+describe('displayStatusForSummary', () => {
+  it('draws no mark for a stopped run: being stopped is not a failure (P0-24)', () => {
+    expect(displayStatusForSummary('p1', { status: 'canceled', latestTerminalRunId: 'r1' }, {})).toBeUndefined();
+  });
+
+  it('keeps drawing a failure until a newer run replaces it, even after it was opened', () => {
+    expect(displayStatusForSummary('p1', { status: 'failed', latestTerminalRunId: 'r1' }, { p1: 'r1' })).toBe('failed');
+  });
+
+  it('drops an acknowledged completion and keeps an unacknowledged one', () => {
+    const summary = { status: 'succeeded' as const, latestTerminalRunId: 'r2' };
+    expect(displayStatusForSummary('p1', summary, { p1: 'r2' })).toBeUndefined();
+    expect(displayStatusForSummary('p1', summary, { p1: 'r1' })).toBe('succeeded');
   });
 });

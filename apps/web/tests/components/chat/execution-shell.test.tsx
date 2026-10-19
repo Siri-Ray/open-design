@@ -82,7 +82,7 @@ describe('壳头', () => {
       .toContain('进行中');
   });
 
-  it('结束:纯文本「已完成」,默认收起,球撤掉', () => {
+  it('结束但秒数缺席:保留「已完成」(P0-24 未规定无秒数时的写法),默认收起,球撤掉', () => {
     const [shell] = shellsOf(call('t1', 'Bash', { command: 'ls' }), 'succeeded');
     render(<ExecutionShell shell={shell as ShellData} />);
     expect(screen.getByText('已完成')).toBeTruthy();
@@ -108,10 +108,10 @@ describe('壳头', () => {
    * 没变的三样仍然钉在这里:不挂球、不是第四种 `status`(壳仍走 `stopped` 旗标)、
    * 不退成红色的「运行失败」。
    */
-  it('手动停止:状态词是「已取消」,不挂球(秒数停住,仍不是第四种状态)', () => {
+  it('手动停止:状态词是「已停止」(P0-24),不挂球(秒数停住,仍不是第四种状态)', () => {
     const [shell] = shellsOf(call('t1', 'Bash', { command: 'ls' }), 'canceled');
     render(<ExecutionShell shell={shell as ShellData} />);
-    expect(screen.getByText('已取消')).toBeTruthy();
+    expect(screen.getByText('已停止')).toBeTruthy();
     expect(screen.queryByText('进行中')).toBeNull();
     expect(screen.queryByText('运行失败')).toBeNull();
     expect(document.querySelector('[data-orb]')).toBeNull();

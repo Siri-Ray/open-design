@@ -131,8 +131,7 @@ function failedRunWithNothingToSay(): ChatMessage {
 
 /**
  * 交付失败:agent 进程 `succeeded`,却什么都没交出来。
- * `isRetryableAssistantTerminalFailure` 把它和 `runStatus:'failed'` 一视同仁
- * 走同一条重试路,所以兜底卡必须同样覆盖它。
+ * P0-24 起本轮是否失败只看运行记录,产物有没有交出来不改变状态,所以这一轮不再出卡。
  */
 function deliveryFailedRun(
   state: 'no_result' | 'delivery_failed',
@@ -180,18 +179,12 @@ describe('终态失败 + 说不出原因:兜底报错卡', () => {
   });
 
   it.each(['no_result', 'delivery_failed'] as const)(
-    'CLI 交付失败(resultDeliveryState=%s)同样出卡并将原消息交给 Cloud 恢复',
+    'CLI 交付失败(resultDeliveryState=%s)不出卡:运行正常结束就不是失败(P0-24)',
     (state) => {
-      const message = deliveryFailedRun(state);
-      const { onRetry, onSwitchToAmrAndRetry } = renderChat(message);
+      renderChat(deliveryFailedRun(state));
 
-      expect(screen.getByTestId('chat-run-error-description').textContent).toBe(
-        'chat.runError.fallbackMessage',
-      );
-      fireEvent.click(screen.getByTestId('chat-error-switch-to-cloud'));
-      expect(onSwitchToAmrAndRetry).toHaveBeenCalledExactlyOnceWith(message);
-      expect(screen.queryByTestId('chat-error-retry')).toBeNull();
-      expect(onRetry).not.toHaveBeenCalled();
+      expect(screen.queryByTestId('chat-run-error-card')).toBeNull();
+      expect(screen.queryByTestId('chat-error-switch-to-cloud')).toBeNull();
     },
   );
 

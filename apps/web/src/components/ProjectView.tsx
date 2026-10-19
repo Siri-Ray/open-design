@@ -82,8 +82,10 @@ import {
   strategyTaskRunIndex,
 } from '../runtime/strategy-question-continuation';
 import {
+  eventsEndedByAskingUser,
   isTodoWriteToolName,
   isWorkspaceLifecycleReadable,
+  turnEndedByAskingUser,
   workspaceBillingAuthorityContext,
   workspacePrincipalKey,
   type AmrWalletSnapshot,
@@ -4348,12 +4350,19 @@ export function ProjectView({
     // file mutations or live artifacts.
     setDesignMdRefreshKey((n) => n + 1);
 
-    const status =
-      last.resultDeliveryState === 'no_result' ||
-      last.resultDeliveryState === 'delivery_failed'
-        ? 'failed'
-        : last.runStatus;
+    // P0-24: the run record alone names the outcome. A delivery outcome
+    // (`no_result` / `delivery_failed`) no longer turns a finished run into a
+    // failure notification; a stopped run sends nothing.
+    const status = last.runStatus;
     if (status !== 'succeeded' && status !== 'failed') return;
+
+    // Feedback is only for a turn the user is not watching: this view shows the
+    // active conversation, so "not viewing" is the window being hidden or
+    // unfocused. The sound follows the notification (P0-24 rule ④): no
+    // notification due, no sound.
+    const isHidden = typeof document !== 'undefined' && document.hidden;
+    const isFocused = typeof document === 'undefined' ? true : document.hasFocus();
+    if (!isHidden && isFocused) return;
 
     const cfg = config.notifications ?? DEFAULT_NOTIFICATIONS;
     if (cfg.soundEnabled) {
@@ -4361,30 +4370,26 @@ export function ProjectView({
     }
 
     if (cfg.desktopEnabled) {
-      // System notifications are useful only when the task is not already in
-      // front of the user. Sounds remain independent feedback for both states.
-      const isHidden = typeof document !== 'undefined' && document.hidden;
-      const isFocused = typeof document === 'undefined' ? true : document.hasFocus();
-      if (isHidden || !isFocused) {
-        const title = status === 'succeeded'
-          ? t('notify.successTitle')
-          : t('notify.failureTitle');
-        const fallbackBody = status === 'succeeded'
-          ? t('notify.successBody')
-          : t('notify.failureBody');
-        const trimmed = (last.content ?? '').trim();
-        const body = trimmed ? trimmed.slice(0, 80) : fallbackBody;
-        void showCompletionNotification({
-          status,
-          title,
-          body,
-          onClick: () => {
-            if (typeof window !== 'undefined') window.focus();
-          },
-        });
-      }
+      // Fixed copy, never the reply text: a reply can open with markup such as
+      // `<question-form …>` or `<od-done …/>`, which must not reach the body.
+      const asksUser =
+        status === 'succeeded'
+        && (turnEndedByAskingUser(last.content) || eventsEndedByAskingUser(last.events));
+      const body = status === 'failed'
+        ? t('notify.runFailedBody')
+        : asksUser
+          ? t('notify.needsReplyBody')
+          : t('notify.newReplyBody');
+      void showCompletionNotification({
+        status,
+        title: project.name,
+        body,
+        onClick: () => {
+          if (typeof window !== 'undefined') window.focus();
+        },
+      });
     }
-  }, [config.notifications, t]);
+  }, [config.notifications, project.name, t]);
 
   // Fire completion feedback from assistant run-status transitions rather than
   // from the local SSE listener state. A run can finish while its conversation

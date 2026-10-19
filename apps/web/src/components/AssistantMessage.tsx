@@ -531,8 +531,9 @@ function AssistantMessageImpl({
    *  · **不流了但没有 runStatus** → 历史/遗留消息。它已经结束了,只是没人给它盖过章。
    *    当成 running 的话壳永远转下去,而且 D43 的兜底(结论提到壳外)不会触发 ——
    *    整段回答会被关在壳里,`<od-card>` 这类交互块跟着一起消失。
-   *  · **产物没送达**(`no_result` / `delivery_failed`)→ 用户视角就是这一轮失败了,
-   *    与老链路的 `runFailed` 判据保持一致;失败原因交给下面的报错卡(B18)。
+   *
+   * 产物有没有送达(`no_result` / `delivery_failed`)**不参与**这一判断(P0-24):
+   * 本轮是否失败只看运行记录,文件有没有生成、保存成功、能否打开都不改变状态。
    *
    * 还有一条只对没有 runStatus 的历史消息生效,见 `legacyTurnFailed`。
    */
@@ -541,11 +542,7 @@ function AssistantMessageImpl({
     turnRunStatus = 'running';
   } else if (message.runStatus === 'canceled') {
     turnRunStatus = 'canceled';
-  } else if (
-    message.resultDeliveryState === 'no_result' ||
-    message.resultDeliveryState === 'delivery_failed' ||
-    (!message.runStatus && legacyTurnFailed(displayEvents, message.endedAt))
-  ) {
+  } else if (!message.runStatus && legacyTurnFailed(displayEvents, message.endedAt)) {
     turnRunStatus = 'failed';
   } else {
     turnRunStatus = message.runStatus ?? 'succeeded';

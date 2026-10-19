@@ -99,7 +99,7 @@ describe('AssistantMessage 执行记录', () => {
      * 不说『还在跑』…… 那是『永远停在 running』这个新 bug」。
      */
     expect(maybeRecord(container)).not.toBeNull();
-    expect(recordHead(container)).toContain('Done');
+    expect(recordHead(container)).toContain('Took');
 
     activateExecutionRecord(container);
     expect(rowCount(container)).toBe(1);
@@ -148,7 +148,7 @@ describe('AssistantMessage 执行记录', () => {
      * 副作用间接说话。B47 本身仍然成立,守卫在 `tests/runtime/chat/empty-shell.test.ts`。
      */
     expect(maybeRecord(container)).not.toBeNull();
-    expect(recordHead(container)).toContain('Done');
+    expect(recordHead(container)).toContain('Took');
     expect(recordHead(container)).not.toContain('Working');
 
     activateExecutionRecord(container);
@@ -193,7 +193,7 @@ describe('AssistantMessage 执行记录', () => {
       />,
     );
 
-    expect(recordHead(container)).toContain('Done');
+    expect(recordHead(container)).toContain('Took');
     activateExecutionRecord(container);
     expect(bodyText(container)).toContain('missing.ts');
     expect(bodyText(container)).toContain('source.ts');
@@ -426,7 +426,8 @@ describe('AssistantMessage 执行记录', () => {
 
     // 手动停止仍不是第四种 `status`(壳走 `stopped` 旗标、秒数停住),
     // 但壳头那个词报的是终态本身,不再和真的在跑的回合共用「进行中」。
-    expect(recordHead(container)).toContain('Canceled');
+    // P0-24:被停止的词是「已停止」(en "Stopped"),不是取消也不是失败。
+    expect(recordHead(container)).toContain('Stopped');
     expect(recordHead(container)).not.toContain('Working');
     expect(recordHead(container)).not.toContain('Done');
     expect(container.querySelector('[data-testid="assistant-label"]')?.textContent).toBe('Task stopped');
@@ -453,7 +454,8 @@ describe('AssistantMessage 执行记录', () => {
   });
 
   it.each(['no_result', 'delivery_failed'] as const)(
-    '产物没送达(%s)也算这一轮失败',
+    // P0-24:本轮是否失败只看运行记录,产物有没有送达不改变状态。
+    '产物没送达(%s)不算这一轮失败:壳头照常报「用时」',
     (resultDeliveryState) => {
       const { container } = render(
         <AssistantMessage
@@ -471,7 +473,8 @@ describe('AssistantMessage 执行记录', () => {
         />,
       );
 
-      expect(recordHead(container)).toContain('Run failed');
+      expect(recordHead(container)).toContain('Took');
+      expect(recordHead(container)).not.toContain('Run failed');
     },
   );
 
@@ -704,7 +707,7 @@ describe('AssistantMessage 执行记录', () => {
       ],
       { streaming: false, runStatus: 'succeeded', endedAt: 3_000 },
     ));
-    expect(recordHead(container)).toContain('Done');
+    expect(recordHead(container)).toContain('Took');
     expect(record(container).open).toBe(false);
   });
 
@@ -748,7 +751,7 @@ describe('AssistantMessage 执行记录', () => {
     activateExecutionRecord(container);
     const flow = container.querySelector('[data-testid="assistant-flow"]');
     expect(flow?.firstElementChild).toBe(record(container));
-    expect(recordHead(container)).toContain('Done');
+    expect(recordHead(container)).toContain('Took');
     expect(flow?.textContent).toContain('Here is the finished answer.');
 
     expect(bodyText(container)).toContain('Thoughts');
