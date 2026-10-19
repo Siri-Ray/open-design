@@ -1317,8 +1317,10 @@ function AppInner() {
     [],
   );
   const handleCreationHandoffSettled = useCallback((projectId: string) => {
+    // Only a persisted project's record can be released: before the create
+    // answers, the record is what holds ProjectView's project reads.
     setPendingProjectCreation((current) =>
-      current?.projectId === projectId ? null : current,
+      current?.projectId === projectId && current.created ? null : current,
     );
   }, []);
   const pendingLocalProjectIdsRef = useRef<Set<string>>(new Set());

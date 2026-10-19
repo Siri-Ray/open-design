@@ -8,10 +8,11 @@ import {
 } from '../../../src/runtime/chat/creation-handoff';
 
 const identity = { agentId: 'claude', agentName: 'Claude' };
+const messageIds = { user: 'home-auto-send-x-user', assistant: 'home-auto-send-x-assistant' };
 
 describe('creation hand-off turn (OPEND-3334)', () => {
   it('is the turn handleSend first paints: a user message and a running, empty assistant placeholder', () => {
-    const messages = creationHandoffMessages({ prompt: 'Draft the onboarding', identity, at: 1_000 });
+    const messages = creationHandoffMessages({ messageIds, prompt: 'Draft the onboarding', identity, at: 1_000 });
     expect(messages.map((message) => message.role)).toEqual(['user', 'assistant']);
     expect(messages[0]).toMatchObject({ content: 'Draft the onboarding', createdAt: 1_000 });
     expect(messages[1]).toMatchObject({
@@ -24,8 +25,13 @@ describe('creation hand-off turn (OPEND-3334)', () => {
     });
   });
 
+  it('carries the ids the auto-sent turn will carry, so the real rows take these rows over', () => {
+    const messages = creationHandoffMessages({ messageIds, prompt: 'Draft', identity, at: 1 });
+    expect(messages.map((message) => message.id)).toEqual([messageIds.user, messageIds.assistant]);
+  });
+
   it('draws no user message when there is neither a prompt nor a file', () => {
-    const messages = creationHandoffMessages({ prompt: '', identity, at: 1 });
+    const messages = creationHandoffMessages({ messageIds, prompt: '', identity, at: 1 });
     expect(messages.map((message) => message.role)).toEqual(['assistant']);
   });
 
@@ -53,7 +59,7 @@ describe('creation hand-off turn (OPEND-3334)', () => {
 
 describe('creation hand-off turn · execution record', () => {
   it('opens the same running, empty shell a just-sent real turn opens', () => {
-    const [, assistant] = creationHandoffMessages({ prompt: 'x', identity, at: 1 });
+    const [, assistant] = creationHandoffMessages({ messageIds, prompt: 'x', identity, at: 1 });
     const blocks = buildTurnBlocks({
       events: assistant!.events ?? [],
       runStatus: assistant!.runStatus,
