@@ -106,11 +106,11 @@ async function installHandoffProbe(page: Page): Promise<void> {
     new MutationObserver(() => {
       if (
         probe.pendingFrame == null
-        && document.querySelector('[data-testid="project-creation-pending-view"]')
+        && document.querySelector('[data-creation-phase="pending"]')
       ) {
         probe.pendingFrame = probe.frame;
       }
-    }).observe(document, { childList: true, subtree: true });
+    }).observe(document, { childList: true, subtree: true, attributes: true });
   });
 }
 
@@ -206,13 +206,14 @@ test('[P0] AMR send from Home enters the pending frame before the balance gate a
   await gotoEntryHome(page);
   await sendFromHome(page, 'Draft a landing page for a coffee subscription.');
 
-  const pending = page.getByTestId('project-creation-pending-view');
+  const pending = page.locator('[data-creation-phase="pending"]');
   // The frame is up while the gate is still reading the wallet: nothing was
   // created yet, and the user already sees their prompt in the project shell.
   await expect(pending).toBeVisible({ timeout: T.short });
   expect(billing.held(), 'the balance gate was in flight').toBe(true);
   expect(create.requested(), 'no project was created before the verdict').toBe(false);
-  await expect(page.getByTestId('project-creation-pending-chat')).toBeVisible();
+  // The project view is up with the user's turn already drawn.
+  await expect(pending.locator('[data-testid="chat-log"] .msg.user')).toBeVisible();
   expect(await readHandoffFrames(page)).toBeLessThanOrEqual(1);
 
   // The verdict lands → the create leaves → the run starts, all behind the
@@ -238,7 +239,7 @@ test('[P0] an empty wallet the shell already shows blocks on Home: no frame, no 
   await expect(page.getByTestId('home-hero-input')).toBeVisible({ timeout: T.medium });
   await sendFromHome(page, prompt);
 
-  const pending = page.getByTestId('project-creation-pending-view');
+  const pending = page.locator('[data-creation-phase="pending"]');
   const dialog = page.getByTestId('amr-balance-dialog');
   await expect(dialog).toBeVisible({ timeout: T.short });
   await expect(pending).toHaveCount(0);
@@ -312,7 +313,7 @@ test('[P0] a stale $0 projection: the confirmation reads a fundable wallet and t
   await expect(page.getByTestId('home-hero-input')).toBeVisible({ timeout: T.medium });
   await sendFromHome(page, 'Draft a landing page after a recharge.');
 
-  const pending = page.getByTestId('project-creation-pending-view');
+  const pending = page.locator('[data-creation-phase="pending"]');
   // The dialog may be visible only for the confirmation's round trip; what
   // must hold is that the send ends up on the frame with a create in flight.
   await expect(pending).toBeVisible({ timeout: T.medium });
@@ -330,7 +331,7 @@ test('[P1] local-agent send from Home still enters the pending frame within a fr
   await gotoEntryHome(page);
   await sendFromHome(page, 'Draft a landing page with the local agent.');
 
-  const pending = page.getByTestId('project-creation-pending-view');
+  const pending = page.locator('[data-creation-phase="pending"]');
   await expect(pending).toBeVisible({ timeout: T.short });
   expect(await readHandoffFrames(page)).toBeLessThanOrEqual(1);
   create.release();

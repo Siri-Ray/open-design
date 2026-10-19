@@ -10,14 +10,13 @@ import { T } from '@/timeouts';
 /*
  * OPEND-3334 · the Home → project hand-off must be invisible.
  *
- * A Home send opens the optimistic project frame (OPEND-2617) and ProjectView
- * takes over once `POST /api/projects` answers (OPEND-2170 keeps the frame's
- * chat card on screen until the first transcript settles). The frame is a
- * hand-drawn copy of ProjectView, so every place the copy drifted from the
- * real view becomes a jump at the hand-off: the assistant status row
- * ("Preparing…" in the old footer vs the execution record's "Working" head),
- * the composer (simplified vs real), the empty state's pills (disabled vs
- * live), the tabs dock, the switcher name.
+ * A Home send opens the project before `POST /api/projects` answers
+ * (OPEND-2617). ProjectView is mounted from the click and holds its project
+ * reads until the create answers (`data-creation-phase="pending"`); the
+ * optimistic first turn carries the auto-send's ids, so the real turn takes
+ * over the same rows. Anything that differs between the pending phase and
+ * the persisted view is a visible jump: the assistant status row, the
+ * composer, the empty state's pills, the tabs dock, the switcher name.
  *
  * Two pins, no stopwatch:
  *  1. Pixel parity: the chat column and the workspace column look the same in
@@ -88,7 +87,7 @@ async function installStatusLog(page: Page): Promise<void> {
         const text = (el.textContent ?? '').trim();
         if (!STATUS.test(text)) continue;
         if (el.getClientRects().length === 0) continue;
-        const where = el.closest('[data-creation-handoff]') ? 'handoff' : 'view';
+        const where = document.querySelector('[data-creation-phase="pending"]') ? 'handoff' : 'view';
         const className = el.className;
         const key = `${where}|${text}|${className}`;
         if (!seen.has(key)) {
@@ -126,7 +125,7 @@ async function installMountLog(page: Page): Promise<void> {
     const sample = () => {
       const pane = document.querySelector('.split-chat-slot > .pane');
       if (pane) {
-        const surface = document.querySelector('[data-testid="project-creation-pending-view"]') ? 'pending' : 'view';
+        const surface = document.querySelector('[data-creation-phase="pending"]') ? 'pending' : 'view';
         const rows: string[] = [];
         const entering: string[] = [];
         for (const row of Array.from(document.querySelectorAll('.split-chat-slot .msg'))) {
@@ -137,7 +136,7 @@ async function installMountLog(page: Page): Promise<void> {
           );
           if (fading) entering.push(id);
         }
-        const workspace = ['design-files-loading', 'design-files-empty', 'design-files-empty-unconfirmed', 'pending-design-files-empty']
+        const workspace = ['design-files-loading', 'design-files-empty', 'design-files-empty-unconfirmed']
           .find((testId) => document.querySelector(`[data-testid="${testId}"]`)) ?? 'other';
         const entry = { at: performance.now(), surface, pane: idOf(pane), rows, entering, workspace } as const;
         const key = JSON.stringify({ ...entry, at: 0 });
@@ -234,7 +233,7 @@ test('[P0] the chat and workspace columns do not change across the Home → proj
   await page.addStyleTag({ content: FREEZE_CSS });
   await sendFromHome(page, 'Gamified habit app: draft the onboarding flow.');
 
-  const pending = page.getByTestId('project-creation-pending-view');
+  const pending = page.locator('[data-creation-phase="pending"]');
   await expect(pending).toBeVisible({ timeout: T.short });
   await expect.poll(() => create.requested(), { timeout: T.medium }).toBe(true);
   // The frame at rest: nothing is in flight but the held create.
@@ -247,12 +246,12 @@ test('[P0] the chat and workspace columns do not change across the Home → proj
   };
 
   create.release();
-  // The first frame of the real view: the frame's card has been released and
-  // the user turn is on screen; the run's events are still held, so nothing
-  // else can have painted yet.
-  await expect(page.locator('[data-testid="chat-log"] .msg.user').first()).toBeVisible({ timeout: T.long });
+  // The project is persisted and its reads have answered; the run's events
+  // are still held, so nothing but the hand-off itself can have changed.
   await expect(pending).toHaveCount(0, { timeout: T.medium });
-  await expect(page.getByTestId('project-creation-pending-chat')).toHaveCount(0, { timeout: T.medium });
+  await expect(page).toHaveURL(/\/conversations\//, { timeout: T.long });
+  await expect(page.locator('[data-testid="chat-log"] .msg.user').first()).toBeVisible({ timeout: T.long });
+  await page.waitForTimeout(600);
   const after = {
     chat: await chat.screenshot({ animations: 'disabled' }),
     workspace: await workspace.screenshot({ animations: 'disabled' }),
@@ -264,13 +263,18 @@ test('[P0] the chat and workspace columns do not change across the Home → proj
 
 test('[P0] the assistant status row shows one label with one class set from the click to the first content', async ({ page }) => {
   await applyStandardMocks(page);
+  const create = await holdProjectCreate(page);
   await routeSuccessfulRuns(page, { runId: 'home-handoff-status', events: 'pending' });
   await gotoEntryHome(page);
   await sendFromHome(page, 'Gamified habit app: draft the streak screen.');
 
+  // Hold the create long enough that the pending phase is sampled at all.
+  await expect(page.locator('[data-creation-phase="pending"]')).toBeVisible({ timeout: T.short });
+  await expect.poll(() => create.requested(), { timeout: T.medium }).toBe(true);
+  await page.waitForTimeout(600);
+  create.release();
+  await expect(page.locator('[data-creation-phase="pending"]')).toHaveCount(0, { timeout: T.medium });
   await expect(page.locator('[data-testid="chat-log"] .msg.user').first()).toBeVisible({ timeout: T.long });
-  await expect(page.getByTestId('project-creation-pending-view')).toHaveCount(0, { timeout: T.medium });
-  await expect(page.getByTestId('project-creation-pending-chat')).toHaveCount(0, { timeout: T.medium });
   // Let the real view's status row settle before reading the log.
   await page.waitForTimeout(800);
   const log = await page.evaluate(() => window.__odStatusLog ?? []);
@@ -283,27 +287,33 @@ test('[P0] the assistant status row shows one label with one class set from the 
   expect(texts[0], `the only status label must be the running one:\n${readable}`).toMatch(/^(Working|进行中)$/);
   // The same head is more than one element (the record's shimmer span and
   // its summary wrapper both carry the text); what must hold is that the
-  // hand-off frame and the real view draw the SAME set of them.
+  // pending phase and the persisted view draw the SAME set of them.
   const signature = (where: 'handoff' | 'view') =>
     Array.from(new Set(log.filter((entry) => entry.where === where).map((entry) => `${entry.text}|${entry.className}`))).sort();
   const handoff = signature('handoff');
   const view = signature('view');
-  expect(handoff.length, `the hand-off frame drew no status row:\n${readable}`).toBeGreaterThan(0);
+  expect(handoff.length, `the pending phase drew no status row:\n${readable}`).toBeGreaterThan(0);
   expect(view, `the status row's elements changed across the hand-off:\n${readable}`).toEqual(handoff);
 });
 
 test('[P0] the first turn enters once and nothing remounts or reloads after the Home → project hand-off', async ({ page }) => {
   await installMountLog(page);
   await applyStandardMocks(page);
+  const create = await holdProjectCreate(page);
   await routeSuccessfulRuns(page, { runId: 'home-handoff-mounts', events: 'pending' });
   await gotoEntryHome(page);
   await sendFromHome(page, 'Gamified habit app: draft the rewards screen.');
 
-  // Past the whole hand-off: the real view, its conversation resolved, the
-  // real first turn on screen.
+  await expect(page.locator('[data-creation-phase="pending"]')).toBeVisible({ timeout: T.short });
+  await expect.poll(() => create.requested(), { timeout: T.medium }).toBe(true);
+  await page.waitForTimeout(400);
+  create.release();
+
+  // Past the whole hand-off: persisted, its conversation resolved, the real
+  // first turn on screen.
+  await expect(page.locator('[data-creation-phase="pending"]')).toHaveCount(0, { timeout: T.medium });
   await expect(page).toHaveURL(/\/conversations\//, { timeout: T.long });
   await expect(page.locator('[data-testid="chat-log"] .msg.user').first()).toBeVisible({ timeout: T.long });
-  await expect(page.getByTestId('project-creation-pending-chat')).toHaveCount(0, { timeout: T.medium });
   await page.waitForTimeout(800);
 
   const log = await page.evaluate(() => window.__odMountLog ?? []);
@@ -311,19 +321,23 @@ test('[P0] the first turn enters once and nothing remounts or reloads after the 
     .map((entry) => `${Math.round(entry.at)}ms ${entry.surface} pane#${entry.pane} rows=[${entry.rows.join(' ')}] entering=[${entry.entering.join(' ')}] ws=${entry.workspace}`)
     .join('\n');
   expect(log.length, `nothing was sampled:\n${readable}`).toBeGreaterThan(0);
-  expect(log[0]?.surface, `the pending frame was never sampled:\n${readable}`).toBe('pending');
+  expect(log[0]?.surface, `the pending phase was never sampled:\n${readable}`).toBe('pending');
 
-  // The pending frame's first rows are the only entrance. Any other row seen
-  // fading in is the turn flashing: the view taking over, the conversation id
-  // re-keying the pane, or the real rows replacing the optimistic ones.
+  // The first rows are the only entrance. Any other row seen fading in is the
+  // turn flashing: the pane re-keying on the conversation id, or the real rows
+  // replacing the optimistic ones instead of taking them over.
   const firstRows = new Set(log.find((entry) => entry.rows.length > 0)?.rows ?? []);
   const replayed = Array.from(new Set(log.flatMap((entry) => entry.entering.filter((row) => !firstRows.has(row)))));
   expect(replayed, `rows faded in again after the first paint:\n${readable}`).toEqual([]);
 
-  // The real view mounts its pane once; resolving the conversation id is not a
-  // conversation switch.
-  const viewPanes = Array.from(new Set(log.filter((entry) => entry.surface === 'view').map((entry) => entry.pane)));
-  expect(viewPanes, `the real view remounted its chat pane:\n${readable}`).toHaveLength(1);
+  // One pane from the click to the first content: the create answering and
+  // the conversation id resolving are the same view learning facts, not a
+  // hand-off to another surface (OPEND-3334).
+  const panes = Array.from(new Set(log.map((entry) => entry.pane)));
+  expect(panes, `the chat pane was replaced during the hand-off:\n${readable}`).toHaveLength(1);
+  // And one user row: the real turn takes the optimistic row over in place.
+  const userRows = Array.from(new Set(log.flatMap((entry) => entry.rows.filter((row) => row.startsWith('u')))));
+  expect(userRows, `the user turn's row was replaced during the hand-off:\n${readable}`).toHaveLength(1);
 
   // A project born from the Home send has no files; the workspace says so from
   // the first frame and never detours through "Loading…".

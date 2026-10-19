@@ -13654,12 +13654,9 @@ export function ProjectView({
     </>
   );
 
-  // The `.app` shell belongs to the caller, not to this component. App.tsx
-  // renders the same `div.app` around both this view and
-  // ProjectCreationPendingView so React reconciles one element across the
-  // hand-off. Owning the shell here would make each view mount its own
-  // element and replay the `.app` entrance animation, which reads as the
-  // project frame flashing twice on the way in from Home.
+  // The `.app` shell belongs to the caller, not to this component: App.tsx
+  // owns the `div.app` around every project-route surface, so switching
+  // between them never replays the `.app` entrance animation.
   return (
     <CollabProvider value={collabValue}>
       <CritiqueTheaterMount
@@ -13677,6 +13674,12 @@ export function ProjectView({
           resizingChatPanel && !workspaceFocused ? 'is-resizing-chat' : '',
         ].filter(Boolean).join(' ')}
         style={projectSplitStyle(workspaceFocused, splitLeftPanelWidth, workspacePanelTrack)}
+        // A Home send's creation phase, for tests and diagnostics: `pending`
+        // while the project row does not exist yet (reads held), `persisted`
+        // until the first transcript settles, absent otherwise.
+        data-creation-phase={
+          creationHandoff ? (creationHandoff.persisted ? 'persisted' : 'pending') : undefined
+        }
       >
         <div
           className={[
