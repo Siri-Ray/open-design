@@ -7329,7 +7329,24 @@ export function ProjectView({
         const preservedTaskPrefixEvents = preserveTaskPrefix
           ? [...(message.events ?? []).slice(0, taskPrefixEventCount)]
           : [];
-        if (needsFullReplay && daemonStatusIsRecoverable) {
+        // A full replay rebuilds the row from event 0 of this Run's log, so its
+        // content/events must start from the preserved task prefix — otherwise
+        // the replayed text is appended to what the row already shows. A
+        // generic-disconnect row's content came from this same log, so this
+        // holds even when the daemon's verdict is 'failed' (e.g. the Run was
+        // interrupted by a daemon restart); the replay re-delivers that
+        // failure, and dropping the disconnect marker keeps reloads from
+        // replaying (and appending) again.
+        const rebuildsFromRunLog =
+          needsFullReplay && (daemonStatusIsRecoverable || recoverableGenericDisconnectFailed);
+        // The browser stamped a generic-disconnect row's endedAt when its
+        // reconnect loop gave up; that is not when the Run ended. Adopt the
+        // daemon record's terminal time when it already has one, else leave it
+        // unset for the replay finalizers.
+        const genericDisconnectEndedAt = isTerminalRunStatus(status.status)
+          ? status.updatedAt
+          : undefined;
+        if (rebuildsFromRunLog) {
           updateMessageById(
             message.id,
             // Clear endedAt only for spuriously-failed pending messages so the
@@ -7346,9 +7363,14 @@ export function ProjectView({
               events: preservedTaskPrefixEvents,
               producedFiles: undefined,
               ...(spuriouslyFailedPending ? { endedAt: undefined } : {}),
+              ...(recoverableGenericDisconnectFailed
+                ? { endedAt: genericDisconnectEndedAt }
+                : {}),
             }),
             true,
           );
+        }
+        if (needsFullReplay && daemonStatusIsRecoverable) {
           // When the failed-message recovery moves back to running/succeeded,
           // clear any stale "daemon stream disconnected" error banner that the
           // original onError path may have set, so the chat does not show a
