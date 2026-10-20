@@ -12,6 +12,7 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { AssistantMessage } from '../../src/components/AssistantMessage';
+import { projectTurnAwaitingRunRecord } from '../../src/runtime/chat/pending-disconnect';
 import type { AgentEvent, ChatMessage } from '../../src/types';
 
 function messageWithEvents(events: AgentEvent[]): ChatMessage {
@@ -451,6 +452,36 @@ describe('AssistantMessage 执行记录', () => {
     );
 
     expect(container.querySelector('[data-testid="assistant-label"]')?.textContent).toBe('Task stopped');
+  });
+
+  it('P0-24 N15:浏览器放弃重连的一轮按「进行中」画,不写「运行失败」', () => {
+    const disconnected = {
+      ...messageWithEvents([
+        { kind: 'tool_use', id: 'tool-1', name: 'Bash', input: { command: 'ls' } },
+        { kind: 'tool_result', toolUseId: 'tool-1', content: 'ok', isError: false },
+        {
+          kind: 'status',
+          label: 'error',
+          code: 'DAEMON_STREAM_DISCONNECTED',
+          detail: 'daemon stream disconnected before run completed',
+        },
+      ]),
+      runStatus: 'failed' as const,
+    };
+    const { container } = render(
+      <AssistantMessage
+        projectKind="prototype"
+        conversationId="conv-1"
+        message={projectTurnAwaitingRunRecord(disconnected)}
+        streaming={false}
+        projectId="project-1"
+        isLast
+      />,
+    );
+
+    expect(recordHead(container)).toContain('Working');
+    expect(recordHead(container)).not.toContain('Failed');
+    expect(container.textContent).not.toContain('daemon stream disconnected');
   });
 
   it('P0-24 N8:刚发出就被停止、壳里什么都没有 → 仍有一行「已停止 0s」,且点不开', () => {

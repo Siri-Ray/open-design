@@ -1,4 +1,5 @@
 import { readRetriedErrorSurface, retriedErrorSurfaceKey, writeRetriedErrorSurface } from '../runtime/chat/retried-error-surface';
+import { runOutcomeAwaitsRunRecord } from '../runtime/chat/pending-disconnect';
 import type { ObservedPublicShareLink, ObservedShareUpdateRequest } from './share/observed-public-share-link';
 import type { ShareLoginReturn } from './share/share-login-return';
 import {
@@ -4438,6 +4439,9 @@ export function ProjectView({
       }
       if (message.runStatus !== 'succeeded' && message.runStatus !== 'failed') continue;
       if (message.runStatus === 'succeeded' && designDeliveryVerificationPending(message)) continue;
+      // P0-24 N15: the browser losing the stream is not the run's outcome. Do
+      // not notify, and do not mark it notified: the real result still will.
+      if (runOutcomeAwaitsRunRecord(message)) continue;
       if (!keys.some((key) => activeCompletionNotificationRunsRef.current.has(key))) continue;
       if (keys.some((key) => completedNotificationRunsRef.current.has(key))) continue;
       for (const key of keys) completedNotificationRunsRef.current.add(key);

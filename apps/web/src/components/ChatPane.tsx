@@ -139,6 +139,7 @@ import {
 import { Reconnect } from './chat/Reconnect';
 import { UserStatusCard } from './chat/UserStatusCard';
 import type { ChatReconnectView } from '../runtime/chat/reconnect-state';
+import { projectTurnAwaitingRunRecord } from '../runtime/chat/pending-disconnect';
 import { TodoCard } from './ToolCard';
 import type { BrandBrowserAssistConfirm } from './OdCard';
 import {
@@ -1483,9 +1484,20 @@ export function ChatPane({
   const analytics = useAnalytics();
   const displayMessages = useMemo(
     () => foldStrategyTaskTurns(
-      messages.filter((message) => !shouldHideEmptyBrandAssistantMessage(message, projectMetadata)),
+      messages
+        .filter((message) => !shouldHideEmptyBrandAssistantMessage(message, projectMetadata))
+        // P0-24 N15: a turn the browser only lost contact with is drawn as in
+        // progress until the run record decides it (see pending-disconnect) —
+        // while the reconnect row for that run is on screen to say so. Without
+        // the row (the user left and came back) the error card keeps catching
+        // the turn, an earlier decision N15 does not cover.
+        .map((message) => (
+          reconnect?.reason === 'transport' && message.runId === reconnect.runId
+            ? projectTurnAwaitingRunRecord(message)
+            : message
+        )),
     ),
-    [messages, projectMetadata],
+    [messages, projectMetadata, reconnect],
   );
   /**
    * 转录**画得出来**的那一份 —— 正文、右侧导轨、钉顶三处共用这一个数组。

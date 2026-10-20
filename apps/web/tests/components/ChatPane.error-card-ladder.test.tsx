@@ -29,7 +29,7 @@ vi.mock('../../src/i18n', () => ({
 
 vi.mock('../../src/components/AssistantMessage', () => ({
   AssistantMessage: ({ message }: { message: ChatMessage }) => (
-    <div data-testid={`assistant-${message.id}`}>{message.content}</div>
+    <div data-testid={`assistant-${message.id}`} data-run-status={message.runStatus}>{message.content}</div>
   ),
 }));
 
@@ -227,6 +227,37 @@ describe('R9 断线:报错卡让位给流水最后一行的重连行', () => {
    * 于是重连行不在场;而报错卡这边仍然无条件让位。两边都不说话,那一轮在屏幕上
    * 一个字都没有 —— 既没有失败的说明,也没有任何恢复入口。
    */
+  /*
+   * P0-24 N15(PRD 场景 E6):界面重连用尽**不是**这一轮的结局,以运行记录为准。
+   * 重连行在场时,这一轮的回合标题保持「进行中」,不写「运行失败」;恢复后由运行
+   * 记录给出真实结果。重连行不在场的那一档仍由报错卡接住(下面两条),N15 没有覆盖。
+   */
+  it('重连行在场时,断线那一轮按「进行中」画,不按「运行失败」画', () => {
+    const disconnected = failedMessage({}, {
+      code: GENERIC_DAEMON_DISCONNECT_CODE,
+      detail: GENERIC_DAEMON_DISCONNECT_MESSAGE,
+    });
+    renderChat(disconnected, { reconnect: reconnectExhausted, onManualReconnect: vi.fn() });
+    expect(screen.getByTestId('chat-reconnect')).toBeTruthy();
+    expect(screen.getByTestId('assistant-msg-failed').dataset.runStatus).toBe('running');
+
+    // 对照:重连行不在场时 N15 没有覆盖,这一轮照旧是失败、由报错卡接住。
+    cleanup();
+    renderChat(disconnected, { reconnect: null });
+    expect(screen.getByTestId('assistant-msg-failed').dataset.runStatus).toBe('failed');
+  });
+
+  it('重连行在场时,真正的失败(断线之后又落了别的报错)照旧按失败画', () => {
+    const message = failedMessage({
+      events: [
+        { kind: 'status', label: 'error', code: GENERIC_DAEMON_DISCONNECT_CODE, detail: GENERIC_DAEMON_DISCONNECT_MESSAGE },
+        { kind: 'status', label: 'error', code: 'AGENT_EXECUTION_FAILED', detail: RAW_STDERR },
+      ],
+    } as Partial<ChatMessage>);
+    renderChat(message, { reconnect: reconnectExhausted, onManualReconnect: vi.fn() });
+    expect(screen.getByTestId('assistant-msg-failed').dataset.runStatus).toBe('failed');
+  });
+
   it('重连行不在场时(退出项目再进来),断线那一轮必须由报错卡接住', () => {
     const { container } = renderChat(
       failedMessage({}, {
