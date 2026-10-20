@@ -1035,6 +1035,8 @@ export function createChatRunService({
       status: 'queued',
       createdAt: now,
       updatedAt: now,
+      /** Stamped by the first `start` event; null while still queued. */
+      startedAt: null as number | null,
       terminalAt: null,
       events: [],
       nextEventId: 1,

@@ -171,24 +171,20 @@ describe('foldRunsToProjectRunSummaries', () => {
     });
   });
 
-  it('keeps the finished run while a newer run is in flight', () => {
-    // The status follows the live run; the acknowledgement still names the
-    // run that last finished, which is the notice the user may have seen.
+  it('drops the previous notice once a newer run starts (P0-24: 新一轮开始后上一轮的蓝点不再显示)', () => {
+    // The status describes the newest-started run only; while it is in flight
+    // there is no finished run to acknowledge.
     const summaries = foldRunsToProjectRunSummaries([
-      run({ id: 'r1', status: 'succeeded', updatedAt: 1 }),
-      run({ id: 'r2', status: 'running', updatedAt: 2 }),
+      run({ id: 'r1', status: 'succeeded', startedAt: 1, updatedAt: 1 }),
+      run({ id: 'r2', status: 'running', startedAt: 2, updatedAt: 2 }),
     ]);
 
-    expect(summaries.get('p1')).toEqual({
-      status: 'running',
-      latestTerminalRunId: 'r1',
-      latestTerminalUpdatedAt: 1,
-    });
+    expect(summaries.get('p1')).toEqual({ status: 'running' });
   });
 
-  it('carries no run identity for a project that never finished a run', () => {
-    expect(foldRunsToProjectRunSummaries([run({ id: 'r1', status: 'queued' })]).get('p1')).toEqual({
-      status: 'queued',
+  it('carries no run identity for a project whose only run has not started', () => {
+    expect(foldRunsToProjectRunSummaries([run({ id: 'r1', status: 'queued', startedAt: null })]).get('p1')).toEqual({
+      status: 'not_started',
     });
   });
 
