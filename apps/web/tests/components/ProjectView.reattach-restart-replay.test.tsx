@@ -7,14 +7,20 @@
  * run 从 state.json 里读回来、判成 `failed`(daemon_restart),`updatedAt` 是它最后
  * 一次落盘的时刻 —— 开跑后约 5 秒。
  *
+ * run 从 state.json 里读回来、判成 `failed`(daemon_restart);`updatedAt` / `terminalAt`
+ * 都是**重启时刻**(`interruptDurableRunAfterDaemonRestart`),不是这条 run 真正停下的时刻。
+ *
  * 两处现象(main 上都能复现):
  *  1. 正文重复:重放出来的字被**追加**到已经显示过的正文后面(`working…working…`),
  *     而且错误标记还留着,每次刷新再追加一份。
  *  2. 结束时间错:壳头耗时取的是浏览器放弃重连的时刻(`onError` 盖的 `endedAt`),
- *     不是 daemon 记录的终态时间。
+ *     而 daemon 记录里有真正的终态时间时应当以记录为准。
  *
- * 判据:全量重放就是从 run 的事件日志重建这一轮,起点必须是空白(或任务前缀),
- * 与 daemon 的裁定是什么无关;daemon 已经给出终态,`endedAt` 以记录为准。
+ * 判据:
+ *  · 全量重放就是从 run 的事件日志重建这一轮,起点必须是空白(或任务前缀),
+ *    与 daemon 的裁定是什么无关;
+ *  · 重建只在内存里做,在重放结果落地之前这一轮必须仍可恢复 —— 中途刷新不许丢正文;
+ *  · daemon 记录的终态时间是真实终态时才采用;重启补判的时间是开机时刻,不能拿来当结束。
  */
 import { cleanup, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -127,10 +133,12 @@ const RUN_ID = 'run-restart-1';
 const MESSAGE_ID = 'assistant-restart-1';
 const CONVERSATION_ID = 'conversation-restart-1';
 const STARTED_AT = 1_790_000_000_000;
-/** daemon 最后一次落盘 —— 重启后读回的 `updatedAt`。 */
+/** daemon 自己判出的真实终态时刻(没有经过重启的那种失败)。 */
 const RECORD_ENDED_AT = STARTED_AT + 5_000;
 /** 浏览器 5 次重连用尽、放弃的时刻 —— 直播 `onError` 盖在 `endedAt` 上的值。 */
 const GAVE_UP_AT = STARTED_AT + 89_000;
+/** daemon 重启后补判的时刻 —— 比放弃重连还晚。 */
+const DAEMON_BOOTED_AT = STARTED_AT + 120_000;
 const TEXT = 'working…';
 const DISCONNECT_MESSAGE = 'daemon stream disconnected before run completed';
 
@@ -161,6 +169,25 @@ function disconnectedMessage(): ChatMessage {
 
 function restartedRunStatus() {
   return {
+    ...terminalRunStatus(),
+    updatedAt: DAEMON_BOOTED_AT,
+    terminalAt: DAEMON_BOOTED_AT,
+    terminalTrigger: 'daemon_restart',
+  };
+}
+
+/** 断连期间 daemon 还活着、run 自己失败了:记录里的时间就是真实终态。 */
+function agentFailedRunStatus() {
+  return {
+    ...terminalRunStatus(),
+    error: 'agent exited with code 1',
+    errorCode: 'AGENT_EXITED',
+    terminalTrigger: null,
+  };
+}
+
+function terminalRunStatus() {
+  return {
     id: RUN_ID,
     projectId: 'project-1',
     conversationId: CONVERSATION_ID,
@@ -169,6 +196,7 @@ function restartedRunStatus() {
     status: 'failed',
     createdAt: STARTED_AT,
     updatedAt: RECORD_ENDED_AT,
+    terminalAt: RECORD_ENDED_AT,
     error: 'Run interrupted because the daemon restarted.',
     errorCode: 'DAEMON_RESTARTED',
     resumable: false,
@@ -185,18 +213,27 @@ type ReattachOptions = {
   onRunStatus?: (status: string) => void;
 };
 
-/** daemon 从第 0 条重推这条 run 的日志:start、正文、重启补的 error + end(failed)。 */
-async function replayRestartedRunLog(options: ReattachOptions) {
-  options.onRunStatus?.('running');
-  options.handlers.onAgentEvent({ kind: 'status', label: 'starting', detail: 'codex' });
-  options.handlers.onDelta(TEXT);
-  options.handlers.onAgentEvent({ kind: 'text', text: TEXT });
-  options.onRunStatus?.('failed');
-  const err = Object.assign(new Error('Run interrupted because the daemon restarted.'), {
-    code: 'DAEMON_RESTARTED',
-  });
-  await options.handlers.onError(err);
+/** daemon 从第 0 条重推这条 run 的日志:start、正文,然后是终态 error + end(failed)。 */
+function replayRunLog(message: string, code: string) {
+  return async (options: ReattachOptions) => {
+    options.onRunStatus?.('running');
+    options.handlers.onAgentEvent({ kind: 'status', label: 'starting', detail: 'codex' });
+    options.handlers.onDelta(TEXT);
+    options.handlers.onAgentEvent({ kind: 'text', text: TEXT });
+    options.onRunStatus?.('failed');
+    await options.handlers.onError(Object.assign(new Error(message), { code }));
+  };
 }
+
+const replayRestartedRunLog = replayRunLog(
+  'Run interrupted because the daemon restarted.',
+  'DAEMON_RESTARTED',
+);
+
+const hasErrorCode = (message: ChatMessage | undefined, code: string) =>
+  (message?.events ?? []).some(
+    (ev) => ev.kind === 'status' && (ev as { code?: string }).code === code,
+  );
 
 function renderProjectView(options?: { daemonLive?: boolean }) {
   const project = {
@@ -276,9 +313,7 @@ describe('daemon 重启后重挂一条断连的 run', () => {
     await waitFor(() => expect(reattachDaemonRun).toHaveBeenCalled());
     await waitFor(() => {
       expect(textEvents(paneMessage()).length, '重放应当落地').toBeGreaterThan(0);
-      expect(paneMessage()?.events?.some(
-        (ev) => ev.kind === 'status' && (ev as { code?: string }).code === 'DAEMON_RESTARTED',
-      )).toBe(true);
+      expect(hasErrorCode(paneMessage(), 'DAEMON_RESTARTED')).toBe(true);
     });
 
     expect(paneMessage()?.content, '已经显示过的正文不许再拼一份').toBe(TEXT);
@@ -290,18 +325,54 @@ describe('daemon 重启后重挂一条断连的 run', () => {
     expect(paneMessage()?.runStatus).toBe('failed');
   });
 
-  it('结束时间取 daemon 记录的终态时刻,不是浏览器放弃重连的时刻', async () => {
+  it('daemon 记录的是真实终态时,结束时间以记录为准,不是浏览器放弃重连的时刻', async () => {
+    fetchChatRunStatus.mockResolvedValue(agentFailedRunStatus());
+    reattachDaemonRun.mockImplementation(replayRunLog('agent exited with code 1', 'AGENT_EXITED'));
+
+    renderProjectView();
+    await waitFor(() => expect(reattachDaemonRun).toHaveBeenCalled());
+    await waitFor(() => expect(hasErrorCode(paneMessage(), 'AGENT_EXITED')).toBe(true));
+
+    expect(paneMessage()?.content).toBe(TEXT);
+    expect(paneMessage()?.endedAt).toBe(RECORD_ENDED_AT);
+  });
+
+  it('重启补判的时刻是开机时间,不能当结束时间(否则耗时只会更长)', async () => {
     fetchChatRunStatus.mockResolvedValue(restartedRunStatus());
     reattachDaemonRun.mockImplementation(replayRestartedRunLog);
 
     renderProjectView();
     await waitFor(() => expect(reattachDaemonRun).toHaveBeenCalled());
-    await waitFor(() => {
-      expect(paneMessage()?.events?.some(
-        (ev) => ev.kind === 'status' && (ev as { code?: string }).code === 'DAEMON_RESTARTED',
-      )).toBe(true);
-    });
+    await waitFor(() => expect(hasErrorCode(paneMessage(), 'DAEMON_RESTARTED')).toBe(true));
 
-    expect(paneMessage()?.endedAt).toBe(RECORD_ENDED_AT);
+    expect(paneMessage()?.endedAt).not.toBe(DAEMON_BOOTED_AT);
+    expect(paneMessage()?.endedAt).toBe(GAVE_UP_AT);
+  });
+
+  it('重放结果落地之前刷新,这一轮仍然可恢复,日志照样重放回来', async () => {
+    fetchChatRunStatus.mockResolvedValue(restartedRunStatus());
+    // 第一次挂载:订阅已经开始,但日志一帧都还没回来。
+    reattachDaemonRun.mockImplementationOnce(() => new Promise(() => undefined));
+
+    const first = renderProjectView();
+    await waitFor(() => expect(reattachDaemonRun).toHaveBeenCalledTimes(1));
+    // 让已经排上的落盘都走完,再看此刻库里存的是什么。
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    const savedBeforeReplay = saveMessage.mock.calls
+      .map((call) => call[2] as ChatMessage)
+      .filter((saved) => saved?.id === MESSAGE_ID)
+      .at(-1);
+    first.unmount();
+
+    // 刷新:从库里存的那一份重新载入。
+    listMessages.mockResolvedValue([savedBeforeReplay ?? disconnectedMessage()]);
+    reattachDaemonRun.mockImplementation(replayRestartedRunLog);
+    renderProjectView();
+
+    await waitFor(
+      () => expect(reattachDaemonRun, '刷新后应当再订阅一次,把日志重放回来').toHaveBeenCalledTimes(2),
+    );
+    await waitFor(() => expect(hasErrorCode(paneMessage(), 'DAEMON_RESTARTED')).toBe(true));
+    expect(paneMessage()?.content).toBe(TEXT);
   });
 });
