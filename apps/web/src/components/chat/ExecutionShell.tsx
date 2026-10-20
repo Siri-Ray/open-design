@@ -271,10 +271,10 @@ export function ExecutionShell({
      * (`elapsed`,由 `Foldable` 的 meta 位画)。等用户回答的一轮也走这里 ——
      * 它的运行已经正常结束,不能再说「已完成」。
      *
-     * 秒数缺席时(不足 1 秒、历史消息缺时间戳)「用时」后面会是空的,PRD 没有规定
-     * 这时写什么,所以这一档暂时保留原来的「已完成」,等产品和设计定稿。
+     * 状态词只有四种(进行中 / 用时 / 已停止 / 运行失败),和量不量得到时长无关:
+     * 改版前的旧消息没有起止时刻时,只写「用时」不写数字(产品裁决 Q1)。
      */
-    return <span>{t(elapsed ? 'chat.record.turnElapsed' : 'chat.record.done')}</span>;
+    return <span>{t('chat.record.turnElapsed')}</span>;
   })();
 
   /**

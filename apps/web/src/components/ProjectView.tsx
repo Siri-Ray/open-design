@@ -4358,37 +4358,40 @@ export function ProjectView({
 
     // Feedback is only for a turn the user is not watching: this view shows the
     // active conversation, so "not viewing" is the window being hidden or
-    // unfocused. The sound follows the notification (P0-24 rule ④): no
-    // notification due, no sound.
+    // unfocused.
     const isHidden = typeof document !== 'undefined' && document.hidden;
     const isFocused = typeof document === 'undefined' ? true : document.hasFocus();
     if (!isHidden && isFocused) return;
 
+    // The sound belongs to the notification (P0-24 rule ④, product answer Q2):
+    // "桌面通知" decides whether one is shown, "提示音" whether it makes a sound.
+    // Desktop notifications off, permission denied or the show failing all
+    // mean no notification, and so no sound either.
     const cfg = config.notifications ?? DEFAULT_NOTIFICATIONS;
-    if (cfg.soundEnabled) {
-      playSound(status === 'succeeded' ? cfg.successSoundId : cfg.failureSoundId);
-    }
+    if (!cfg.desktopEnabled) return;
 
-    if (cfg.desktopEnabled) {
-      // Fixed copy, never the reply text: a reply can open with markup such as
-      // `<question-form …>` or `<od-done …/>`, which must not reach the body.
-      const asksUser =
-        status === 'succeeded'
-        && (turnEndedByAskingUser(last.content) || eventsEndedByAskingUser(last.events));
-      const body = status === 'failed'
-        ? t('notify.runFailedBody')
-        : asksUser
-          ? t('notify.needsReplyBody')
-          : t('notify.newReplyBody');
-      void showCompletionNotification({
-        status,
-        title: project.name,
-        body,
-        onClick: () => {
-          if (typeof window !== 'undefined') window.focus();
-        },
-      });
-    }
+    // Fixed copy, never the reply text: a reply can open with markup such as
+    // `<question-form …>` or `<od-done …/>`, which must not reach the body.
+    const asksUser =
+      status === 'succeeded'
+      && (turnEndedByAskingUser(last.content) || eventsEndedByAskingUser(last.events));
+    const body = status === 'failed'
+      ? t('notify.runFailedBody')
+      : asksUser
+        ? t('notify.needsReplyBody')
+        : t('notify.newReplyBody');
+    void showCompletionNotification({
+      status,
+      title: project.name,
+      body,
+      onClick: () => {
+        if (typeof window !== 'undefined') window.focus();
+      },
+    }).then((result) => {
+      if (result === 'shown' && cfg.soundEnabled) {
+        playSound(status === 'succeeded' ? cfg.successSoundId : cfg.failureSoundId);
+      }
+    });
   }, [config.notifications, project.name, t]);
 
   // Fire completion feedback from assistant run-status transitions rather than

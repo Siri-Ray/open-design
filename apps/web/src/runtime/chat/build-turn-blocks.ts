@@ -1712,10 +1712,15 @@ export function buildTurnBlocks(input: BuildTurnInput): TurnBlock[] {
     if (from == null || to == null) return null;
     const ms = to - from;
     /*
-     * 门槛用 `UNKNOWN_ELAPSED_BELOW_MS` 而不是 `> 0`:整张壳的跨度不到 100ms,
-     * 意思是壳里所有带时刻的事**同一批到达**(codex 的 `tool_use` 与 `tool_result`
-     * 间隔 p50 4ms),那不是「跑得快」,是「不知道」—— 和 `format.ts` 开头给
-     * 单条工具行定的判据是同一条。
+     * 两头都是这个 run 自己的起止时刻时,量出来多少就是多少:一轮刚开始就被停掉,
+     * 跨度可以真的不到 100ms,P0-24 要求它写「已停止 0s」,不是当作量不到。
+     */
+    if (openFrom != null && closeTo != null) return ms >= 0 ? ms : null;
+    /*
+     * 只靠事件时刻拼出来的跨度,门槛用 `UNKNOWN_ELAPSED_BELOW_MS` 而不是 `> 0`:
+     * 不到 100ms 意思是壳里所有带时刻的事**同一批到达**(codex 的 `tool_use` 与
+     * `tool_result` 间隔 p50 4ms),那不是「跑得快」,是「不知道」—— 和 `format.ts`
+     * 开头给单条工具行定的判据是同一条。
      */
     return ms >= UNKNOWN_ELAPSED_BELOW_MS ? ms : null;
   }

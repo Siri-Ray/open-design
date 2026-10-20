@@ -3490,7 +3490,12 @@ function FormBlock({
         onSubmit={onSubmit ? (...args) => void handleSubmit(...args) : undefined}
         submitDisabled={submitDisabled || submitting}
         visualStyleContext={visualStyleContext}
-        autoContinueAfterTimeout
+        /*
+         * No `autoContinueAfterTimeout` (P0-24 N5): an unanswered card waits for
+         * the user indefinitely. Auto-submitting after ten minutes sent the
+         * card's pre-selected defaults as if the user had chosen them, turned
+         * "需要你回复" back into a running turn and raised a second notification.
+         */
       />
       {strategyBlockedNotice ? (
         <div
