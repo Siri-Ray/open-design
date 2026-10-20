@@ -134,6 +134,65 @@ describe('foldRunsToProjectStatuses', () => {
     expect(foldRunsToProjectStatuses(runs, ['p1']).get('p1')).toBe('awaiting_input');
   });
 
+  /*
+   * P0-24 N13: OD Next runs one logical task as several physical runs. The daemon
+   * marks the finished segment succeeded first and only then starts the next
+   * one, which sits `queued` without a start until it spawns. A segment ending
+   * is not the turn ending: the sidebar keeps spinning until the final answer.
+   */
+  const task = (over: Record<string, unknown>) => ({
+    taskExecutionId: 'task-1',
+    outcome: 'running',
+    terminal: false,
+    activeRunId: 'plan',
+    ...over,
+  }) as unknown as ChatRunStatusResponse['strategyTask'];
+
+  it('keeps spinning while the next segment of the same task has not started (P0-24 N13)', () => {
+    const runs = [
+      run({ id: 'plan', conversationId: 'c', status: 'succeeded', startedAt: 1000, updatedAt: 1100,
+        strategyTask: task({ activeRunId: 'plan', nextRunId: 'produce' }) }),
+      run({ id: 'produce', conversationId: 'c', status: 'queued', startedAt: null, createdAt: 1090, updatedAt: 1090 }),
+    ];
+    expect(foldRunsToProjectStatuses(runs).get('p1')).toBe('running');
+  });
+
+  it('shows the next segment\'s own result when it ended without ever starting (P0-24 N13)', () => {
+    const runs = [
+      run({ id: 'plan', conversationId: 'c', status: 'succeeded', startedAt: 1000, updatedAt: 1100,
+        strategyTask: task({ activeRunId: 'plan', nextRunId: 'produce' }) }),
+      run({ id: 'produce', conversationId: 'c', status: 'failed', startedAt: null, createdAt: 1090, updatedAt: 1200 }),
+    ];
+    expect(foldRunsToProjectStatuses(runs).get('p1')).toBe('failed');
+  });
+
+  it('keeps the segment\'s own result when its successor is not in the feed (P0-24 N13)', () => {
+    const runs = [
+      run({ id: 'plan', conversationId: 'c', status: 'succeeded', startedAt: 1000, updatedAt: 1100,
+        strategyTask: task({ activeRunId: 'plan', nextRunId: 'produce' }) }),
+    ];
+    expect(foldRunsToProjectStatuses(runs).get('p1')).toBe('succeeded');
+  });
+
+  it('does not spin for a task that is waiting on the user rather than on a next run (P0-24 N13)', () => {
+    // An unfinished task with no next run is parked on the user's answer.
+    const runs = [
+      run({ id: 'ask', conversationId: 'c', status: 'succeeded', startedAt: 1000, updatedAt: 1100,
+        strategyTask: task({ activeRunId: 'ask' }) }),
+    ];
+    expect(foldRunsToProjectStatuses(runs, ['p1'], ['c']).get('p1')).toBe('awaiting_input');
+  });
+
+  it('does not say awaiting input for a blocked task whose question can no longer be answered (P0-24 N13)', () => {
+    const runs = [
+      run({ id: 'blocked', conversationId: 'c', status: 'succeeded', startedAt: 1000, updatedAt: 1100,
+        strategyTask: task({ activeRunId: 'blocked', outcome: 'blocked', terminal: true }) }),
+    ];
+    expect(foldRunsToProjectStatuses(runs, ['p1'], ['c']).get('p1')).toBe('succeeded');
+    // Without the per-conversation set (older daemon) the same holds.
+    expect(foldRunsToProjectStatuses(runs, ['p1']).get('p1')).toBe('succeeded');
+  });
+
   it('falls back to createdAt when the daemon predates startedAt', () => {
     expect(
       foldRunsToProjectStatuses([

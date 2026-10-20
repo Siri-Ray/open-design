@@ -92,6 +92,45 @@ function runStartedAt(run: ChatRunStatusResponse): number | null {
 }
 
 /**
+ * The run that next carries this run's logical task, when the task goes on.
+ *
+ * P0-24 N13: OD Next runs one logical task as several physical runs. The daemon
+ * marks a finished segment succeeded before it starts the next one, which waits
+ * `queued` without a start until it spawns — so that segment ending is not the
+ * turn ending. Only an explicit next run counts: an unfinished task with no
+ * next run is parked on the user (a question), not on the daemon.
+ */
+function continuationRunId(run: ChatRunStatusResponse): string | null {
+  const task = run.strategyTask;
+  if (!task || task.terminal || !isTerminalRunStatus(run.status)) return null;
+  if (task.nextRunId && task.nextRunId !== run.id) return task.nextRunId;
+  if (task.activeRunId && task.activeRunId !== run.id) return task.activeRunId;
+  return null;
+}
+
+/**
+ * The run that speaks for the turn `run` belongs to: `run` itself, or — while
+ * its task continues — the successor carrying it, even before that successor
+ * has started (it then reads queued/running) or when it ended without ever
+ * starting (its own result is the turn's, per N13 ④). A successor missing from
+ * the feed leaves `run` in charge, so a stale projection cannot spin forever.
+ */
+function runSpeakingForTurn(
+  run: ChatRunStatusResponse,
+  runsById: ReadonlyMap<string, ChatRunStatusResponse>,
+): ChatRunStatusResponse {
+  let current = run;
+  // A task has at most a handful of physical runs; the bound only guards a cycle.
+  for (let hop = 0; hop < 8; hop += 1) {
+    const nextId = continuationRunId(current);
+    const next = nextId ? runsById.get(nextId) : undefined;
+    if (!next) return current;
+    current = next;
+  }
+  return current;
+}
+
+/**
  * `Map<projectId, ProjectRunSummary>` for every project the runs cover.
  *
  * P0-24 sidebar rule: a project's status follows only the conversation that
@@ -100,6 +139,8 @@ function runStartedAt(run: ChatRunStatusResponse): number | null {
  * older failure is replaced as soon as any conversation starts a new run, and
  * a question pending in an older conversation does not surface (N3 / N4).
  * The newest-started run is by construction its conversation's latest run.
+ * An OD Next segment speaks through the run continuing its task, and a
+ * blocked task's locked question is not one the user can answer (N13).
  *
  * `awaitingInputConversationIds` names the conversations holding an
  * unanswered question form. When the daemon predates that set, the
@@ -116,6 +157,7 @@ export function foldRunsToProjectRunSummaries(
   awaitingInputConversationIds?: readonly string[],
 ): Map<string, ProjectRunSummary> {
   const current = new Map<string, { run: ChatRunStatusResponse; startedAt: number }>();
+  const runsById = new Map(runs.map((run) => [run.id, run]));
   for (const run of runs) {
     if (!run.projectId) continue;
     const startedAt = runStartedAt(run);
@@ -141,15 +183,18 @@ export function foldRunsToProjectRunSummaries(
       summaries.set(run.projectId, { status: 'not_started' });
     }
   }
-  for (const [projectId, { run }] of current) {
+  for (const [projectId, { run: startedRun }] of current) {
+    const run = runSpeakingForTurn(startedRun, runsById);
     if (run.status === 'queued' || run.status === 'running') {
       // An auto-retry backoff moves a started run back to `queued`; it is
-      // still this conversation's run in flight.
-      summaries.set(projectId, { status: run.status });
+      // still this conversation's run in flight. A task's next segment waiting
+      // to spawn is the same turn still running, not a turn back in the queue.
+      summaries.set(projectId, { status: run === startedRun ? run.status : 'running' });
       continue;
     }
     const terminal = terminalRunDisplayStatus(run);
-    const asksUser = terminal === 'succeeded' && (
+    // A blocked task's question is locked and cannot be answered (N13 ③).
+    const asksUser = terminal === 'succeeded' && run.strategyTask?.outcome !== 'blocked' && (
       awaitingConversations
         ? run.conversationId !== null && awaitingConversations.has(run.conversationId)
         : awaitingProjects.has(projectId)
