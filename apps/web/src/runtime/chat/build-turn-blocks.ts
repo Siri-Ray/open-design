@@ -1221,6 +1221,9 @@ export function buildTurnBlocks(input: BuildTurnInput): TurnBlock[] {
       }
     }
     ensureShell();
+  } else if (input.runStatus === 'canceled') {
+    // P0-24 N8:刚发出就被停止、一条事件都没落库的一轮,也要有那一行「已停止」
+    ensureShell();
   }
   finishTurn();
   /*
@@ -1228,9 +1231,22 @@ export function buildTurnBlocks(input: BuildTurnInput): TurnBlock[] {
    * 不告诉任何人任何事。**还在跑的空壳要留** —— 它就是「进行中」那一行本身。
    */
   const turnStatus = input.runStatus ?? 'running';
+  const shellHasContent = (b: ExecutionShell): boolean => b.items.length > 0 || b.segments.length > 0;
+  /*
+   * P0-24 N8:被停止的一轮**始终**有回合标题 —— 刚发出就停、壳里一件事都没有,
+   * 也要留一行「已停止 0s」(PRD 场景 E2)。B47 当年撤掉取消档的理由是壳头写着
+   * 「进行中」、和下面那行「已取消」自相矛盾;一期起壳头已改成「已停止」,那个
+   * 矛盾不在了。只留**一张**(最前那张,排在正文之前),且只在这一轮没有别的壳留下时才留 ——
+   * 有内容的壳已经带着「已停止」的头。只回复文字的正常轮次仍按 B47 不出壳。
+   */
+  const keptStoppedShell = turnStatus === 'canceled'
+    && !blocks.some((b) => b.kind === 'shell' && shellHasContent(b))
+    ? blocks.find((b): b is ExecutionShell => b.kind === 'shell')
+    : undefined;
   const kept = blocks.filter((b) => {
     if (b.kind !== 'shell') return true;
-    if (b.items.length > 0 || b.segments.length > 0) return true;
+    if (shellHasContent(b)) return true;
+    if (b === keptStoppedShell) return true;
     // 还在跑:空壳就是「进行中」那一行本身,必须留
     if (turnIsLive) return true;
     /*
@@ -1243,6 +1259,8 @@ export function buildTurnBlocks(input: BuildTurnInput): TurnBlock[] {
      * 既没有信息,又和紧跟在下面那行「已取消」自相矛盾。用户 2026-08-27 指认:
      * 「之前不是说如果 done 之前,没有任何工具调用或 thinking 或普通文案,
      * 就不出现这个了吗?」—— B47 的原话本来就该管到这一格。
+     * (P0-24 N8 已改:取消档现在留一张空壳,见上面 `keptStoppedShell`;这里只
+     * 再丢掉多余的那些。)
      */
     return turnStatus === 'failed';
   });

@@ -453,6 +453,29 @@ describe('AssistantMessage 执行记录', () => {
     expect(container.querySelector('[data-testid="assistant-label"]')?.textContent).toBe('Task stopped');
   });
 
+  it('P0-24 N8:刚发出就被停止、壳里什么都没有 → 仍有一行「已停止 0s」,且点不开', () => {
+    const { container } = render(
+      <AssistantMessage
+        projectKind="prototype"
+        conversationId="conv-1"
+        message={{
+          ...messageWithEvents([]),
+          startedAt: 1_000,
+          endedAt: 1_400,
+          runStatus: 'canceled',
+        }}
+        streaming={false}
+        projectId="project-1"
+        isLast
+      />,
+    );
+
+    expect(recordHead(container)).toContain('Stopped');
+    expect(recordHead(container)).toContain('0s');
+    // 没有可展开的内容:Foldable 不建内容区
+    expect(recordBody(container)).toBeNull();
+  });
+
   it.each(['no_result', 'delivery_failed'] as const)(
     // P0-24:本轮是否失败只看运行记录,产物有没有送达不改变状态。
     '产物没送达(%s)不算这一轮失败:壳头照常报「用时」',
