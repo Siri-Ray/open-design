@@ -281,7 +281,9 @@ describe('durable run terminal reconciliation', () => {
     expect(first).toMatchObject({ interrupted: 1, messagesReconciled: 1, analyticsReplayed: 1 });
     expect(db.prepare(`SELECT run_status AS status, ended_at AS endedAt, events_json AS eventsJson FROM messages WHERE id = 'm1'`).get()).toMatchObject({
       status: 'failed',
-      endedAt: expect.any(Number),
+      // P0-24 N1: the run ended at its last recorded activity (the persisted
+      // update at 2_000 is newer than the 1_500 event), not at restart time.
+      endedAt: 2_000,
       eventsJson: expect.stringContaining('daemon restarted'),
     });
     expect(capture).toHaveBeenCalledWith(expect.objectContaining({

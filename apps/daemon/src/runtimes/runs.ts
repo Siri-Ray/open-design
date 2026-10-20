@@ -26,6 +26,7 @@ import {
 } from '../run-analytics-observability.js';
 import {
   interruptDurableRunAfterDaemonRestart,
+  lastRecordedRunActivityAt,
   RESTART_ERROR_CODE,
   RESTART_ERROR_MESSAGE,
 } from './run-restart-recovery.js';
@@ -841,13 +842,16 @@ export function createChatRunService({
     const statePath = path.join(runsLogDir, id, 'state.json');
     const state = readDurableRunState(statePath);
     if (!state || state.id !== id) return null;
-    const interruptedAfterRestart =
-      interruptDurableRunAfterDaemonRestart(state);
+    const eventsLogPath = path.join(runsLogDir, id, 'events.jsonl');
+    const events = readDurableRunEvents(eventsLogPath);
+    const interruptedAfterRestart = interruptDurableRunAfterDaemonRestart(
+      state,
+      Date.now(),
+      lastRecordedRunActivityAt(state, events),
+    );
     if (interruptedAfterRestart) writeDurableState(statePath, state);
     backfillDurableTerminal(state);
     if (!TERMINAL_RUN_STATUSES.has(state.status)) return null;
-    const eventsLogPath = path.join(runsLogDir, id, 'events.jsonl');
-    const events = readDurableRunEvents(eventsLogPath);
     if (
       interruptedAfterRestart
       || state.terminalRecoveryReason === 'daemon_restart'
