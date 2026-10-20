@@ -1689,7 +1689,12 @@ export async function listProjectRunsWithScope(
 export async function listRunsForProject(
   projectId: string,
   workspaceContext?: WorkspaceCollabContext | null,
-): Promise<{ runs: ChatRunStatusResponse[]; awaitingInputProjectIds: string[] } | null> {
+): Promise<{
+  runs: ChatRunStatusResponse[];
+  awaitingInputProjectIds: string[];
+  /** `undefined` when the daemon predates the per-conversation set. */
+  awaitingInputConversationIds?: string[];
+} | null> {
   try {
     const resp = await fetch(`/api/runs?projectId=${encodeURIComponent(projectId)}`, {
       ...(workspaceContext
@@ -1703,6 +1708,9 @@ export async function listRunsForProject(
       // Absent on daemons older than this field; treat as "no pending
       // question" rather than failing the whole read.
       awaitingInputProjectIds: body.awaitingInputProjectIds ?? [],
+      ...(Array.isArray(body.awaitingInputConversationIds)
+        ? { awaitingInputConversationIds: body.awaitingInputConversationIds }
+        : {}),
     };
   } catch {
     return null;

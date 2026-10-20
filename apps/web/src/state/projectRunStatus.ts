@@ -37,14 +37,6 @@ export function isTerminalRunStatus(status: string): boolean {
   return TERMINAL_RUN_STATUSES.has(status);
 }
 
-/** The newest run per project, split by whether it has finished. */
-interface RunFold {
-  /** Newest non-terminal run — an in-flight run outranks any history. */
-  active?: { status: 'queued' | 'running'; updatedAt: number };
-  /** Newest terminal run, already resolved to its display status. */
-  terminal?: { status: ProjectDisplayStatus; updatedAt: number; runId: string };
-}
-
 /**
  * What a finished run should be called.
  *
@@ -73,70 +65,101 @@ export function terminalRunDisplayStatus(
  */
 export interface ProjectRunSummary {
   status: ProjectDisplayStatus;
-  /** The newest terminal run, when the project has one. */
+  /** The run the status describes, when it has finished. */
   latestTerminalRunId?: string;
   latestTerminalUpdatedAt?: number;
+  /**
+   * The run was stopped because the client quit, not by the user's own stop
+   * click: the user was not there when it ended, so it is a new result they
+   * have not seen (P0-24 P12) and earns the same blue dot as a completion.
+   */
+  stoppedWhileAway?: boolean;
+}
+
+/**
+ * When a run began executing, for picking the project's current conversation.
+ *
+ * `startedAt` is the first `start` event. A daemon that predates it only has
+ * `createdAt`, which is the same instant for a run that never queued. A run
+ * still `queued` with no `startedAt` has not started and does not count
+ * (P0-24 N3: a queued message counts from the moment it actually starts).
+ */
+function runStartedAt(run: ChatRunStatusResponse): number | null {
+  if (typeof run.startedAt === 'number' && Number.isFinite(run.startedAt)) return run.startedAt;
+  if (run.startedAt === null) return null;
+  if (run.status === 'queued') return null;
+  return Number.isFinite(run.createdAt) ? run.createdAt : null;
 }
 
 /**
  * `Map<projectId, ProjectRunSummary>` for every project the runs cover.
  *
- * `awaitingInputProjectIds` comes from the same `/api/runs` response and is
- * what lets a blocked project be told apart from a finished one; the run that
- * asked the question reports `succeeded` and exits. Pass an empty list when the
- * daemon is too old to send it — the result then simply never says
- * `awaiting_input`, which is the pre-existing behaviour, not a regression.
+ * P0-24 sidebar rule: a project's status follows only the conversation that
+ * most recently STARTED executing a run — that run's own outcome, nothing
+ * else. Another conversation still running does not make the project spin, an
+ * older failure is replaced as soon as any conversation starts a new run, and
+ * a question pending in an older conversation does not surface (N3 / N4).
+ * The newest-started run is by construction its conversation's latest run.
+ *
+ * `awaitingInputConversationIds` names the conversations holding an
+ * unanswered question form. When the daemon predates that set, the
+ * project-level `awaitingInputProjectIds` stands in for it (the old,
+ * project-wide behaviour) rather than never saying `awaiting_input`.
+ *
+ * Deliberate divergence from the daemon's `GET /api/projects`, which still
+ * composes the most recently ENDED run and a project-wide question: that feed
+ * only serves the legacy project list and the CLI, both outside P0-24.
  */
 export function foldRunsToProjectRunSummaries(
   runs: ChatRunStatusResponse[],
   awaitingInputProjectIds: readonly string[] = [],
+  awaitingInputConversationIds?: readonly string[],
 ): Map<string, ProjectRunSummary> {
-  const folds = new Map<string, RunFold>();
-
+  const current = new Map<string, { run: ChatRunStatusResponse; startedAt: number }>();
   for (const run of runs) {
     if (!run.projectId) continue;
-    const fold = folds.get(run.projectId) ?? {};
-    if (TERMINAL_RUN_STATUSES.has(run.status)) {
-      if (!fold.terminal || run.updatedAt > fold.terminal.updatedAt) {
-        fold.terminal = {
-          status: terminalRunDisplayStatus(run),
-          updatedAt: run.updatedAt,
-          runId: run.id,
-        };
-      }
-      // Deliberate divergence from the daemon: `normalizeProjectDisplayStatus`
-      // folds `queued` into `running`, because its consumers only ever needed
-      // "is it working". `queued` is kept distinct here so a caller can pace
-      // its indicator differently (a queued project has not started yet). Both
-      // still mean the same thing to anyone who only checks for `running`, and
-      // nothing downstream may colour them apart.
-    } else if (run.status === 'queued' || run.status === 'running') {
-      if (!fold.active || run.updatedAt > fold.active.updatedAt) {
-        fold.active = { status: run.status, updatedAt: run.updatedAt };
-      }
+    const startedAt = runStartedAt(run);
+    if (startedAt === null) continue;
+    const held = current.get(run.projectId);
+    if (
+      !held
+      || startedAt > held.startedAt
+      || (startedAt === held.startedAt && run.updatedAt > held.run.updatedAt)
+    ) {
+      current.set(run.projectId, { run, startedAt });
     }
-    folds.set(run.projectId, fold);
   }
 
-  const awaitingInput = new Set(awaitingInputProjectIds);
+  const awaitingProjects = new Set(awaitingInputProjectIds);
+  const awaitingConversations = awaitingInputConversationIds
+    ? new Set(awaitingInputConversationIds)
+    : null;
   const summaries = new Map<string, ProjectRunSummary>();
-  for (const [projectId, fold] of folds) {
-    // An in-flight run outranks history, matching the daemon's
-    // `activeRunStatuses ?? latestRunStatuses` precedence.
-    const base = fold.active?.status ?? fold.terminal?.status ?? 'not_started';
-    // Only `succeeded` is superseded by a pending question — a failed or
-    // canceled run leaves nothing to answer. Same narrow rule as
-    // `composeProjectDisplayStatus`.
-    const status = base === 'succeeded' && awaitingInput.has(projectId) ? 'awaiting_input' : base;
-    // The terminal run is reported even while a newer run is in flight: it is
-    // still the newest FINISHED run, which is what an acknowledgement names.
+  for (const run of runs) {
+    // A project whose runs are all still queued has nothing started yet.
+    if (run.projectId && !current.has(run.projectId) && !summaries.has(run.projectId)) {
+      summaries.set(run.projectId, { status: 'not_started' });
+    }
+  }
+  for (const [projectId, { run }] of current) {
+    if (run.status === 'queued' || run.status === 'running') {
+      // An auto-retry backoff moves a started run back to `queued`; it is
+      // still this conversation's run in flight.
+      summaries.set(projectId, { status: run.status });
+      continue;
+    }
+    const terminal = terminalRunDisplayStatus(run);
+    const asksUser = terminal === 'succeeded' && (
+      awaitingConversations
+        ? run.conversationId !== null && awaitingConversations.has(run.conversationId)
+        : awaitingProjects.has(projectId)
+    );
     summaries.set(projectId, {
-      status,
-      ...(fold.terminal
-        ? {
-            latestTerminalRunId: fold.terminal.runId,
-            latestTerminalUpdatedAt: fold.terminal.updatedAt,
-          }
+      status: asksUser ? 'awaiting_input' : terminal,
+      latestTerminalRunId: run.id,
+      latestTerminalUpdatedAt: run.updatedAt,
+      ...(terminal === 'canceled' && run.cancelOrigin === 'daemon_shutdown'
+        ? { stoppedWhileAway: true }
         : {}),
     });
   }
@@ -203,21 +226,34 @@ export function writeStoredAcknowledgedRuns(acknowledged: AcknowledgedRuns): voi
  * told users their stop had broken something. Every other status is live and
  * stays: a running, blocked or failed project is not a notice the user can
  * spend.
+ *
+ * A run stopped while the user was away (the client quit) is the exception:
+ * it is a new result the user has not seen, so it draws the completion dot
+ * until acknowledged, exactly like a completion (P0-24 P12).
  */
 export function displayStatusForSummary(
   projectId: string,
   summary: ProjectRunSummary,
   acknowledged: AcknowledgedRuns,
 ): ProjectDisplayStatus | undefined {
-  if (summary.status === 'canceled') return undefined;
+  if (!summaryIsNotice(summary)) {
+    return summary.status === 'canceled' ? undefined : summary.status;
+  }
   if (
-    summary.status === 'succeeded'
-    && summary.latestTerminalRunId !== undefined
+    summary.latestTerminalRunId !== undefined
     && acknowledged[projectId] === summary.latestTerminalRunId
   ) {
     return undefined;
   }
-  return summary.status;
+  return 'succeeded';
+}
+
+/**
+ * Whether a summary is a "new result" notice — the blue dot that opening the
+ * project spends: a completion, or a run stopped while the user was away.
+ */
+export function summaryIsNotice(summary: ProjectRunSummary): boolean {
+  return summary.status === 'succeeded' || (summary.status === 'canceled' && summary.stoppedWhileAway === true);
 }
 
 /**
@@ -228,9 +264,14 @@ export function displayStatusForSummary(
 export function foldRunsToProjectStatuses(
   runs: ChatRunStatusResponse[],
   awaitingInputProjectIds: readonly string[] = [],
+  awaitingInputConversationIds?: readonly string[],
 ): Map<string, ProjectDisplayStatus> {
   const statuses = new Map<string, ProjectDisplayStatus>();
-  for (const [projectId, summary] of foldRunsToProjectRunSummaries(runs, awaitingInputProjectIds)) {
+  for (const [projectId, summary] of foldRunsToProjectRunSummaries(
+    runs,
+    awaitingInputProjectIds,
+    awaitingInputConversationIds,
+  )) {
     statuses.set(projectId, summary.status);
   }
   return statuses;

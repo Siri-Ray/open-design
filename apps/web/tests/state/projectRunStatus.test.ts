@@ -33,16 +33,27 @@ describe('foldRunsToProjectStatuses', () => {
     expect(statuses.get('stopped')).toBe('canceled');
   });
 
-  it('keeps queued distinct from running', () => {
-    // The daemon folds queued into running for its own consumers; this one
-    // paces its indicator differently, so the distinction has to survive.
+  it('keeps a started run that went back to queued distinct from running', () => {
+    // An auto-retry backoff moves a started run back to `queued`; it is still
+    // in flight and its indicator is paced differently.
     const statuses = foldRunsToProjectStatuses([
-      run({ projectId: 'waiting', status: 'queued' }),
-      run({ projectId: 'working', status: 'running' }),
+      run({ projectId: 'waiting', status: 'queued', startedAt: 5 }),
+      run({ projectId: 'working', status: 'running', startedAt: 5 }),
     ]);
 
     expect(statuses.get('waiting')).toBe('queued');
     expect(statuses.get('working')).toBe('running');
+  });
+
+  it('does not count a run that is queued and has not started (P0-24 N3)', () => {
+    const statuses = foldRunsToProjectStatuses([
+      run({ projectId: 'p1', status: 'succeeded', startedAt: 1, updatedAt: 2 }),
+      run({ projectId: 'p1', status: 'queued', startedAt: null, createdAt: 3, updatedAt: 3 }),
+      run({ projectId: 'fresh', status: 'queued', startedAt: null }),
+    ]);
+
+    expect(statuses.get('p1')).toBe('succeeded');
+    expect(statuses.get('fresh')).toBe('not_started');
   });
 
   it('calls a succeeded run with unfinished declared work succeeded (P0-24)', () => {
@@ -82,29 +93,54 @@ describe('foldRunsToProjectStatuses', () => {
     );
   });
 
-  it('lets an in-flight run outrank finished history', () => {
+  it('follows the conversation that most recently STARTED, not the one that ended last (P0-24 N3)', () => {
+    // 报名页 starts at 10:00 and finishes at 10:08; 宣传海报 starts at 10:05
+    // and fails at 10:06. The project shows the failure.
     const statuses = foldRunsToProjectStatuses([
-      run({ status: 'succeeded', updatedAt: 99 }),
-      run({ status: 'running', updatedAt: 1 }),
+      run({ conversationId: 'signup', status: 'succeeded', startedAt: 1000, updatedAt: 1800 }),
+      run({ conversationId: 'poster', status: 'failed', startedAt: 1500, updatedAt: 1600 }),
+    ]);
+
+    expect(statuses.get('p1')).toBe('failed');
+  });
+
+  it('does not spin for an older conversation that is still running (P0-24 N3)', () => {
+    const statuses = foldRunsToProjectStatuses([
+      run({ conversationId: 'signup', status: 'running', startedAt: 1000, updatedAt: 2000 }),
+      run({ conversationId: 'poster', status: 'succeeded', startedAt: 1500, updatedAt: 1600 }),
+    ]);
+
+    expect(statuses.get('p1')).toBe('succeeded');
+  });
+
+  it('replaces an older failure as soon as any conversation starts a run (P0-24 P3)', () => {
+    const statuses = foldRunsToProjectStatuses([
+      run({ conversationId: 'signup', status: 'failed', startedAt: 1000, updatedAt: 1100 }),
+      run({ conversationId: 'poster', status: 'running', startedAt: 1200, updatedAt: 1200 }),
     ]);
 
     expect(statuses.get('p1')).toBe('running');
   });
 
-  it('picks the newest run within each of active and terminal', () => {
+  it('only says awaiting input when the current conversation is the one asking (P0-24 N4)', () => {
+    const runs = [
+      run({ conversationId: 'signup', status: 'succeeded', startedAt: 1000, updatedAt: 1100 }),
+      run({ conversationId: 'poster', status: 'succeeded', startedAt: 1500, updatedAt: 1600 }),
+    ];
+
+    expect(foldRunsToProjectStatuses(runs, ['p1'], ['signup']).get('p1')).toBe('succeeded');
+    expect(foldRunsToProjectStatuses(runs, ['p1'], ['poster']).get('p1')).toBe('awaiting_input');
+    // An older daemon without the per-conversation set: project-wide fallback.
+    expect(foldRunsToProjectStatuses(runs, ['p1']).get('p1')).toBe('awaiting_input');
+  });
+
+  it('falls back to createdAt when the daemon predates startedAt', () => {
     expect(
       foldRunsToProjectStatuses([
-        run({ status: 'succeeded', updatedAt: 1 }),
-        run({ status: 'failed', updatedAt: 2 }),
+        run({ conversationId: 'a', status: 'succeeded', createdAt: 1, updatedAt: 9 }),
+        run({ conversationId: 'b', status: 'failed', createdAt: 2, updatedAt: 3 }),
       ]).get('p1'),
     ).toBe('failed');
-
-    expect(
-      foldRunsToProjectStatuses([
-        run({ status: 'queued', updatedAt: 2 }),
-        run({ status: 'running', updatedAt: 1 }),
-      ]).get('p1'),
-    ).toBe('queued');
   });
 
   it('omits projects it was told nothing about', () => {
@@ -176,8 +212,23 @@ describe('foldRunsToProjectRunSummaries', () => {
 });
 
 describe('displayStatusForSummary', () => {
-  it('draws no mark for a stopped run: being stopped is not a failure (P0-24)', () => {
+  it('draws no mark for a run the user stopped: being stopped is not a failure (P0-24)', () => {
     expect(displayStatusForSummary('p1', { status: 'canceled', latestTerminalRunId: 'r1' }, {})).toBeUndefined();
+  });
+
+  it('draws the new-result dot for a run stopped because the client quit, until opened (P0-24 P12)', () => {
+    const [summary] = [...foldRunsToProjectRunSummaries([
+      run({ id: 'r1', status: 'canceled', cancelOrigin: 'daemon_shutdown', startedAt: 1, updatedAt: 2 }),
+    ]).values()];
+
+    expect(summary).toMatchObject({ status: 'canceled', stoppedWhileAway: true, latestTerminalRunId: 'r1' });
+    expect(displayStatusForSummary('p1', summary!, {})).toBe('succeeded');
+    expect(displayStatusForSummary('p1', summary!, { p1: 'r1' })).toBeUndefined();
+
+    const [userStop] = [...foldRunsToProjectRunSummaries([
+      run({ id: 'r2', status: 'canceled', cancelOrigin: 'user_stop', startedAt: 1, updatedAt: 2 }),
+    ]).values()];
+    expect(displayStatusForSummary('p1', userStop!, {})).toBeUndefined();
   });
 
   it('keeps drawing a failure until a newer run replaces it, even after it was opened', () => {

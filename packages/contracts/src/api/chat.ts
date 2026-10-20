@@ -733,6 +733,14 @@ export interface ChatRunStatusResponse {
   status: ChatRunStatus;
   createdAt: number;
   updatedAt: number;
+  /**
+   * When the Run first began executing (its first `start` event), as opposed to
+   * `createdAt`, when it was created and possibly still waiting. A project's
+   * status follows the conversation whose Run most recently STARTED, and a
+   * queued Run has not started (P0-24). `null` while not started yet; absent
+   * on older daemons.
+   */
+  startedAt?: number | null;
   /** The immutable instant this Run entered its terminal status, when terminal. */
   terminalAt?: number | null;
   cancelRequested?: boolean;
@@ -888,6 +896,17 @@ export interface ChatRunListResponse {
    * Optional: older daemons omit it, and absent means "unknown", not "none".
    */
   awaitingInputProjectIds?: string[];
+  /**
+   * Conversations holding an unanswered question form — the per-conversation
+   * form of `awaitingInputProjectIds`. A project shows "needs your reply" only
+   * when the conversation that most recently started a Run is the one waiting
+   * (P0-24); a question pending in an older conversation does not surface.
+   *
+   * Same visibility rule: a subset of the conversations the accompanying
+   * `runs` already expose. Optional: older daemons omit it, and absent means
+   * "unknown" — callers then fall back to the project-level set.
+   */
+  awaitingInputConversationIds?: string[];
 }
 
 export interface ChatRunCancelResponse {

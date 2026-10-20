@@ -585,6 +585,7 @@ function durableRunState(run) {
     status: run.status,
     createdAt: run.createdAt,
     updatedAt: run.updatedAt,
+    startedAt: run.startedAt ?? null,
     terminalAt: run.terminalAt ?? null,
     exitCode: run.exitCode,
     signal: run.signal,
@@ -1509,6 +1510,9 @@ export function createChatRunService({
     run.events.push(record);
     if (run.events.length > maxEvents) run.events.splice(0, run.events.length - maxEvents);
     run.updatedAt = timestamp;
+    // The first `start` is when the Run left the queue and began executing.
+    // A retry restart emits `start` again; the Run started at the first one.
+    if (event === 'start' && run.startedAt == null) run.startedAt = timestamp;
     // State writes are synchronous so they survive process termination. Keep
     // them on lifecycle boundaries only: agent/text deltas can arrive many
     // times per second and are already streamed to events.jsonl.
@@ -1546,6 +1550,7 @@ export function createChatRunService({
     status: run.status,
     createdAt: run.createdAt,
     updatedAt: run.updatedAt,
+    startedAt: run.startedAt ?? null,
     terminalAt: run.terminalAt ?? null,
     cancelRequested: !!run.cancelRequested,
     cancelOrigin: run.cancelOrigin ?? null,

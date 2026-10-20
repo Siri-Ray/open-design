@@ -1608,6 +1608,21 @@ describe('run event log persistence', () => {
     });
   });
 
+  it('stamps startedAt at the first start event only, and persists it (P0-24 N3)', () => {
+    const runs = createRunsWithLog(tmpDir);
+    const run = runs.create({ projectId: 'p1', conversationId: 'c1', assistantMessageId: 'm1', agentId: 'claude' });
+    const statePath = path.join(tmpDir, run.id, 'state.json');
+
+    expect(runs.statusBody(run).startedAt).toBeNull();
+    run.status = 'running';
+    runs.emit(run, 'start', { status: 'running' }, 1_000);
+    runs.emit(run, 'start', { status: 'running' }, 2_000);
+
+    expect(run.startedAt).toBe(1_000);
+    expect(runs.statusBody(run).startedAt).toBe(1_000);
+    expect(JSON.parse(fs.readFileSync(statePath, 'utf8')).startedAt).toBe(1_000);
+  });
+
   it('persists a restart-safe terminal state and telemetry checkpoints', () => {
     const runs = createRunsWithLog(tmpDir);
     const run = runs.create({
