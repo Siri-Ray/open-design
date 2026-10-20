@@ -16789,6 +16789,9 @@ export async function startServer({
         ));
         return finishWithRetryDecision('failed', code, signal);
       }
+      // P0-24 N9: a plugin-authoring run that exited cleanly without the
+      // generated-plugin files still ended normally — what it produced never
+      // decides the run's status. Keep the evidence as a diagnostic only.
       if (
         code === 0 &&
         !run.cancelRequested &&
@@ -16796,12 +16799,12 @@ export async function startServer({
         !(await hasGeneratedPluginArtifacts(cwd)) &&
         !emittedRenderableQuestionForm(run.askUserScanText)
       ) {
-        send('error', createSseErrorPayload(
-          'AGENT_EXECUTION_FAILED',
-          'Plugin authoring ended before generating the required generated-plugin artifacts.',
-          { retryable: true },
-        ));
-        return finishWithRetryDecision('failed', code, signal);
+        send('agent', {
+          type: 'diagnostic',
+          name: 'plugin_authoring_artifacts_missing',
+          source: 'daemon-run-finalize',
+          message: 'Plugin authoring ended before generating the required generated-plugin artifacts.',
+        });
       }
       // Plain-stream auth-failure guard: plain adapters (e.g. deepseek's
       // TUI variants) may exit cleanly with visible stdout that's actually
@@ -17063,7 +17066,6 @@ export async function startServer({
             }
           } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
-            const failureMessage = `Failed to persist plain-stream artifact(s): ${message}`;
             console.warn(`[plain-stream] failed to persist stdout artifact(s): ${message}`);
             send('agent', {
               type: 'diagnostic',
@@ -17071,11 +17073,8 @@ export async function startServer({
               source: 'daemon-run-finalize',
               message,
             });
-            send('error', createSseErrorPayload(
-              'AGENT_EXECUTION_FAILED',
-              failureMessage,
-            ));
-            return finishWithRetryDecision('failed', 1, null);
+            // P0-24 N9: failing to save the page does not fail a run whose
+            // agent finished normally; the diagnostic above keeps the reason.
           }
         }
       }
@@ -17358,16 +17357,17 @@ export async function startServer({
           const details = err instanceof AiHtmlVersionSnapshotError
             ? { failures: err.failures }
             : undefined;
-          send('error', createSseErrorPayload(
-            'HTML_VERSION_SNAPSHOT_FAILED',
+          // P0-24 N9: a failed version snapshot does not fail a run whose
+          // agent finished normally; keep the reason as a diagnostic.
+          console.warn(`[html-version-snapshot] ${message}`);
+          send('agent', {
+            type: 'diagnostic',
+            name: 'html_version_snapshot_failed',
+            source: 'daemon-run-finalize',
+            code: 'HTML_VERSION_SNAPSHOT_FAILED',
             message,
-            {
-              retryable: false,
-              ...(details ? { details } : {}),
-            },
-          ));
-          finishStrategyAwarePhysicalRun('failed', 1, signal);
-          return;
+            ...(details ? { details } : {}),
+          });
         }
         try {
           persistDeliveredAgentSessionState();
