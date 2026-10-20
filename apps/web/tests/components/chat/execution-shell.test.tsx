@@ -82,10 +82,11 @@ describe('壳头', () => {
       .toContain('进行中');
   });
 
-  it('结束但秒数缺席:保留「已完成」(P0-24 未规定无秒数时的写法),默认收起,球撤掉', () => {
+  it('结束但量不到秒数:只写「用时」不写数字(P0-24 Q1),默认收起,球撤掉', () => {
     const [shell] = shellsOf(call('t1', 'Bash', { command: 'ls' }), 'succeeded');
     render(<ExecutionShell shell={shell as ShellData} />);
-    expect(screen.getByText('已完成')).toBeTruthy();
+    expect(screen.getByText('用时')).toBeTruthy();
+    expect(screen.queryByText('已完成')).toBeNull();
     expect(document.querySelector('[data-orb]')).toBeNull();
     expect(document.querySelector('details')?.open).toBe(false);
   });

@@ -706,7 +706,8 @@ const config: AppConfig = {
     soundEnabled: true,
     successSoundId: 'success-sound',
     failureSoundId: 'failure-sound',
-    desktopEnabled: false,
+    // On: since P0-24 Q2 the sound belongs to a shown notification.
+    desktopEnabled: true,
   },
 };
 
@@ -887,6 +888,8 @@ describe('ProjectView conversation run isolation', () => {
   let conversationAMessages: ChatMessage[] = [runningAssistant];
 
   beforeEach(() => {
+    // P0-24 Q2: the sound plays only once a notification was actually shown.
+    showCompletionNotification.mockResolvedValue('shown');
     window.localStorage.clear();
     workspaceScopeMocks.ambientContext = null;
     workspaceScopeMocks.ambientLoading = false;
@@ -2033,7 +2036,31 @@ describe('ProjectView conversation run isolation', () => {
     fireEvent.click(screen.getByTestId('conversation-select-conv-a'));
 
     await waitFor(() => expect(playSound).toHaveBeenCalledWith('success-sound'));
+    expect(showCompletionNotification).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'succeeded', body: 'notify.newReplyBody' }),
+    );
+  });
+
+  it('plays no sound when desktop notifications are off (P0-24 Q2)', async () => {
+    vi.spyOn(document, 'hasFocus').mockReturnValue(false);
+    renderProjectView({
+      ...config,
+      notifications: { ...config.notifications!, desktopEnabled: false },
+    });
+
+    await waitFor(() => expect(screen.getByTestId('active-conversation').textContent).toBe('conv-a'));
+    await waitFor(() => expect(screen.getByTestId('streaming-state').textContent).toBe('streaming'));
+    fireEvent.click(screen.getByTestId('conversation-select-conv-b'));
+    await waitFor(() => expect(screen.getByTestId('active-conversation').textContent).toBe('conv-b'));
+    resolveConversationBMessages?.([]);
+    await waitFor(() => expect(screen.getByTestId('streaming-state').textContent).toBe('idle'));
+    conversationAMessages = [succeededAssistant];
+    fireEvent.click(screen.getByTestId('conversation-select-conv-a'));
+
+    await waitFor(() => expect(screen.getByTestId('assistant-summary').textContent).toContain('|succeeded|done'));
+    await act(async () => {});
     expect(showCompletionNotification).not.toHaveBeenCalled();
+    expect(playSound).not.toHaveBeenCalled();
   });
 
   it.each([

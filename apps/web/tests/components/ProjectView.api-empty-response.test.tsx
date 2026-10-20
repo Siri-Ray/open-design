@@ -74,6 +74,8 @@ vi.mock('../../src/utils/notifications', async () => {
   return {
     ...actual,
     playSound: vi.fn(),
+    // P0-24 Q2: the sound plays only once a notification was actually shown.
+    showCompletionNotification: vi.fn(async () => 'shown' as const),
   };
 });
 
@@ -284,7 +286,8 @@ const config: AppConfig = {
     soundEnabled: true,
     successSoundId: 'success-sound',
     failureSoundId: 'failure-sound',
-    desktopEnabled: false,
+    // On: since P0-24 Q2 the sound belongs to a shown notification.
+    desktopEnabled: true,
   },
 };
 
