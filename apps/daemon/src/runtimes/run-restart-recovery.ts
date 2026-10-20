@@ -42,10 +42,16 @@ export function lastRecordedRunActivityAt(
 export function interruptDurableRunAfterDaemonRestart(
   state: RestartRecoverableDurableRunState,
   now = Date.now(),
-  /** From `lastRecordedRunActivityAt`; the Run's terminal time when known. */
-  lastRecordedAt?: number,
+  /**
+   * From `lastRecordedRunActivityAt`; the Run's terminal time when known.
+   * Pass a function to defer reading the event log until a Run actually needs
+   * interrupting — terminal Runs must not have their logs read at all.
+   */
+  lastRecordedAtInput?: number | (() => number),
 ): boolean {
   if (TERMINAL_STATUSES.has(state.status)) return false;
+  const lastRecordedAt =
+    typeof lastRecordedAtInput === 'function' ? lastRecordedAtInput() : lastRecordedAtInput;
   const endedAt =
     typeof lastRecordedAt === 'number' && lastRecordedAt > 0 && lastRecordedAt <= now
       ? lastRecordedAt

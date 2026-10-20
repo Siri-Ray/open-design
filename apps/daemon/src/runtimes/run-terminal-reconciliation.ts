@@ -442,7 +442,7 @@ export async function reconcileDurableRunTerminals(
     if (!interruptDurableRunAfterDaemonRestart(
       entry.state,
       now,
-      lastRecordedRunActivityAt(entry.state, readEvents(options.runsLogDir, entry.state.id)),
+      () => lastRecordedRunActivityAt(entry.state, readEvents(options.runsLogDir, entry.state.id)),
     )) continue;
     writeState(entry.filePath, entry.state);
     interruptedRunIds.add(entry.state.id);
