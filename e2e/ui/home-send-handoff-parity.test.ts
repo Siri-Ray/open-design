@@ -377,3 +377,49 @@ test('[P0] the first turn enters once and nothing remounts or reloads after the 
   const workspaces = Array.from(new Set(log.map((entry) => entry.workspace)));
   expect(workspaces, `the workspace column changed state across the hand-off:\n${readable}`).not.toContain('design-files-loading');
 });
+
+test('[P0] the first turn stays on screen while the Home uploads outlive the creation record', async ({ page }) => {
+  // QA on bd5fe20579: App releases its creation record 8s after the create;
+  // uploads still going up then made the first turn and its Working row
+  // vanish until they finished. The turn belongs to the view, not the record.
+  await installMountLog(page);
+  await applyStandardMocks(page);
+  await routeSuccessfulRuns(page, { runId: 'home-handoff-slow-upload', events: 'pending' });
+  const release = deferred();
+  let uploadHeld = false;
+  await page.route('**/api/projects/*/upload', async (route) => {
+    if (route.request().method() !== 'POST') {
+      await route.fallback();
+      return;
+    }
+    uploadHeld = true;
+    await release.promise;
+    await route.continue();
+  });
+  await gotoEntryHome(page);
+  await page.getByTestId('home-hero-file-input').setInputFiles({
+    name: 'brief.txt',
+    mimeType: 'text/plain',
+    buffer: Buffer.from('Slow upload brief.\n', 'utf8'),
+  });
+  await expect(page.getByTestId('home-hero-staged-files')).toContainText('brief.txt');
+  await sendFromHome(page, 'Gamified habit app: draft the settings screen.');
+
+  await expect.poll(() => uploadHeld, { timeout: T.medium }).toBe(true);
+  // Past App's 8s record deadline with the upload still held.
+  await page.waitForTimeout(9_500);
+  release.resolve();
+  await expect(page.locator('[data-testid="chat-log"] .msg.user').first()).toBeVisible({ timeout: T.long });
+  await page.waitForTimeout(800);
+
+  const log = await page.evaluate(() => window.__odMountLog ?? []);
+  const readable = log
+    .map((entry) => `${Math.round(entry.at)}ms ${entry.surface} pane#${entry.pane} rows=[${entry.rows.join(' ')}]`)
+    .join('\n');
+  const firstUserAt = log.findIndex((entry) => entry.rows.some((row) => row.startsWith('u')));
+  expect(firstUserAt, `the user turn was never drawn:\n${readable}`).toBeGreaterThanOrEqual(0);
+  const gaps = log.slice(firstUserAt).filter((entry) => !entry.rows.some((row) => row.startsWith('u')));
+  expect(gaps, `the user turn left the screen while the upload was held:\n${readable}`).toEqual([]);
+  const panes = Array.from(new Set(log.map((entry) => entry.pane)));
+  expect(panes, `the chat pane was replaced:\n${readable}`).toHaveLength(1);
+});

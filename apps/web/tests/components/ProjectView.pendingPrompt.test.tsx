@@ -1845,6 +1845,43 @@ describe('ProjectView mounted from a Home send before the create answers (OPEND-
     expect(projectScoped).toEqual([]);
   });
 
+  it('keeps the optimistic turn when App releases its record while the Home uploads are still going up', async () => {
+    // QA on bd5fe20579: App's record has an 8s cleanup deadline after the
+    // create; uploads outliving it made the first turn and its Working row
+    // vanish until the uploads finished.
+    const brief = new File(['x'], 'brief.txt', { type: 'text/plain' });
+    beginHomeAttachmentUploads('p-new', [brief]);
+    const persisted = { ...pendingHandoff, files: [brief], persisted: true };
+    const view = renderProjectView(project('p-new'), vi.fn(), { creationHandoff: persisted });
+    await waitFor(() => {
+      expect(latestChatPaneProps().messages?.map((message) => message.content))
+        .toEqual(['Draft the onboarding flow', '']);
+    });
+
+    view.rerender(projectViewElement(project('p-new'), vi.fn(), { creationHandoff: null }));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(latestChatPaneProps().messages?.map((message) => message.content))
+      .toEqual(['Draft the onboarding flow', '']);
+    expect(chatPaneMounts.count).toBe(1);
+  });
+
+  it('retires the optimistic turn once the record is released and nothing is left to send', async () => {
+    const view = renderProjectView(project('p-new'), vi.fn(), {
+      creationHandoff: { ...pendingHandoff, persisted: true },
+    });
+    await waitFor(() => {
+      expect(latestChatPaneProps().messages?.length).toBe(2);
+    });
+    // No upload in flight and no auto-send key: e.g. the working-directory
+    // hand-off failed after the create, so App never writes the keys.
+    view.rerender(projectViewElement(project('p-new'), vi.fn(), { creationHandoff: null }));
+    await waitFor(() => {
+      expect(latestChatPaneProps().messages ?? []).toEqual([]);
+    });
+  });
+
   it('starts reading once the create answers, in the same pane, keyed by the seed conversation', async () => {
     const view = renderProjectView(project('p-new'), vi.fn(), { creationHandoff: pendingHandoff });
     await waitFor(() => expect(chatPaneMounts.count).toBe(1));

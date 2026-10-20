@@ -13116,7 +13116,7 @@ export function ProjectView({
       ? amrGateWitness
       : undefined;
     autoSendSeedRef.current = isAutoSend
-      ? (readAutoSendPrompt(project.id) ?? project.pendingPrompt ?? '')
+      ? (readAutoSendPrompt(project.id) ?? creationHandoff?.prompt ?? project.pendingPrompt ?? '')
       : '';
     autoSendAttachmentsRef.current = isAutoSend ? readAutoSendAttachments(project.id) : [];
     autoSendContextRef.current = isAutoSend ? readAutoSendContext(project.id) : null;
@@ -13737,34 +13737,41 @@ export function ProjectView({
     return () => window.removeEventListener('keydown', onKeyDown, { capture: true });
   }, [designMdState.exists, handleContinueInCli]);
 
-  // OPEND-2170: the hand-off card App keeps over this column comes down only
-  // once the column has something real to show — the auto-sent turn painted,
-  // or a transcript that is loaded and has nothing to send, or a load that
-  // failed (the error surface is the real thing then). Fired once per mount;
-  // App owns the fallback deadline, so a send parked behind a gate dialog
-  // cannot pin the card forever.
-  const creationHandoffActive = creationHandoff !== null;
+  // The optimistic first turn of a Home send belongs to this view, not to
+  // App's creation record (OPEND-3334). It is captured at mount and retired
+  // only when the column no longer needs it: the real turn owns the rows, the
+  // auto-send was turned down, or nothing is going to be sent. App's record
+  // has its own cleanup deadline; tying the turn to it made the turn vanish
+  // whenever the Home uploads outlived that deadline, and come back when
+  // they finished.
+  const [optimisticFirstTurn, setOptimisticFirstTurn] = useState<{
+    prompt: string;
+    files?: readonly File[];
+  } | null>(() => (creationHandoff
+    ? { prompt: creationHandoff.prompt, files: creationHandoff.files }
+    : null));
+  // The seed conversation's id, minted with the project. Kept for the life of
+  // the view: the pane is keyed by it from the first frame, so the
+  // conversation list answering (or the record being released) never re-keys
+  // it.
+  const [seedConversationId] = useState(() => creationHandoff?.conversationId ?? null);
   // Until the auto-sent turn is on screen the transcript is empty, but the
   // turn's first frame is already known: ChatPane draws it from these two
-  // optimistic messages with its own components, so the real turn replaces
-  // it like for like (OPEND-3334). Any real message wins at once.
+  // optimistic messages with its own components, so the real turn takes over
+  // the same rows (OPEND-3334). Any real message wins at once.
   const creationHandoffMessageIds = useMemo(() => {
     const identity = homeAutoSendIdentity(project.id);
     return { user: identity.userMessageId!, assistant: identity.assistantMessageId! };
   }, [project.id]);
   const creationHandoffMessages = useCreationHandoffMessages(
-    creationHandoff,
+    optimisticFirstTurn,
     selectedAssistantIdentity,
     creationHandoffMessageIds,
   );
-  const creationHandoffTurnShown = creationHandoffActive && messages.length === 0;
-  // The pane mounts on the click, before the conversation list answers; the
-  // seed conversation's id is already known (minted with the project), so the
-  // pane is keyed by it from the first frame and the list's answer does not
-  // re-key it.
+  const creationHandoffTurnShown = optimisticFirstTurn !== null && messages.length === 0;
   const chatPaneConversationKey =
     activeConversationId
-    ?? creationHandoff?.conversationId
+    ?? seedConversationId
     ?? 'conversation-unavailable';
   // A project born from the Home send starts with no files, and the pending
   // frame already drew the empty state. Keep drawing it (inert) until the
@@ -13776,9 +13783,13 @@ export function ProjectView({
     () => creationHandoff !== null && !project.metadata?.baseDir,
   );
   const ignoreStopBeforeFirstRun = useCallback(() => undefined, []);
+  // OPEND-2170: the first turn is settled once the column has something real
+  // to show — the auto-sent turn painted, a loaded transcript with nothing to
+  // send, or a load that failed (the error surface is the real thing then).
+  // Then the optimistic turn retires and App may release its record.
   const creationHandoffSettledRef = useRef(false);
   useEffect(() => {
-    if (!creationHandoffActive || creationHandoffSettledRef.current) return;
+    if (optimisticFirstTurn === null || creationHandoffSettledRef.current) return;
     const transcriptLoaded =
       Boolean(activeConversationId)
       && messagesConversationId === activeConversationId
@@ -13797,20 +13808,38 @@ export function ProjectView({
       );
     if (!(transcriptFailed || (transcriptLoaded && (firstTurnPainted || nothingToSend)))) return;
     creationHandoffSettledRef.current = true;
+    setOptimisticFirstTurn(null);
     onCreationHandoffSettled?.(project.id);
   }, [
     activeConversationId,
     conversationLoadError,
-    creationHandoffActive,
     failedMessagesConversationId,
     homeAttachmentUploads.length,
     messages.length,
     messagesConversationId,
     messagesInitialized,
     onCreationHandoffSettled,
+    optimisticFirstTurn,
     project.id,
     projectIsProgrammaticBrandExtraction,
   ]);
+  // App released its record without the first turn settling here. The turn
+  // still stands while the Home uploads are going up (the send follows them)
+  // or while the auto-send keys are written (the send is coming). With
+  // neither, nothing will be sent — e.g. the working-directory hand-off
+  // failed after the create — and the turn must not stand as "Working".
+  useEffect(() => {
+    if (optimisticFirstTurn === null || creationHandoff !== null) return;
+    if (homeAttachmentUploads.length > 0) return;
+    let sendPending = false;
+    try {
+      sendPending = Boolean(window.sessionStorage.getItem(autoSendFirstMessageKey(project.id)));
+    } catch {
+      sendPending = false;
+    }
+    if (sendPending) return;
+    setOptimisticFirstTurn(null);
+  }, [creationHandoff, homeAttachmentUploads.length, optimisticFirstTurn, project.id]);
 
   // PluginLoopHome auto-send: when the user submits on Home, app.tsx
   // sets `sessionStorage['od:auto-send-first:<projectId>']` and routes
@@ -13911,6 +13940,10 @@ export function ProjectView({
       })
       .then((accepted) => {
         if (!accepted) {
+          // The turn was turned down (a preflight block, a scope transition):
+          // the optimistic turn must not keep claiming it is running. A later
+          // retry paints the real turn itself.
+          setOptimisticFirstTurn(null);
           // The handoff was not accepted (for example a transient project
           // scope/conversation transition or a recoverable preflight block).
           // Keep every session value intact; a later dependency change can
@@ -13927,6 +13960,7 @@ export function ProjectView({
         autoSendInFlightRef.current = false;
       })
       .catch(() => {
+        setOptimisticFirstTurn(null);
         // `handleSend` normally reports a rejected preflight as `false`, but
         // transport/provider setup may still throw. Preserve the handoff for a
         // later retry instead of silently consuming the user's first prompt.
@@ -14092,7 +14126,7 @@ export function ProjectView({
               </button>
             </div>
           ) : null}
-          {activeConversationId || conversationLoadError || emptyConversationReadOnlySettled || creationHandoffActive ? (
+          {activeConversationId || conversationLoadError || emptyConversationReadOnlySettled || seedConversationId !== null ? (
             <ChatPane
               historyPortalTarget={historyPortalTarget}
               // The conversation id is part of the key so switching conversations
