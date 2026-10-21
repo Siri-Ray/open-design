@@ -360,8 +360,7 @@ export function ExecutionShell({
       onToggle={onToggle}
       expandable={items.length > 0}
       deferBody={deferCollapsedBodies}
-      // P0-24 推测项 A-04:回合标题的时长前加分隔符「·」(见 record.module.css `.turnHead`)。
-      className={hasTodo ? `${styles.turnHead} ${styles.hasTodo}` : styles.turnHead}
+      className={hasTodo ? styles.hasTodo : undefined}
     >
       {items.length
         ? items.map((item, i) => renderItem(item, i, {
