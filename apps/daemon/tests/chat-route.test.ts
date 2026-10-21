@@ -428,7 +428,9 @@ process.exit(0);
     );
   });
 
-  it('marks OpenCode tool-only runs failed when no assistant output is produced', async () => {
+  // P0-24 Q6 / P7: a clean exit with no reply is a normal end. A tool already
+  // ran, so the retry policy does not re-run it; the gap is kept as a diagnostic.
+  it('ends OpenCode tool-only runs normally when no assistant output is produced', async () => {
     const conversationId = `conv-${randomUUID()}`;
 
     await withFakeAgent(
@@ -466,10 +468,9 @@ process.exit(0);
         expect(response.ok).toBe(true);
         expect(body).toContain('"type":"tool_use"');
         expect(body).toContain('"type":"tool_result"');
-        expect(body).toContain('AGENT_EXECUTION_FAILED');
-        expect(body).toContain('Agent completed without producing any output');
-        expect(body).toContain('"status":"failed"');
-        expect(body).not.toContain('"status":"succeeded"');
+        expect(body).not.toContain('event: error');
+        expect(body).toContain('empty_reply_ended_normally');
+        expect(body).toContain('"status":"succeeded"');
 
         const runsResponse = await fetch(
           `${baseUrl}/api/runs?conversationId=${encodeURIComponent(conversationId)}`,
@@ -481,7 +482,7 @@ process.exit(0);
         expect(runsBody.runs).toHaveLength(1);
         expect(runsBody.runs[0]).toMatchObject({
           conversationId,
-          status: 'failed',
+          status: 'succeeded',
           exitCode: 0,
         });
       },
@@ -3349,7 +3350,8 @@ process.exit(0);
     );
   });
 
-  it('marks reasoning-only stream runs failed when no assistant output is produced', async () => {
+  // P0-24 Q6: reasoning without a reply is still a normal end.
+  it('ends reasoning-only stream runs normally when no assistant output is produced', async () => {
     const reasoningLine = JSON.stringify({
       type: 'assistant',
       message: {
@@ -3390,18 +3392,49 @@ process.exit(0);
         const eventsResponse = await fetch(`${baseUrl}/api/runs/${runId}/events`, {
           signal: eventsController.signal,
         });
-        const eventsBody = await readSseUntil(
-          eventsResponse,
-          'Agent completed without producing any output',
-        );
+        const eventsBody = await readSseUntil(eventsResponse, 'event: end');
         eventsController.abort();
         const statusBody = await waitForRunStatus(baseUrl, runId);
 
         expect(eventsBody).toContain('"type":"thinking_delta"');
-        expect(eventsBody).toContain('AGENT_EXECUTION_FAILED');
-        expect(eventsBody).toContain('Agent completed without producing any output');
-        expect(eventsBody).not.toContain('"status":"succeeded"');
-        expect(statusBody.status).toBe('failed');
+        expect(eventsBody).toContain('empty_reply_ended_normally');
+        expect(eventsBody).not.toContain('event: error');
+        expect(statusBody.status).toBe('succeeded');
+      },
+    );
+  });
+
+  // P0-24 Q6: an empty reply still gets the automatic retry a transient empty
+  // response used to get; only an attempt that is not retried ends normally.
+  it('retries a completely empty reply, then ends it normally', async () => {
+    const resultLine = JSON.stringify({
+      type: 'result',
+      is_error: false,
+      usage: { input_tokens: 1, output_tokens: 0 },
+    });
+
+    await withFakeAgent(
+      'qodercli',
+      `
+console.log(${JSON.stringify(resultLine)});
+process.exit(0);
+`,
+      async () => {
+        const createResponse = await fetch(`${baseUrl}/api/runs`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ agentId: 'qoder', message: 'answer nothing' }),
+        });
+        expect(createResponse.status).toBe(202);
+        const { runId } = await createResponse.json() as { runId: string };
+
+        const statusBody = await waitForRunStatus(baseUrl, runId);
+        const eventsResponse = await fetch(`${baseUrl}/api/runs/${runId}/events`);
+        const eventsBody = await readSseUntil(eventsResponse, 'event: end');
+
+        expect(eventsBody).toContain('run_retry_attempted');
+        expect(eventsBody).toContain('empty_reply_ended_normally');
+        expect(statusBody.status).toBe('succeeded');
       },
     );
   });

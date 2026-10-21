@@ -13464,9 +13464,26 @@ export async function startServer({
       status,
       code = null,
       signal = null,
-      { allowRetry = true } = {},
+      {
+        allowRetry = true,
+        // P0-24 Q6: an empty reply is a normal end, but a transient one may
+        // still be retried. The guard hands its error frame here instead of
+        // sending it: the frame goes out only if this attempt is retried, and
+        // an attempt that is not retried ends `succeeded` without it.
+        emptyReplyError = null,
+        skipCloseDiagnostic = false,
+      } = {},
     ) => {
-      lifecycle.mark('finalize_start');
+      if (!skipCloseDiagnostic) lifecycle.mark('finalize_start');
+      if (emptyReplyError) {
+        // Classify and decide retry from exactly the inputs the sent frame
+        // used to leave on the run, so retry behaviour does not change.
+        run.error = emptyReplyError.error?.message ?? run.error;
+        run.errorCode = emptyReplyError.error?.code ?? run.errorCode;
+      }
+      const sendEmptyReplyErrorBeforeRetry = () => {
+        if (emptyReplyError) send('error', emptyReplyError);
+      };
       // The Run records how the process ended; the strategy task records its
       // own verdict. A task blocked at any stage keeps a cleanly exited Run
       // succeeded: the task projection on the terminal event carries the
@@ -13479,13 +13496,15 @@ export async function startServer({
       // them from a generic process exit. Clear the pending value immediately
       // so a scheduled retry cannot inherit the previous attempt's reason.
       const rpcCloseReason = deriveRpcCloseReason(status, code, signal);
-      design.runs.emit(run, 'diagnostic', {
-        type: 'runtime_close',
-        rpc_close_reason: rpcCloseReason,
-        status,
-        ...(typeof code === 'number' ? { exit_code: code } : {}),
-        ...(signal ? { signal } : {}),
-      });
+      if (!skipCloseDiagnostic) {
+        design.runs.emit(run, 'diagnostic', {
+          type: 'runtime_close',
+          rpc_close_reason: rpcCloseReason,
+          status,
+          ...(typeof code === 'number' ? { exit_code: code } : {}),
+          ...(signal ? { signal } : {}),
+        });
+      }
       pendingRpcCloseReason = null;
       const result = runResultFromStatus(status);
       const errorCode = deriveRunErrorCode({
@@ -13585,6 +13604,7 @@ export async function startServer({
           resumed: agentResumeCtx.isResuming,
         });
         publishNativeSessionRecoveryMetadata();
+        sendEmptyReplyErrorBeforeRetry();
         design.runs.emit(run, 'run_retry_attempted', {
           ...retryAnalyticsBase(postToolResumeDecision, failure, errorCode),
           retry_reason: postToolResumeDecision.retryReason,
@@ -13622,6 +13642,7 @@ export async function startServer({
         run.retryStrategy = decision.retryStrategy;
         run.retryFinalResult = undefined;
         run.retrySuppressedReason = undefined;
+        sendEmptyReplyErrorBeforeRetry();
         design.runs.emit(run, 'run_retry_attempted', {
           ...retryAnalyticsBase(decision, failure, errorCode),
           retry_reason: decision.retryReason,
@@ -13629,6 +13650,24 @@ export async function startServer({
         });
         scheduleRetryRestart(decision.retryDelayMs);
         return true;
+      }
+      if (emptyReplyError) {
+        // Not retried: the agent exited cleanly with nothing to say, which is
+        // a normal end (P0-24 Q6, same as P7). Keep the evidence as a
+        // diagnostic, not as an error the turn would display.
+        run.error = null;
+        run.errorCode = null;
+        send('agent', {
+          type: 'diagnostic',
+          name: 'empty_reply_ended_normally',
+          source: 'daemon-run-finalize',
+          code: emptyReplyError.error?.code ?? null,
+          message: emptyReplyError.error?.message ?? null,
+        });
+        return finishWithRetryDecision('succeeded', code, signal, {
+          allowRetry: false,
+          skipCloseDiagnostic: true,
+        });
       }
       // Resume-on-failure: a terminal *resumable* failure (transient mid-stream
       // drop / inactivity) on a session-resuming runtime is not a dead end.
@@ -16782,12 +16821,13 @@ export async function startServer({
         !agentProducedOutput
       ) {
         markRpcCloseReason('empty_output');
-        send('error', createSseErrorPayload(
-          'AGENT_EXECUTION_FAILED',
-          'Agent completed without producing any output. The model or provider may have returned an empty response. Check the agent logs for upstream errors, then try re-authenticating the agent or switching models.',
-          { retryable: true },
-        ));
-        return finishWithRetryDecision('failed', code, signal);
+        return finishWithRetryDecision('failed', code, signal, {
+          emptyReplyError: createSseErrorPayload(
+            'AGENT_EXECUTION_FAILED',
+            'Agent completed without producing any output. The model or provider may have returned an empty response. Check the agent logs for upstream errors, then try re-authenticating the agent or switching models.',
+            { retryable: true },
+          ),
+        });
       }
       // P0-24 N9: a plugin-authoring run that exited cleanly without the
       // generated-plugin files still ended normally — what it produced never
@@ -16844,15 +16884,22 @@ export async function startServer({
         markRpcCloseReason('empty_output');
         const combinedDetail = `${agentStderrTail}\n${agentStdoutTail}`;
         const authFailure = classifyAgentAuthFailure(agentId, combinedDetail);
-        const msg = authFailure
-          ? authFailure.message ?? `${def.name} authentication expired. Please re-authenticate and retry.`
-          : `${def.name} returned an empty response. This may indicate an expired session — try re-authenticating the agent.`;
-        send('error', createSseErrorPayload(
-          authFailure ? 'AGENT_AUTH_REQUIRED' : 'AGENT_EXECUTION_FAILED',
-          msg,
-          { retryable: true },
-        ));
-        return finishWithRetryDecision('failed', 0, signal);
+        if (authFailure) {
+          // A login problem is a real failure, not an empty reply.
+          send('error', createSseErrorPayload(
+            'AGENT_AUTH_REQUIRED',
+            authFailure.message ?? `${def.name} authentication expired. Please re-authenticate and retry.`,
+            { retryable: true },
+          ));
+          return finishWithRetryDecision('failed', 0, signal);
+        }
+        return finishWithRetryDecision('failed', 0, signal, {
+          emptyReplyError: createSseErrorPayload(
+            'AGENT_EXECUTION_FAILED',
+            `${def.name} returned an empty response. This may indicate an expired session — try re-authenticating the agent.`,
+            { retryable: true },
+          ),
+        });
       }
       // ACP agents that don't shut down on stdin.end() (e.g. Devin for
       // Terminal) are forced to exit via SIGTERM from attachAcpSession after
