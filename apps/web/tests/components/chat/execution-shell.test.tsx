@@ -116,6 +116,8 @@ describe('壳头', () => {
     expect(screen.queryByText('进行中')).toBeNull();
     expect(screen.queryByText('运行失败')).toBeNull();
     expect(document.querySelector('[data-orb]')).toBeNull();
+    // PRD: 「已停止」灰色,与红色的「运行失败」区分
+    expect(screen.getByText('已停止').className).toMatch(/stStopped/);
   });
 
   it('空态:没有内容时不出箭头(D21)', () => {

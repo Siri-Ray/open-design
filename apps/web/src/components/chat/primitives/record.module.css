@@ -469,6 +469,7 @@
  */
 .fold.flat .body.stack .body.stack > .fold { padding-inline: 0; }
 .fold.flat > summary .stFail { color: var(--chat-red); }
+.fold.flat > summary .stStopped { color: var(--chat-text-muted); }
 
 /*
  * **可折叠的命令行整行退到静音灰**(稿子 components.css:1151-1154):
@@ -1170,6 +1171,9 @@
 
 /* 整轮失败时壳头的状态词 */
 .stFail { color: var(--chat-red); }
+
+/* 被停止的一轮壳头的状态词:PRD 规定「已停止」灰色(P0-24) */
+.stStopped { color: var(--chat-text-muted); }
 
 @media (prefers-reduced-motion: reduce) {
   .shimmer { animation: none; color: var(--dia-base, var(--chat-text-muted)); -webkit-text-fill-color: currentColor; }

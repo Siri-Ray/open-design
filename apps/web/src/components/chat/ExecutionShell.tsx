@@ -216,7 +216,7 @@ export function ExecutionShell({
        * 不是取消也不是失败。不复用 `chat.record.canceled` —— 那个词还是待办勾选的
        * 读屏文字(`StatusMark`),两处的意思不同。
        */
-      return <span>{t('chat.record.turnStopped')}</span>;
+      return <span className={styles.stStopped}>{t('chat.record.turnStopped')}</span>;
     }
     if (running) {
       /**

@@ -11,10 +11,9 @@
  * go well": spinning a stopped run's orb is the one thing this component must
  * never do, because the rotation itself is what says "working".
  *
- * Speed carries only one distinction, and it is not urgency: `queued` turns
- * slowly because it has not started. Everything else that is live — running
+ * Speed carries no distinction: everything that is live — queued, running
  * and awaiting a reply alike — turns at the same rate, so a colour change
- * never reads as a change of pace.
+ * never reads as a change of pace (P0-24: queued draws running's spinner).
  *
  * A FINISHED run is not a glyph in the lead slot at all (OPEND-3133): the row
  * keeps the folder every idle project leads with (`ProjectFolderGlyph`) and
@@ -194,10 +193,11 @@ export function ProjectRunStatusIcon({ status, size = 14, label }: Props) {
     case 'running':
       return <SiriOrb size={size} state="thinking" label={label} />;
     case 'queued':
-      // Same green as running: it is the same "not finished" family. The
-      // slower turn is the only thing saying this one has not started yet, so
-      // `idle` here is load-bearing.
-      return <SiriOrb size={size} state="idle" label={label} />;
+      // P0-24 (PRD scenario A2, product answer P4): a queued run draws the same
+      // spinner as a running one — the sidebar says "not finished yet", and
+      // whether it has started is not a distinction the row makes. The label
+      // still names it (排队中) for the tooltip and assistive tech.
+      return <SiriOrb size={size} state="thinking" label={label} />;
     case 'awaiting_input':
       // Running's speed, deliberately (per product). A pending question is not
       // a paused run — the agent is live and the work is mid-flight, so the
