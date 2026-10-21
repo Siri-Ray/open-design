@@ -31,7 +31,12 @@ import {
   getStrategyTaskExecution,
   getStrategyTaskExecutionByRunId,
   migrateStrategyTaskStore,
+  reconcileStrategyTaskRunTerminal,
 } from '../../src/strategies/task-store.js';
+import {
+  endFailedAutomaticContinuation,
+  odNextNativeSessionGuardReason,
+} from '../../src/strategies/od-next/automatic-simple-production.js';
 import {
   TEST_PROMPT_BUNDLE,
   strategyTaskCreateIdentityFixture,
@@ -954,6 +959,33 @@ describe('durable strategy task store', () => {
       runId: 'run-live',
       source: 'live_run_end',
       pid: process.pid,
+    }));
+  });
+
+  it('names why a refused continuation could not resume its native session', () => {
+    // Production bundles carried only "cold re-seeding is forbidden": nothing
+    // said whether the stored session was missing, refused by the resume guard
+    // (model/cwd/cursor), or unsupported by the runtime.
+    expect(odNextNativeSessionGuardReason({
+      supportsSessionResume: false, storedSessionId: 'thread-1', invalidationReason: null,
+    })).toBe('unsupported');
+    expect(odNextNativeSessionGuardReason({
+      supportsSessionResume: true, storedSessionId: null, invalidationReason: null,
+    })).toBe('no_stored_session');
+    expect(odNextNativeSessionGuardReason({
+      supportsSessionResume: true, storedSessionId: 'thread-1', invalidationReason: 'model_changed',
+    })).toBe('model_changed');
+
+    const task = createTask(db, snapshot, 'run-guarded', 'task-guarded');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const ended = endFailedAutomaticContinuation(db, { runId: 'run-guarded', guardReason: 'no_stored_session' });
+    expect(ended).toMatchObject({ taskExecutionId: task.taskExecutionId, outcome: 'completed' });
+    expect(warn).toHaveBeenCalledWith('[od-next-task] continuation failed', expect.objectContaining({
+      runId: 'run-guarded',
+      reasonCodes: [
+        'od_next_native_session_continuity_unproven',
+        'od_next_native_session_guard_no_stored_session',
+      ],
     }));
   });
 
