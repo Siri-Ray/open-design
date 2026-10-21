@@ -161,10 +161,11 @@ function todoTurn(): ChatMessage {
   return { id: 'assistant-1', role: 'assistant', content: '', events, startedAt: 1_000, endedAt: 3_000 };
 }
 
-// P0-24 产品 Q6 答复:回合末尾这一行整行删除,包括报错文案 S24 的「任务尚未完成」
-// 「任务已停止」,状态只看回合标题。下面两条从「出这一行」翻成「不再出这一行」。
+// P0-24 产品 Q6 答复:回合末尾的状态词删除,包括报错文案 S24 的「任务尚未完成」
+// 「任务已停止」,状态只看回合标题。PRD Must todo 2「其余保持现状」:
+// 「本次任务仍有 N 项内容未完成。」这句正文保留,被停止那一轮的正文随状态词一起删。
 describe('S24 回合状态行(P0-24 已删除)', () => {
-  it('S24a 仍有待办未完成:不再出「任务尚未完成」和未完成项数', () => {
+  it('S24a 仍有待办未完成:不再出「任务尚未完成」,「本次任务仍有 N 项内容未完成。」保留', () => {
     zh(
       <AssistantMessage
         projectKind="prototype"
@@ -176,7 +177,7 @@ describe('S24 回合状态行(P0-24 已删除)', () => {
       />,
     );
     expect(screen.queryByTestId('assistant-label')).toBeNull();
-    expect(screen.queryByTestId('assistant-label-detail')).toBeNull();
+    expect(screen.getByTestId('assistant-label-detail').textContent).toBe('本次任务仍有 2 项内容未完成。');
   });
 
   it('S24c 用户主动停止:不再出「任务已停止」和正文', () => {

@@ -2180,6 +2180,16 @@ export function AssistantFooter({
             : t("assistant.workingLabel")}
         </span>
       ) : null}
+      {/*
+        PRD Must todo 2「其余保持现状」:「本次任务仍有 N 项内容未完成。」这句留着 ——
+        删的只是它前面那个状态词。出现条件与改版前相同:正常结束、还欠着待办、N > 0
+        (被停止的一轮原来说的是「本次运行已按你的操作停止。」,那句删了,这句也不补)。
+      */}
+      {!hideRunStatus && !streaming && !hasEmptyResponse && !canceled && hasUnfinishedTodos && unfinishedTodoCount > 0 ? (
+        <span className="assistant-label-detail" data-testid="assistant-label-detail">
+          {t("assistant.unfinishedDetail", { n: unfinishedTodoCount })}
+        </span>
+      ) : null}
       {copyMarkdown || onFork || feedbackControls ? (
         <span className="assistant-footer-controls">
           {/* 稿子的顺序是 赞 → 踩 → 复制 → Fork:先是「这答案好不好」,再是「拿它做点什么」 */}
