@@ -161,8 +161,10 @@ function todoTurn(): ChatMessage {
   return { id: 'assistant-1', role: 'assistant', content: '', events, startedAt: 1_000, endedAt: 3_000 };
 }
 
-describe('S24 回合状态行', () => {
-  it('S24a 仍有待办未完成:标题「任务尚未完成」+ 正文带实际未完成项数', () => {
+// P0-24 产品 Q6 答复:回合末尾这一行整行删除,包括报错文案 S24 的「任务尚未完成」
+// 「任务已停止」,状态只看回合标题。下面两条从「出这一行」翻成「不再出这一行」。
+describe('S24 回合状态行(P0-24 已删除)', () => {
+  it('S24a 仍有待办未完成:不再出「任务尚未完成」和未完成项数', () => {
     zh(
       <AssistantMessage
         projectKind="prototype"
@@ -173,11 +175,11 @@ describe('S24 回合状态行', () => {
         isLast
       />,
     );
-    expect(screen.getByTestId('assistant-label').textContent).toBe('任务尚未完成');
-    expect(screen.getByTestId('assistant-label-detail').textContent).toBe('本次任务仍有 2 项内容未完成。');
+    expect(screen.queryByTestId('assistant-label')).toBeNull();
+    expect(screen.queryByTestId('assistant-label-detail')).toBeNull();
   });
 
-  it('S24c 用户主动停止:标题「任务已停止」+ 正文', () => {
+  it('S24c 用户主动停止:不再出「任务已停止」和正文', () => {
     zh(
       <AssistantMessage
         projectKind="prototype"
@@ -196,38 +198,8 @@ describe('S24 回合状态行', () => {
         isLast
       />,
     );
-    expect(screen.getByTestId('assistant-label').textContent).toBe('任务已停止');
-    expect(screen.getByTestId('assistant-label-detail').textContent).toBe('本次运行已按你的操作停止。');
-  });
-
-  // run-error-catalog D-04:「按你的操作停止」只属于用户自己按的停止。P0-24 Q5 起
-  // 本地服务关闭或崩溃重启停下的一轮也记为已停止,它不能说是用户停的。
-  it.each([
-    ['daemon_shutdown', false],
-    ['project_cleanup', false],
-    ['user_stop', true],
-  ] as const)('stop origin %s → 「按你的操作停止」正文显示=%s', (cancelOrigin, shown) => {
-    render(
-      <AssistantMessage
-        projectKind="prototype"
-        conversationId="conv-1"
-        message={{
-          id: `assistant-stop-${cancelOrigin}`,
-          role: 'assistant',
-          content: 'partial answer',
-          runStatus: 'canceled',
-          cancelOrigin,
-          events: [{ kind: 'text', text: 'partial answer' }],
-          startedAt: 1_000,
-          endedAt: 3_000,
-        } as ChatMessage}
-        streaming={false}
-        projectId="project-1"
-        isLast
-      />,
-    );
-    expect(screen.getByTestId('assistant-label')).toBeTruthy();
-    expect(screen.queryByTestId('assistant-label-detail') !== null).toBe(shown);
+    expect(screen.queryByTestId('assistant-label')).toBeNull();
+    expect(screen.queryByTestId('assistant-label-detail')).toBeNull();
   });
 });
 

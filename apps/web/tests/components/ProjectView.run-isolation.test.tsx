@@ -2163,9 +2163,9 @@ describe('ProjectView conversation run isolation', () => {
         ]),
       );
     });
-    expect(screen.getByTestId('chat-error').textContent).toMatch(
-      /finished without producing a deliverable project file/i,
-    );
+    // P0-24 (PRD C7/C8, Q3): the reason stays on the turn (above) but no
+    // pane-level failure card is raised for a run that ended normally.
+    expect(screen.getByTestId('chat-error').textContent).toBe('');
     expect(reattachDaemonRun).not.toHaveBeenCalled();
   });
 

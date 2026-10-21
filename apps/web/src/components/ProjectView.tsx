@@ -7264,9 +7264,8 @@ export function ProjectView({
               true,
               { telemetryFinalized: true },
             );
-            if (deliveryOutcome === 'no_result' || deliveryOutcome === 'delivery_failed') {
-              setError(artifactPersistenceError ?? DESIGN_RESULT_MISSING_DETAIL);
-            }
+            // P0-24 (PRD C7/C8, Q3): no pane-level failure card for a run that
+            // ended normally without a deliverable; the message keeps the outcome.
             await auditDesignSystemWorkspaceAfterRun(message.id);
             // Clear stale retry count for successfully recovered run.
             transientFailedRetriesRef.current.delete(runId);
@@ -7807,9 +7806,8 @@ export function ProjectView({
                   true,
                   { telemetryFinalized: true },
                 );
-                if (deliveryOutcome === 'no_result' || deliveryOutcome === 'delivery_failed') {
-                  setError(artifactPersistenceError ?? DESIGN_RESULT_MISSING_DETAIL);
-                }
+                // P0-24 (PRD C7/C8, Q3): no pane-level failure card for a run that
+                // ended normally without a deliverable; the message keeps the outcome.
                 await auditDesignSystemWorkspaceAfterRun(message.id);
               })();
               onProjectsRefresh();
@@ -9930,17 +9928,18 @@ export function ProjectView({
             !liveHtml.trim();
           if (emptyApiResponse) {
             const endedAt = Date.now();
-            const diagnostic = t('assistant.emptyResponseMessage');
+            // P0-24 Q6 (same as P7): a model stream that ends with no reply is a
+            // normal end, not a failure. The turn keeps the `empty_response`
+            // marker other logic reads, without a 运行失败 body text.
             updateMessageById(
               assistantId,
               (prev) => ({
                 ...prev,
                 endedAt,
-                runStatus: 'failed',
+                runStatus: 'succeeded',
                 events: [
                   ...(prev.events ?? []),
                   { kind: 'status', label: 'empty_response', detail: config.model },
-                  { kind: 'text', text: diagnostic },
                 ],
               }),
               true,
@@ -9952,7 +9951,7 @@ export function ProjectView({
               controller,
               cancelController,
             );
-            if (ownsCurrentRun) updateConversationLatestRun('failed', endedAt);
+            if (ownsCurrentRun) updateConversationLatestRun('succeeded', endedAt);
             void refreshProjectFiles().catch(() => {
               // Retain the last accepted file list while the daemon recovers.
             });
@@ -10181,7 +10180,9 @@ export function ProjectView({
                 return updated;
               });
               if (deliveryOutcome === 'no_result' || deliveryOutcome === 'delivery_failed') {
-                setError(artifactPersistenceError ?? DESIGN_RESULT_MISSING_DETAIL);
+                // P0-24 (PRD C7/C8, Q3): a run that ended normally but delivered no
+                // file is not a failure, so no pane-level failure card. The outcome stays
+                // recorded on the message (resultDeliveryState), as Q3 accepted.
                 releaseCommentsAfterUnsuccessfulRun(runSavedComments);
               }
               await auditDesignSystemWorkspaceAfterRun(assistantId);

@@ -214,7 +214,9 @@ describe('反向锚点:兜底不许铺到这三档上', () => {
    * 「没有输出」,由 `e2e/ui/api-empty-response.test.ts` 那条 P0 钉死。
    * 那一格自己已经在说话,再压一张白卡就是两块 UI 说同一件事。
    */
-  it('空回复那一档仍然只显示「没有输出」,不出兜底卡', () => {
+  // P0-24 Q6:回合末尾整行删除,旧会话里落库为 failed 的空回复也不再出「任务未能完成」;
+  // 兜底卡照旧不出(新产生的空回复已按正常结束)。
+  it('空回复那一档(旧会话)不出兜底卡,回合末尾也不再出状态词', () => {
     const message = {
       id: 'msg-empty',
       role: 'assistant',
@@ -232,9 +234,7 @@ describe('反向锚点:兜底不许铺到这三档上', () => {
     renderChat(message);
 
     expect(screen.queryByTestId('chat-run-error-card')).toBeNull();
-    expect(screen.getByTestId('assistant-label').textContent).toContain(
-      'assistant.emptyResponseLabel',
-    );
+    expect(screen.queryByTestId('assistant-label')).toBeNull();
   });
 
   /*

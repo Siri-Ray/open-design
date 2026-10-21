@@ -455,7 +455,9 @@ describe('ProjectView API empty response handling', () => {
     expect(mockedStreamViaDaemon).not.toHaveBeenCalled();
   });
 
-  it('marks an empty API completion as a soft no-output state instead of succeeded', async () => {
+  // P0-24 Q6 (same as P7): a model stream that ends with no reply is a normal
+  // end. The turn keeps its empty_response marker but no longer says 运行失败.
+  it('ends an empty API completion normally, keeping only its empty_response marker', async () => {
     mockedStreamViaDaemon.mockImplementation(async (options: DaemonStreamOptions) => {
       const { handlers } = options;
       handlers.onDone('');
@@ -467,8 +469,7 @@ describe('ProjectView API empty response handling', () => {
     await waitFor(() => {
       expect(screen.getByText('empty_response:deepseek-chat')).toBeTruthy();
     });
-    expect(screen.getByText('This task failed to run. Please retry. If it fails again, please contact support.')).toBeTruthy();
-    expect(screen.queryByText('succeeded')).toBeNull();
+    expect(screen.queryByText('This task failed to run. Please retry. If it fails again, please contact support.')).toBeNull();
 
     await waitFor(() => {
       expect(
@@ -476,7 +477,7 @@ describe('ProjectView API empty response handling', () => {
           const message = call[2] as ChatMessage;
           return (
             message.role === 'assistant' &&
-            message.runStatus === 'failed' &&
+            message.runStatus === 'succeeded' &&
             message.events?.some(
               (event: AgentEvent) => event.kind === 'status' && event.label === 'empty_response',
             )
@@ -484,7 +485,7 @@ describe('ProjectView API empty response handling', () => {
         }),
       ).toBe(true);
     });
-    expect(mockedPlaySound).toHaveBeenCalledWith('failure-sound');
+    expect(mockedPlaySound).not.toHaveBeenCalledWith('failure-sound');
   });
 
   it('retries a failed API turn without appending a duplicate user message', async () => {
@@ -652,7 +653,7 @@ describe('ProjectView API empty response handling', () => {
       await expectCommentReleasedToOpen();
       await waitFor(() => {
         expect(hasSavedAssistantMessage((message) => (
-          message.runStatus === 'failed' &&
+          message.runStatus === 'succeeded' &&
           message.events?.some((event) => event.kind === 'status' && event.label === 'empty_response') === true
         ))).toBe(true);
       });

@@ -388,7 +388,7 @@ describe('AssistantMessage 执行记录', () => {
    * 是 `opacity: 0`(OPEND-2542 的 hover 揭示)—— 前提在历史回合上不成立。
    * 这一条仍然守着「两行说的是同一件事的两句话」:壳头报终态、状态行报是谁停的。
    */
-  it('手动停止:壳头报「已取消」,「任务已停止」是下面那行状态的词(B7 / W4;OPEND-2849 S24c 换词)', () => {
+  it('手动停止:壳头报「已停止」,回合末尾不再有状态行(P0-24 回合末尾只留问答卡 / 失败卡)', () => {
     const { container } = render(
       <AssistantMessage
         projectKind="prototype"
@@ -431,10 +431,10 @@ describe('AssistantMessage 执行记录', () => {
     expect(recordHead(container)).toContain('Stopped');
     expect(recordHead(container)).not.toContain('Working');
     expect(recordHead(container)).not.toContain('Done');
-    expect(container.querySelector('[data-testid="assistant-label"]')?.textContent).toBe('Task stopped');
+    expect(container.querySelector('[data-testid="assistant-label"]')).toBeNull();
   });
 
-  it('执行记录里没内容的一轮被停掉:状态行说「任务已停止」而不是「已完成」', () => {
+  it('执行记录里没内容的一轮被停掉:回合末尾不说「任务已停止」也不说「已完成」(P0-24)', () => {
     const { container } = render(
       <AssistantMessage
         projectKind="prototype"
@@ -451,7 +451,7 @@ describe('AssistantMessage 执行记录', () => {
       />,
     );
 
-    expect(container.querySelector('[data-testid="assistant-label"]')?.textContent).toBe('Task stopped');
+    expect(container.querySelector('[data-testid="assistant-label"]')).toBeNull();
   });
 
   it('P0-24 N15:浏览器放弃重连的一轮按「进行中」画,不写「运行失败」', () => {
