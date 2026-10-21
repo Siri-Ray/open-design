@@ -1486,18 +1486,13 @@ export function ChatPane({
     () => foldStrategyTaskTurns(
       messages
         .filter((message) => !shouldHideEmptyBrandAssistantMessage(message, projectMetadata))
-        // P0-24 N15: a turn the browser only lost contact with is drawn as in
-        // progress until the run record decides it (see pending-disconnect) —
-        // while the reconnect row for that run is on screen to say so. Without
-        // the row (the user left and came back) the error card keeps catching
-        // the turn, an earlier decision N15 does not cover.
-        .map((message) => (
-          reconnect?.reason === 'transport' && message.runId === reconnect.runId
-            ? projectTurnAwaitingRunRecord(message)
-            : message
-        )),
+        // P0-24 N15 / Q7: a turn the browser only lost contact with is drawn
+        // as in progress until the run record decides it (see
+        // pending-disconnect) — also after the user left and came back, when
+        // the reconnect row is gone until recovery reattaches.
+        .map(projectTurnAwaitingRunRecord),
     ),
-    [messages, projectMetadata, reconnect],
+    [messages, projectMetadata],
   );
   /**
    * 转录**画得出来**的那一份 —— 正文、右侧导轨、钉顶三处共用这一个数组。

@@ -9,6 +9,7 @@ import type { AgentEvent, ChatMessage } from '../../../src/types';
 import {
   projectTurnAwaitingRunRecord,
   runOutcomeAwaitsRunRecord,
+  settleTurnFromRunRecord,
 } from '../../../src/runtime/chat/pending-disconnect';
 
 const disconnect: AgentEvent = {
@@ -70,3 +71,18 @@ describe('projectTurnAwaitingRunRecord', () => {
     expect(projectTurnAwaitingRunRecord(failed)).toBe(failed);
   });
 });
+
+describe('settleTurnFromRunRecord', () => {
+  it('drops the disconnect marker once the record decides, so a confirmed failure reads failed', () => {
+    const settled = settleTurnFromRunRecord(turn({}));
+    expect(settled.events).toEqual([{ kind: 'text', text: 'partial' }]);
+    expect(runOutcomeAwaitsRunRecord(settled)).toBe(false);
+  });
+
+  it('keeps real errors and returns an unmarked message unchanged', () => {
+    const real = turn({ events: [realError] });
+    expect(settleTurnFromRunRecord(real)).toBe(real);
+    expect(settleTurnFromRunRecord(turn({ events: [disconnect, realError] })).events).toEqual([realError]);
+  });
+});
+

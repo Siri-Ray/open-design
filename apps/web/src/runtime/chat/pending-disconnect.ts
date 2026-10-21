@@ -59,3 +59,21 @@ export function projectTurnAwaitingRunRecord<T extends ChatMessage>(message: T):
     ),
   };
 }
+
+/**
+ * The run record has spoken: drop the disconnect marker from the message.
+ *
+ * Call wherever recovery adopts a terminal status from the daemon. The marker
+ * only ever meant "outcome unknown"; left behind on a turn the record says
+ * failed, it would keep {@link runOutcomeAwaitsRunRecord} drawing that turn as
+ * in progress forever (P0-24 N15 / Q7).
+ */
+export function settleTurnFromRunRecord<T extends ChatMessage>(message: T): T {
+  const events = message.events ?? [];
+  if (!events.some((event) => isErrorStatus(event) && isReconnectOwnedError(event))) return message;
+  return {
+    ...message,
+    events: events.filter((event) => !(isErrorStatus(event) && isReconnectOwnedError(event))),
+  };
+}
+
