@@ -39,6 +39,7 @@ import type {
   RunContextSelection,
   SseErrorPayload,
   StrategyTaskProjectionV2,
+  RunNoticesResponse,
   WorkspaceCollabContext,
 } from '@open-design/contracts';
 import type { StreamHandlers } from './anthropic';
@@ -1712,6 +1713,30 @@ export async function listRunsForProject(
         ? { awaitingInputConversationIds: body.awaitingInputConversationIds }
         : {}),
     };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The global run-notice feed after `after` (P0-24 N10). `null` when the daemon
+ * is unreachable or refuses, so the poller keeps its cursor and tries again.
+ */
+export async function fetchRunNotices(
+  after: number,
+  workspaceContext?: WorkspaceCollabContext | null,
+): Promise<RunNoticesResponse | null> {
+  try {
+    const resp = await fetch(`/api/run-notices?after=${Math.max(0, Math.floor(after))}`, {
+      cache: 'no-store',
+      ...(workspaceContext
+        ? { headers: workspaceProjectHeaders(workspaceContext) }
+        : {}),
+    });
+    if (!resp.ok) return null;
+    const body = (await resp.json()) as RunNoticesResponse;
+    if (typeof body?.epoch !== 'string' || !Array.isArray(body.notices)) return null;
+    return body;
   } catch {
     return null;
   }

@@ -232,6 +232,12 @@ export interface CompletionNotificationOpts {
   status: 'succeeded' | 'failed';
   title: string;
   body: string;
+  /**
+   * Notification identity. The default is one per status, so a second turn of
+   * the same kind replaces the first; the global feed passes one per run so
+   * two projects finishing back to back both stay in the center (P0-24 N10).
+   */
+  tag?: string;
   onClick?: () => void;
 }
 
@@ -244,7 +250,7 @@ export type CompletionNotificationResult =
 function notificationOptionsFor(
   opts: CompletionNotificationOpts,
 ): NotificationOptionsWithBrowserExtensions {
-  const tag = `od-task-${opts.status}`;
+  const tag = opts.tag ?? `od-task-${opts.status}`;
   return {
     body: opts.body,
     tag,
