@@ -1169,6 +1169,16 @@
   30% { transform: translateY(-3px); }
 }
 
+/*
+ * P0-24 推测项 A-04(登记表 A-04):回合标题写成「已停止 · 31s」「用时 · 1m 20s」,
+ * 按 PRD 示例在时长前加分隔符。只挂在回合标题(执行记录壳)上,工具行等其他折叠头
+ * 不受影响;分隔符走伪元素,时长文字本身不变。设计确认写法前先按这个做。
+ */
+.turnHead > summary .meta::before {
+  content: '·';
+  margin-right: 0.35em;
+}
+
 /* 整轮失败时壳头的状态词 */
 .stFail { color: var(--chat-red); }
 

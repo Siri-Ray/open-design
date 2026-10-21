@@ -7,6 +7,8 @@
  * 用真实的 buildTurnBlocks 产出当输入,而不是手捏 shell 对象:
  * 手捏的话组件与数据层可能各自漂移,接起来才发现对不上。
  */
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, render as rtlRender, screen } from '@testing-library/react';
 import type { ReactElement } from 'react';
@@ -118,6 +120,16 @@ describe('壳头', () => {
     expect(document.querySelector('[data-orb]')).toBeNull();
     // PRD: 「已停止」灰色,与红色的「运行失败」区分
     expect(screen.getByText('已停止').className).toMatch(/stStopped/);
+  });
+
+  // P0-24 推测项 A-04:回合标题写成「已停止 · 31s」—— 分隔符只挂在回合标题上
+  it('回合标题带 turnHead 钩子,分隔符只画在它的时长前(推测项 A-04)', () => {
+    const [shell] = shellsOf(call('t1', 'Bash', { command: 'ls' }), 'canceled');
+    const { container } = render(<ExecutionShell shell={shell as ShellData} />);
+    expect(container.querySelector('details')?.className).toMatch(/turnHead/);
+    // jsdom 下 import.meta.url 不是 file: 协议,按包根(vitest 的 cwd)取路径
+    const css = readFileSync(resolve(process.cwd(), 'src/components/chat/primitives/record.module.css'), 'utf8');
+    expect(css).toMatch(/\.turnHead > summary \.meta::before\s*\{[^}]*content:\s*'·'/);
   });
 
   it('空态:没有内容时不出箭头(D21)', () => {
