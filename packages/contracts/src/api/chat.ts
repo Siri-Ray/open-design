@@ -1111,6 +1111,17 @@ export type PersistedAgentEvent =
        */
       runStartedAt?: number;
       runEndedAt?: number;
+      /**
+       * View-only, stamped by the client fold like the span above: this Run
+       * started because the user replied (e.g. submitted a question form),
+       * not because the daemon auto-continued the task.
+       *
+       * The renderer gives auto-continued Runs one turn header with a summed
+       * duration (P0-24 N13 ①, assumption A-01) and keeps a Run that follows a
+       * user reply as a turn of its own (P0-24 Q8, option A). Absent = the
+       * boundary is an auto-continuation; it is never persisted.
+       */
+      afterUserReply?: boolean;
     }
   /**
    * This turn's follow-up suggestions — the three one-line actions the chat
