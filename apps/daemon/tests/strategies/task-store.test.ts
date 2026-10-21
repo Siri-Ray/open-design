@@ -949,7 +949,9 @@ describe('durable strategy task store', () => {
   });
 
   it.each([
-    ['running', 'completed'],
+    // P0-24 Q5: a Run still running when the daemon died is recorded as
+    // stopped on restart, so its task ends the way a stopped Run's does.
+    ['running', 'canceled'],
     ['canceled', 'canceled'],
   ] as const)(
     'reconciles a persisted %s physical Run after a real SQLite restart to %s',
@@ -1004,7 +1006,9 @@ describe('durable strategy task store', () => {
     },
   );
 
-  it('ends the task while retaining the physical failure when startup interrupts a Run', async () => {
+  // P0-24 Q5: the restart stops the Run rather than failing it; the task ends
+  // the way a stopped Run's does and keeps that physical fact.
+  it('ends the task as stopped when startup interrupts a Run', async () => {
     const task = createTask(db, snapshot, 'run-interrupted');
     closeDatabase();
 
@@ -1032,9 +1036,9 @@ describe('durable strategy task store', () => {
     });
 
     const persisted = getStrategyTaskExecution(db, task.taskExecutionId);
-    expect(persisted?.outcome).toBe('completed');
+    expect(persisted?.outcome).toBe('canceled');
     expect(persisted?.blockedContext).toBeUndefined();
-    expect(persisted?.runs.at(-1)).toMatchObject({ settlementReason: 'ended', settlementFacts: { physicalStatus: 'failed' } });
-    expect(JSON.parse(fs.readFileSync(path.join(runDir, 'state.json'), 'utf8')).status).toBe('failed');
+    expect(persisted?.runs.at(-1)).toMatchObject({ settlementReason: 'ended', settlementFacts: { physicalStatus: 'canceled' } });
+    expect(JSON.parse(fs.readFileSync(path.join(runDir, 'state.json'), 'utf8')).status).toBe('canceled');
   });
 });
