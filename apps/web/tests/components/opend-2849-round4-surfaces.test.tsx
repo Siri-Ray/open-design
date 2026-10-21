@@ -199,6 +199,36 @@ describe('S24 回合状态行', () => {
     expect(screen.getByTestId('assistant-label').textContent).toBe('任务已停止');
     expect(screen.getByTestId('assistant-label-detail').textContent).toBe('本次运行已按你的操作停止。');
   });
+
+  // run-error-catalog D-04:「按你的操作停止」只属于用户自己按的停止。P0-24 Q5 起
+  // 本地服务关闭或崩溃重启停下的一轮也记为已停止,它不能说是用户停的。
+  it.each([
+    ['daemon_shutdown', false],
+    ['project_cleanup', false],
+    ['user_stop', true],
+  ] as const)('stop origin %s → 「按你的操作停止」正文显示=%s', (cancelOrigin, shown) => {
+    render(
+      <AssistantMessage
+        projectKind="prototype"
+        conversationId="conv-1"
+        message={{
+          id: `assistant-stop-${cancelOrigin}`,
+          role: 'assistant',
+          content: 'partial answer',
+          runStatus: 'canceled',
+          cancelOrigin,
+          events: [{ kind: 'text', text: 'partial answer' }],
+          startedAt: 1_000,
+          endedAt: 3_000,
+        } as ChatMessage}
+        streaming={false}
+        projectId="project-1"
+        isLast
+      />,
+    );
+    expect(screen.getByTestId('assistant-label')).toBeTruthy();
+    expect(screen.queryByTestId('assistant-label-detail') !== null).toBe(shown);
+  });
 });
 
 describe('S32a 登录时浏览器没打开', () => {

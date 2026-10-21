@@ -21,6 +21,7 @@ describe('durable run terminal reconciliation', () => {
         run_id TEXT,
         run_status TEXT,
         ended_at INTEGER,
+        cancel_origin TEXT,
         events_json TEXT
       )
     `);
@@ -281,12 +282,12 @@ describe('durable run terminal reconciliation', () => {
     });
 
     expect(first).toMatchObject({ interrupted: 1, messagesReconciled: 1, analyticsReplayed: 1 });
-    expect(db.prepare(`SELECT run_status AS status, ended_at AS endedAt, events_json AS eventsJson FROM messages WHERE id = 'm1'`).get()).toMatchObject({
+    expect(db.prepare(`SELECT run_status AS status, ended_at AS endedAt, cancel_origin AS cancelOrigin, events_json AS eventsJson FROM messages WHERE id = 'm1'`).get()).toMatchObject({
       status: 'canceled',
       // P0-24 N1: the run ended at its last recorded activity (the persisted
       // update at 2_000 is newer than the 1_500 event), not at restart time.
       endedAt: 2_000,
-      eventsJson: expect.stringContaining('"label":"canceled"'),
+      cancelOrigin: 'daemon_shutdown',
     });
     expect(capture).toHaveBeenCalledWith(expect.objectContaining({
       eventName: 'run_finished',
@@ -309,6 +310,9 @@ describe('durable run terminal reconciliation', () => {
         tool_execution_evidence_incomplete: true,
       }),
     }));
+    // No internal reconciliation note is printed into the conversation (Q5).
+    const repaired = db.prepare(`SELECT events_json AS eventsJson FROM messages WHERE id = 'm1'`).get() as { eventsJson: string | null };
+    expect(repaired.eventsJson ?? '').not.toContain('reconciled after daemon restart');
     const runFinished = (capture.mock.calls as unknown as Array<[{ properties: Record<string, unknown> }]>)[0]![0].properties;
     // The stop reason survives for SLO eligibility, the way a live cancel reports it.
     expect(runFinished).toMatchObject({ cancel_origin: 'daemon_shutdown', terminal_trigger: 'daemon_restart' });
@@ -518,7 +522,7 @@ describe('durable run terminal reconciliation', () => {
     }));
     const storageDb = new Database(':memory:');
     storageDb.exec(`CREATE TABLE messages (
-      id TEXT PRIMARY KEY, run_id TEXT, run_status TEXT, ended_at INTEGER, content TEXT NOT NULL DEFAULT '', events_json TEXT)`);
+      id TEXT PRIMARY KEY, run_id TEXT, run_status TEXT, ended_at INTEGER, cancel_origin TEXT, content TEXT NOT NULL DEFAULT '', events_json TEXT)`);
     storageDb.prepare(
       `INSERT INTO messages (id, run_id, run_status, content, events_json) VALUES ('m-storage', ?, 'failed', 'partial', '[]')`,
     ).run(runId);

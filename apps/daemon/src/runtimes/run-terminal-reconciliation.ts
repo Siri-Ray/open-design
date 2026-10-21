@@ -320,11 +320,21 @@ function reconcileMessages(
     const status = state && TERMINAL_STATUSES.has(state.status) ? state.status : 'failed';
     db.prepare(
       `UPDATE messages
-          SET run_status = ?, ended_at = COALESCE(ended_at, ?)
+          SET run_status = ?, ended_at = COALESCE(ended_at, ?),
+              cancel_origin = COALESCE(cancel_origin, ?)
         WHERE id = ? AND run_status IN ('queued', 'running')`,
-    ).run(status, state?.updatedAt ?? now, row.id);
+    ).run(
+      status,
+      state?.updatedAt ?? now,
+      status === 'canceled' ? state?.cancelOrigin ?? null : null,
+      row.id,
+    );
     const isDaemonRestart = state?.terminalRecoveryReason === 'daemon_restart'
       || state?.errorCode === RESTART_ERROR_CODE;
+    // P0-24 Q5: a Run the restart stopped is just stopped. Its message already
+    // says canceled, and the footer reports it; an extra status row would
+    // print the internal reconciliation note into the conversation.
+    if (status === 'canceled' && isDaemonRestart) continue;
     appendMessageStatusEvent(db, row.id, status === 'failed'
       ? {
           label: 'error',

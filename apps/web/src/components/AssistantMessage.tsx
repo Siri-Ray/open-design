@@ -1135,6 +1135,10 @@ function AssistantMessageImpl({
    *
    * 复制、时间这些**照旧**:它们说的是这段内容本身,不是某一轮的结果。
    */
+  /** A stop with a known origin other than the user's own click (D-04). */
+  const canceledByNonUser = message.runStatus === "canceled"
+    && message.cancelOrigin != null
+    && message.cancelOrigin !== "user_stop";
   const hideRunStatus =
     message.id === errorCardOwnerId
     || hasPendingQuestionForm
@@ -1424,6 +1428,7 @@ function AssistantMessageImpl({
                   unfinishedTodoCount: unfinishedTodos.length,
                   hasEmptyResponse,
                   canceled: message.runStatus === "canceled",
+                  canceledByNonUser,
                   preparing,
                   preparingStatus,
                   copyMarkdown,
@@ -1444,6 +1449,7 @@ function AssistantMessageImpl({
                 unfinishedTodoCount={unfinishedTodos.length}
                 hasEmptyResponse={hasEmptyResponse}
                 canceled={message.runStatus === "canceled"}
+                canceledByNonUser={canceledByNonUser}
                 preparing={preparing}
                 preparingStatus={preparingStatus}
                 copyMarkdown={copyMarkdown}
@@ -2113,6 +2119,8 @@ interface AssistantFooterProps {
   unfinishedTodoCount?: number;
   hasEmptyResponse: boolean;
   canceled?: boolean;
+  /** The stop has a known origin other than the user (run-error-catalog D-04). */
+  canceledByNonUser?: boolean;
   // Pre-output phase: streaming but nothing rendered yet. The label shimmers
   // "Preparing…"; once content lands it flips to "Working".
   preparing?: boolean;
@@ -2145,6 +2153,7 @@ export function AssistantFooter({
   unfinishedTodoCount = 0,
   hasEmptyResponse,
   canceled = false,
+  canceledByNonUser = false,
   preparing = false,
   preparingStatus = "preparing",
   copyMarkdown,
@@ -2212,7 +2221,10 @@ export function AssistantFooter({
           </span>
           {/* 产品《报错文案》S24c / S24a(OPEND-2849):这两档的状态词是「标题」,
               紧跟一句正文。其余各档只有状态词。 */}
-          {!streaming && !hasEmptyResponse && (canceled || (hasUnfinishedTodos && unfinishedTodoCount > 0)) ? (
+          {/* 「本次运行已按你的操作停止」只属于用户自己按的停止(run-error-catalog D-04):
+              停止来源已知且不是用户时(如本地服务关闭或崩溃重启,P0-24 Q5)不说这句。
+              缺字段的历史消息照旧显示。 */}
+          {!streaming && !hasEmptyResponse && ((canceled && !canceledByNonUser) || (!canceled && hasUnfinishedTodos && unfinishedTodoCount > 0)) ? (
             <span className="assistant-label-detail" data-testid="assistant-label-detail">
               {canceled
                 ? t("assistant.canceledDetail")
