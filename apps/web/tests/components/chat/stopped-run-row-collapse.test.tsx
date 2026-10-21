@@ -45,7 +45,7 @@
  *   的实现也能让上面全绿。
  */
 import { afterEach, describe, expect, it } from 'vitest';
-import { cleanup, render } from '@testing-library/react';
+import { cleanup, fireEvent, render } from '@testing-library/react';
 import type { ReactElement } from 'react';
 import type { ChatMessage, PersistedAgentEvent } from '@open-design/contracts';
 import { I18nProvider } from '../../../src/i18n';
@@ -101,6 +101,19 @@ const turn = (runStatus: string, withDescription = true): ReactElement => (
   />
 );
 
+/**
+ * P0-24 推测项 A-03:结束的轮次(含被停止的)执行记录默认收起,壳里的行要点开才挂到 DOM。
+ * 这里像用户一样先点开壳,再看里面那一行 —— 本文件钉的是「里面那一行收没收」。
+ */
+const openShell = (root: HTMLElement): void => {
+  const shell = root.querySelector<HTMLDetailsElement>('details[class*="flat"]');
+  const summary = shell?.querySelector('summary');
+  if (!shell || !summary) throw new Error('没有执行记录壳');
+  if (shell.open) return;
+  fireEvent.click(summary);
+  fireEvent(shell, new Event('toggle', { bubbles: false }));
+};
+
 /** 壳自己那层 flat fold 不算工具行 */
 const commandFold = (root: HTMLElement): HTMLDetailsElement => {
   const el = root.querySelector<HTMLDetailsElement>('details[class*="fold"]:not([class*="flat"])');
@@ -114,6 +127,7 @@ describe('按停止之后:在飞的命令行收起来(真实触发路径)', () =
 
     it(`${shape}:轮次 canceled → 折叠块不带 open`, () => {
       const { container } = render(show(turn('canceled', withDescription)));
+      openShell(container);
       expect(
         commandFold(container).open,
         '轮次已经停了,这一行等不到结果 —— 不许永远摊着',
@@ -162,10 +176,11 @@ describe('为什么只有 canceled 这一档会漏 —— 量出来的,不是推
     expect(container.textContent).not.toContain('Packages: +37');
   });
 
-  it('canceled:壳照旧摊开(B7 的裁决没变),要收的是**里面那一行**', () => {
+  it('canceled:壳默认收起(推测项 A-03),点开之后里面那一行也是收着的', () => {
     const { container } = render(show(turn('canceled')));
     const shell = container.querySelector<HTMLDetailsElement>('details[class*="flat"]');
-    expect(shell?.open, '壳保持「进行中」,只挂旗标 —— 这一条不许被这次改动带走').toBe(true);
+    expect(shell?.open, 'P0-24 推测项 A-03:被停止的一轮执行记录默认收起').toBe(false);
+    openShell(container);
     expect(commandFold(container).open, '里面那一行才是要收的').toBe(false);
   });
 });

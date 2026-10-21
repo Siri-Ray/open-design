@@ -35,6 +35,9 @@ import { StatusMark } from './primitives/StatusMark';
 import { ToolRow } from './primitives/ToolRow';
 import styles from './primitives/record.module.css';
 
+/** P0-24 推测项 A-03:结束的执行记录(含被停止的)默认折叠。推翻时改为 false,恢复「停止后保持展开」。 */
+const TURN_RECORDS_START_COLLAPSED = true as boolean;
+
 /**
  * 多久算「等太久」。60 秒来自 `error-ux-design.md:33`(10 分钟 / Cloud 30 分钟才报超时,
  * 这一句只是等待期间的回音,不改变任何超时判定)。
@@ -164,7 +167,13 @@ export function ExecutionShell({
    * `shell.stopped` 仍然单独成条:被用户停住的那一档没有结论,收起来等于把
    * 「停在哪一步」也藏了。
    */
-  const lifecycleOpen = (running && !concluded) || shell.stopped;
+  // P0-24 推测项 A-03(登记表 A-03):PRD「执行过程默认折叠,点击展开」。结束的轮次一律收起,
+  // **被停止的也收起**(原来为了看停在哪一步保持摊开);用户点开后照旧听用户的。
+  // 执行中仍然摊开:运行中的记录里可能有等用户确认的交互卡(如品牌浏览协助),收起会让用户
+  // 看不到它、任务卡住。原规则保留在后半句,推翻时把开关改回 false。
+  const lifecycleOpen = TURN_RECORDS_START_COLLAPSED
+    ? running && !concluded
+    : (running && !concluded) || shell.stopped;
   const [open, setOpen] = useState(lifecycleOpen);
   const [userToggled, setUserToggled] = useState(false);
   useEffect(() => {
