@@ -95,10 +95,8 @@ describe('OPEND-2557 跑完就收起', () => {
     expect(outer(container).open).toBe(true);
   });
 
-  // P0-24 推测项 A-03:PRD「执行过程默认折叠,点击展开」,被停止的一轮也默认收起
-  // (原来为了看停在哪一步保持摊开);点开之后看得到停在哪一步。
-  it('中断的那一轮也默认收起,点开才摊开(推测项 A-03)', () => {
+  it('反向对照:中断的那一轮仍然摊开 —— 它是要人看清停在哪一步的', () => {
     const { container } = render(show(shellOf({ status: 'done', stopped: true })));
-    expect(outer(container).open).toBe(false);
+    expect(outer(container).open).toBe(true);
   });
 });

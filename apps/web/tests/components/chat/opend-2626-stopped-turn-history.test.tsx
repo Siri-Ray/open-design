@@ -27,7 +27,7 @@
  * 夹具形状照抄真机落库记录:TodoWrite 的 `tool_use.id` 带 `:todo-task` 后缀、
  * 对应的 `tool_result.toolUseId` 不带;整条流没有任何终态事件。
  */
-import { cleanup, fireEvent, render } from '@testing-library/react';
+import { cleanup, render } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -152,13 +152,6 @@ describe('OPEND-2626 · 停止过的历史回合恢复后的终态', () => {
 
   it('停止前正在跑的那一步,不许和从没开始过的那几步报同一个名字', () => {
     const { container } = renderRestoredHistoryTurn();
-    // P0-24 推测项 A-03:停止过的回合执行记录默认收起,像用户一样先点开再看各步
-    const shell = container.querySelector<HTMLDetailsElement>('details[class*="flat"]');
-    const summary = shell?.querySelector('summary');
-    if (shell && summary && !shell.open) {
-      fireEvent.click(summary);
-      fireEvent(shell, new Event('toggle', { bubbles: false }));
-    }
     const labels = labelsOf(container);
     const notStarted = labels.filter((l) => l === en['chat.record.pending']);
     // 三条步骤里只有后两条从没开始过 —— 原来是三条全报 "Not started"
