@@ -1,4 +1,7 @@
-import type { TrackingRunTerminalTrigger } from '@open-design/contracts/analytics';
+import type {
+  TrackingRunCancelOrigin,
+  TrackingRunTerminalTrigger,
+} from '@open-design/contracts/analytics';
 
 const TERMINAL_STATUSES = new Set(['succeeded', 'failed', 'canceled']);
 
@@ -6,7 +9,15 @@ export const RESTART_ERROR_CODE = 'DAEMON_RESTARTED';
 export const RESTART_ERROR_MESSAGE =
   'Run interrupted because the daemon restarted.';
 
+/** Whether a durable Run was ended by the daemon-restart interruption above. */
+export function wasInterruptedByDaemonRestart(
+  state: Pick<RestartRecoverableDurableRunState, 'errorCode' | 'terminalRecoveryReason'> | null | undefined,
+): boolean {
+  return state?.terminalRecoveryReason === 'daemon_restart' || state?.errorCode === RESTART_ERROR_CODE;
+}
+
 export interface RestartRecoverableDurableRunState {
+  cancelOrigin?: TrackingRunCancelOrigin | null;
   error?: string | null;
   errorCode?: string | null;
   exitCode?: number | null;
@@ -56,12 +67,22 @@ export function interruptDurableRunAfterDaemonRestart(
     typeof lastRecordedAt === 'number' && lastRecordedAt > 0 && lastRecordedAt <= now
       ? lastRecordedAt
       : now;
-  state.status = 'failed';
+  // P0-24 N1 / Q5: a Run cut off by a crash, force-quit or power loss was
+  // stopped, not failed — the cause is the client going away, not the agent.
+  // It is recorded and reported as canceled; the reason stays on the record
+  // (`errorCode` + `terminalTrigger` + `terminalRecoveryReason`) so analytics
+  // can still tell these apart from a user's stop. Product accepted the
+  // resulting change in failure rate.
+  state.status = 'canceled';
+  // The daemon side stopped it, as on a shutdown; `terminalTrigger` below
+  // still tells a crash restart apart from a graceful one. It is also what
+  // lets the sidebar read it as stopped while the user was away (P12).
+  state.cancelOrigin = 'daemon_shutdown';
   state.updatedAt = endedAt;
   state.terminalAt = endedAt;
-  state.exitCode = 1;
+  state.exitCode = null;
   state.signal = null;
-  state.error = RESTART_ERROR_MESSAGE;
+  state.error = null;
   state.errorCode = RESTART_ERROR_CODE;
   state.terminalTrigger = 'daemon_restart';
   state.terminalRecoveryReason = 'daemon_restart';

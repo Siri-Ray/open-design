@@ -413,7 +413,8 @@ export async function reconcileDurableRunTerminals(
         // A validated local verdict can correct a previously derived restart
         // failure. Its stale marker would otherwise replay a failed SSE end
         // even though the durable status has now been repaired to succeeded.
-        if (recovered.status === 'succeeded' && entry.state.status === 'failed'
+        if (recovered.status === 'succeeded'
+          && (entry.state.status === 'failed' || entry.state.status === 'canceled')
           && entry.state.errorCode === RESTART_ERROR_CODE
           && entry.state.terminalRecoveryReason === 'daemon_restart') {
           delete next.terminalRecoveryReason;
@@ -578,7 +579,11 @@ export async function reconcileDurableRunTerminals(
           ? state.errorCode ?? RESTART_ERROR_CODE
           : deriveRunErrorCode(state)
         : undefined;
-      const failure = failed
+      // A canceled Run is classified too, the way the live path does, so its
+      // replay carries `cancel_origin` / `terminal_trigger` — the SLO
+      // eligibility signal. P0-24 Q5 makes a restart-interrupted Run canceled,
+      // and without this its replay would lose the stop reason entirely.
+      const failure = failed || state.status === 'canceled'
         ? classifyRunFailure({
             result: runResult,
             status: state,

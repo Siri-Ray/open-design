@@ -864,8 +864,13 @@ export function createChatRunService({
       const timestamp = state.terminalAt ?? state.updatedAt;
       const nextEventId =
         events.reduce((max, record) => Math.max(max, record.id), 0) + 1;
-      events.push(
-        {
+      // The replayed terminal frame says what the record says. A Run the
+      // restart interrupted is stopped (P0-24 Q5), so it ends `canceled` with
+      // no error frame; an older record that was failed this way keeps its
+      // failed replay, including the restart error it was reported with.
+      const restartStopped = state.status === 'canceled';
+      if (!restartStopped) {
+        events.push({
           id: nextEventId,
           event: 'error',
           data: {
@@ -876,21 +881,21 @@ export function createChatRunService({
             },
           },
           timestamp,
+        });
+      }
+      events.push({
+        id: restartStopped ? nextEventId : nextEventId + 1,
+        event: 'end',
+        data: {
+          code: restartStopped ? null : 1,
+          signal: null,
+          status: restartStopped ? 'canceled' : 'failed',
+          terminalAt: timestamp,
+          resumable: false,
+          endedWithUnfinishedWork: Boolean(state.endedWithUnfinishedWork),
         },
-        {
-          id: nextEventId + 1,
-          event: 'end',
-          data: {
-            code: 1,
-            signal: null,
-            status: 'failed',
-            terminalAt: timestamp,
-            resumable: false,
-            endedWithUnfinishedWork: Boolean(state.endedWithUnfinishedWork),
-          },
-          timestamp,
-        },
-      );
+        timestamp,
+      });
     }
     const run = {
       ...state,

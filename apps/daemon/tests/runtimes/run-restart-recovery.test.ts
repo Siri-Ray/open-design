@@ -16,7 +16,11 @@ describe('interruptDurableRunAfterDaemonRestart', () => {
 
     expect(last).toBe(3_200);
     expect(interruptDurableRunAfterDaemonRestart(state, restartAt, last)).toBe(true);
-    expect(state).toMatchObject({ status: 'failed', updatedAt: 3_200, terminalAt: 3_200 });
+    // Q5: stopped, not failed; the reason stays on the record.
+    expect(state).toMatchObject({
+      status: 'canceled', updatedAt: 3_200, terminalAt: 3_200,
+      errorCode: 'DAEMON_RESTARTED', terminalTrigger: 'daemon_restart', error: null,
+    });
   });
 
   it('falls back to the last persisted update when the log has no timestamps', () => {

@@ -2144,21 +2144,21 @@ describe('run event log persistence', () => {
     });
 
     expect(reused.kind).toBe('reused');
+    // P0-24 Q5: the interrupted run is stopped, its reason kept on the record,
+    // and its replayed terminal frame says canceled with no error frame.
     expect(reused.run).toMatchObject({
       id: original.id,
-      status: 'failed',
+      status: 'canceled',
       errorCode: 'DAEMON_RESTARTED',
-      error: 'Run interrupted because the daemon restarted.',
+      error: null,
     });
     expect(afterRestart.statusBody(reused.run).terminalTrigger).toBe('daemon_restart');
-    expect(reused.run.events.slice(-2)).toMatchObject([
-      { event: 'error', data: { error: { code: 'DAEMON_RESTARTED' } } },
-      { event: 'end', data: { status: 'failed' } },
-    ]);
+    expect(reused.run.events.at(-1)).toMatchObject({ event: 'end', data: { status: 'canceled' } });
+    expect(reused.run.events.some((record: { event: string }) => record.event === 'error')).toBe(false);
     expect(fs.readdirSync(tmpDir)).toEqual([original.id]);
     expect(JSON.parse(fs.readFileSync(statePath, 'utf8'))).toMatchObject({
       id: original.id,
-      status: 'failed',
+      status: 'canceled',
       errorCode: 'DAEMON_RESTARTED',
       terminalRecoveryReason: 'daemon_restart',
     });

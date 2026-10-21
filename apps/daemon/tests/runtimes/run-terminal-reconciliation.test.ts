@@ -204,7 +204,9 @@ describe('durable run terminal reconciliation', () => {
     }));
   });
 
-  it('fails an interrupted run, repairs its message, and emits missing terminal telemetry once', async () => {
+  // P0-24 N1 / Q5: a run the restart interrupted is stopped, not failed; its
+  // reason (daemon_restart) is kept for analytics, without failure fields.
+  it('stops an interrupted run, repairs its message, and emits missing terminal telemetry once', async () => {
     const runId = 'run-interrupted';
     const runDir = path.join(tmpDir, runId);
     fs.mkdirSync(runDir, { recursive: true });
@@ -280,30 +282,17 @@ describe('durable run terminal reconciliation', () => {
 
     expect(first).toMatchObject({ interrupted: 1, messagesReconciled: 1, analyticsReplayed: 1 });
     expect(db.prepare(`SELECT run_status AS status, ended_at AS endedAt, events_json AS eventsJson FROM messages WHERE id = 'm1'`).get()).toMatchObject({
-      status: 'failed',
+      status: 'canceled',
       // P0-24 N1: the run ended at its last recorded activity (the persisted
       // update at 2_000 is newer than the 1_500 event), not at restart time.
       endedAt: 2_000,
-      eventsJson: expect.stringContaining('daemon restarted'),
+      eventsJson: expect.stringContaining('"label":"canceled"'),
     });
     expect(capture).toHaveBeenCalledWith(expect.objectContaining({
       eventName: 'run_finished',
       insertId: 'run-created-1-finish',
       properties: expect.objectContaining({
-        result: 'failed',
-        error_code: 'DAEMON_RESTARTED',
-        failure_category: 'process_exit',
-        failure_detail: 'interrupted',
-        failure_stage: 'finalize',
-        failure_mechanism: 'unknown',
-        failure_domain: 'cross_boundary',
-        evidence_level: 'lifecycle_signal',
-        repair_owner: 'shared_boundary',
-        admission_status: 'unknown',
-        admission_phase: 'unknown',
-        classifier_version: 'run-failure-v3',
-        retryable: true,
-        user_action: 'retry',
+        result: 'cancelled',
         terminal_trigger: 'daemon_restart',
         terminal_reconciled: true,
         terminal_integrity: 'reconciled',
@@ -320,15 +309,20 @@ describe('durable run terminal reconciliation', () => {
         tool_execution_evidence_incomplete: true,
       }),
     }));
+    const runFinished = (capture.mock.calls as unknown as Array<[{ properties: Record<string, unknown> }]>)[0]![0].properties;
+    // The stop reason survives for SLO eligibility, the way a live cancel reports it.
+    expect(runFinished).toMatchObject({ cancel_origin: 'daemon_shutdown', terminal_trigger: 'daemon_restart' });
+    expect(runFinished).not.toHaveProperty('error_code');
     expect(reportLangfuse).toHaveBeenCalledWith(expect.objectContaining({
-      persistedRunStatus: 'failed',
-      run: expect.objectContaining({ id: runId, status: 'failed' }),
+      persistedRunStatus: 'canceled',
+      run: expect.objectContaining({ id: runId, status: 'canceled' }),
     }));
 
     const recoveredState = JSON.parse(fs.readFileSync(path.join(runDir, 'state.json'), 'utf8'));
     expect(recoveredState).toMatchObject({
-      status: 'failed',
+      status: 'canceled',
       errorCode: 'DAEMON_RESTARTED',
+      terminalTrigger: 'daemon_restart',
       analyticsRecovery: { completedAt: expect.any(Number) },
       langfuseCompletedAt: expect.any(Number),
     });
