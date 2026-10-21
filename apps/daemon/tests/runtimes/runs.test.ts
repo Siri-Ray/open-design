@@ -1623,6 +1623,30 @@ describe('run event log persistence', () => {
     expect(JSON.parse(fs.readFileSync(statePath, 'utf8')).startedAt).toBe(1_000);
   });
 
+  it('keeps a pre-upgrade record without startedAt absent, not null, through hydration and persist', () => {
+    // A state.json written before the stamp existed has no startedAt. Reading it
+    // as null would say "never started" and drop the project from the sidebar
+    // fold; absent lets clients fall back to createdAt.
+    const beforeUpgrade = createRunsWithLog(tmpDir);
+    const run = beforeUpgrade.create({ projectId: 'p1', conversationId: 'c1', assistantMessageId: 'm1', agentId: 'claude' });
+    const statePath = path.join(tmpDir, run.id, 'state.json');
+    const { startedAt: _dropped, ...legacy } = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+    fs.writeFileSync(
+      statePath,
+      `${JSON.stringify({ ...legacy, status: 'succeeded', terminalAt: legacy.updatedAt })}\n`,
+      'utf8',
+    );
+
+    const afterUpgrade = createRunsWithLog(tmpDir);
+    const [listed] = afterUpgrade.list({ projectId: 'p1' });
+    expect(listed).toBeDefined();
+    expect('startedAt' in afterUpgrade.statusBody(listed!)).toBe(false);
+
+    // A later persist must not freeze null into the record either.
+    afterUpgrade.emit(listed!, 'diagnostic', { type: 'probe' });
+    expect('startedAt' in JSON.parse(fs.readFileSync(statePath, 'utf8'))).toBe(false);
+  });
+
   it('persists a restart-safe terminal state and telemetry checkpoints', () => {
     const runs = createRunsWithLog(tmpDir);
     const run = runs.create({

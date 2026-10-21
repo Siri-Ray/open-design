@@ -585,7 +585,11 @@ function durableRunState(run) {
     status: run.status,
     createdAt: run.createdAt,
     updatedAt: run.updatedAt,
-    startedAt: run.startedAt ?? null,
+    // Absent and null mean different things: null is a run created here that
+    // has not started yet; absent is a record that predates the stamp, which
+    // a reader must fall back from (to createdAt), not treat as never started.
+    // Persisting null for it would freeze that mistake into state.json.
+    ...(run.startedAt !== undefined ? { startedAt: run.startedAt } : {}),
     terminalAt: run.terminalAt ?? null,
     exitCode: run.exitCode,
     signal: run.signal,
@@ -1552,7 +1556,9 @@ export function createChatRunService({
     status: run.status,
     createdAt: run.createdAt,
     updatedAt: run.updatedAt,
-    startedAt: run.startedAt ?? null,
+    // Same rule as the durable record: omit a missing stamp rather than send
+    // null, which clients read as "has not started" and drop from the fold.
+    ...(run.startedAt !== undefined ? { startedAt: run.startedAt } : {}),
     terminalAt: run.terminalAt ?? null,
     cancelRequested: !!run.cancelRequested,
     cancelOrigin: run.cancelOrigin ?? null,
