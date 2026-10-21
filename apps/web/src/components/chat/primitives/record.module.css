@@ -1177,6 +1177,8 @@
 .turnHead > summary .meta::before {
   content: '·';
   margin-right: 0.35em;
+  /* 时长走等宽字体,而等宽字体里的「·」画成一个小方块(真机所见);分隔符跟状态词用同一种字体 */
+  font-family: var(--chat-font-sans);
 }
 
 /* 整轮失败时壳头的状态词 */

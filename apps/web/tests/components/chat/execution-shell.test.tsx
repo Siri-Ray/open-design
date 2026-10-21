@@ -130,6 +130,8 @@ describe('壳头', () => {
     // jsdom 下 import.meta.url 不是 file: 协议,按包根(vitest 的 cwd)取路径
     const css = readFileSync(resolve(process.cwd(), 'src/components/chat/primitives/record.module.css'), 'utf8');
     expect(css).toMatch(/\.turnHead > summary \.meta::before\s*\{[^}]*content:\s*'·'/);
+    // 时长是等宽字体,它的「·」画成小方块;分隔符必须走状态词那一套字体
+    expect(css).toMatch(/\.turnHead > summary \.meta::before\s*\{[^}]*font-family:\s*var\(--chat-font-sans\)/);
   });
 
   it('空态:没有内容时不出箭头(D21)', () => {
