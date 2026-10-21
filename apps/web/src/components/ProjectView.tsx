@@ -4386,6 +4386,11 @@ export function ProjectView({
     const status = last.runStatus;
     if (status !== 'succeeded' && status !== 'failed') return;
 
+    // P0-24 N10: on the desktop every turn is announced by the app-root feed
+    // (`useGlobalRunNotices`), wherever the user is; announcing here too would
+    // notify twice. The web has no global feed and keeps this one.
+    if (isOpenDesignHostAvailable()) return;
+
     // Feedback is only for a turn the user is not watching: this view shows the
     // active conversation, so "not viewing" is the window being hidden or
     // unfocused.

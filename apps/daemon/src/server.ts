@@ -909,6 +909,7 @@ import { registerHandoffRoutes } from './routes/handoff.js';
 import { TranscriptExportLockedError } from './transcript-export.js';
 import { registerChatRoutes } from './routes/chat.js';
 import { registerRunRoutes } from './routes/runs.js';
+import { composeRunTerminalHooks, createRunNoticeLog } from './runtimes/run-notices.js';
 import { registerStrategyRolloutRoutes } from './routes/strategy-rollout.js';
 import { registerTerminalRoutes } from './routes/terminal.js';
 import { registerBrowserSessionRoutes } from './routes/browser-sessions.js';
@@ -3538,6 +3539,10 @@ export async function startServer({
   const db = openDatabase(PROJECT_ROOT, { dataDir: RUNTIME_DATA_DIR });
   daemonHealth?.setStorageProbe(() => readSqlitePageStats({ db, file: db.name }));
   const amrTerminalReportOutbox = createAmrTerminalReportOutboxStore(db);
+  // P0-24 N10: notices for turns that end while this process runs (never replayed).
+  const runNotices = createRunNoticeLog({
+    projectName: (projectId) => getProject(db, projectId)?.name ?? null,
+  });
   const amrTerminalReportDelivery = createAmrTerminalReportDeliveryService({
     store: amrTerminalReportOutbox,
     env: { ...process.env, OD_DATA_DIR: RUNTIME_DATA_DIR },
@@ -8364,7 +8369,10 @@ export async function startServer({
           : null;
         if (promptBudget) run.promptBudgetDiagnostics = promptBudget;
       },
-      onTerminal: createAmrTerminalReportFinalizer(amrTerminalReportOutbox),
+      onTerminal: composeRunTerminalHooks(
+        createAmrTerminalReportFinalizer(amrTerminalReportOutbox),
+        runNotices.record,
+      ),
       beforeFinish: (run, status, _code, _signal, terminalAt) => {
         if (run.deliverableSyntaxValidation?.metrics) {
           run.deliverableSyntaxValidation = {
@@ -17807,6 +17815,7 @@ export async function startServer({
   registerRunRoutes(app, {
     db,
     design,
+    runNotices,
     resources: { listAllSkillLikeEntries },
     http: httpDeps,
     paths: { BUNDLED_PLUGINS_DIR, PROJECTS_DIR, RUNTIME_DATA_DIR },
