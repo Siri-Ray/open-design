@@ -210,6 +210,12 @@ interface Props {
   // card) skipped over. Recovery belongs to that real turn; next-step actions
   // have their own ownership rule in `ownsTrailingNextStep` below.
   isLastTurn?: boolean;
+  /**
+   * The pane's reconnect row says the daemon is re-running this turn
+   * (`agent-retry`). P0-24 A4 / assumption A-08: the running header adds
+   * 「正在重试」 too. ChatPane passes it only to the turn that is streaming.
+   */
+  agentRetrying?: boolean;
   // Assistant message id whose run-failure error is rendered as ChatPane's
   // top-level error card; that message's per-message error pill is suppressed
   // to avoid duplication. Other messages keep their error pill.
@@ -295,6 +301,7 @@ interface Props {
 const ASSISTANT_MESSAGE_COMPARED_PROPS: Array<keyof Props> = [
   'message',
   'streaming',
+  'agentRetrying',
   'projectId',
   'projectKind',
   'conversationId',
@@ -419,6 +426,7 @@ function AssistantMessageImpl({
   showRole = true,
   isLast,
   isLastTurn,
+  agentRetrying = false,
   errorCardOwnerId = null,
   nextUserContent,
   onSubmitQuestionForm,
@@ -1348,6 +1356,7 @@ function AssistantMessageImpl({
                 entry.key,
               ].join(":")}
               onBrandBrowserAssistConfirm={onBrandBrowserAssistConfirm}
+              agentRetrying={agentRetrying && streaming}
             />
           ) : (
             <Fragment key={entry.key}>

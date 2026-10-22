@@ -26,6 +26,7 @@
  * caller's layout concern, not this component's.
  */
 import type { ProjectDisplayStatus } from '@open-design/contracts';
+import tagStyles from './ProjectRunStatusIcon.module.css';
 import { Icon } from './Icon';
 import { SiriOrb } from './SiriOrb';
 
@@ -74,6 +75,40 @@ export function hasRunStatusGlyph(status: ProjectDisplayStatus | undefined): boo
  */
 export function hasCompletionNotice(status: ProjectDisplayStatus | undefined): boolean {
   return status === 'succeeded';
+}
+
+/**
+ * Whether the row shows the visible 「需要你回复」 tag after the project name
+ * (P0-24 display rule ①; assumption A-09 for its look). The orb in the lead
+ * slot stays; the tag is what says it in words, not only to assistive tech.
+ */
+export function hasAwaitingReplyTag(status: ProjectDisplayStatus | undefined): boolean {
+  return status === 'awaiting_input';
+}
+
+/**
+ * The visible 「需要你回复」 tag (P0-24, test case X21 / OPEND-4216). The shape
+ * is shared; each surface adds its own spacing class and test id, as with
+ * {@link ProjectCompletionDot}.
+ */
+export function ProjectAwaitingReplyTag({
+  className,
+  label,
+  testId,
+}: {
+  className?: string;
+  /** Localized status name, shown as the tag's text. */
+  label: string;
+  testId: string;
+}) {
+  return (
+    <span
+      className={className ? `${tagStyles.replyTag} ${className}` : tagStyles.replyTag}
+      data-testid={testId}
+    >
+      {label}
+    </span>
+  );
 }
 
 interface Props {

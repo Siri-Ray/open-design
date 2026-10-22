@@ -126,6 +126,18 @@ describe('壳头', () => {
     expect(document.querySelector('details svg')).toBeNull();
   });
 
+  // P0-24 推测项 A-08(场景 A4):自动重试时标题仍是「进行中」,后面加「正在重试」
+  it('自动重试中:标题是「进行中」+「正在重试」;结束的回合不带(推测项 A-08)', () => {
+    const [running] = shellsOf(call('t1', 'Bash', { command: 'ls' }), 'running');
+    const { unmount } = render(<ExecutionShell shell={running as ShellData} agentRetrying />);
+    expect(screen.getByText('进行中')).toBeTruthy();
+    expect(screen.getByTestId('turn-head-retrying').textContent).toBe('正在重试');
+    unmount();
+    const [done] = shellsOf(call('t1', 'Bash', { command: 'ls' }), 'succeeded');
+    render(<ExecutionShell shell={done as ShellData} agentRetrying />);
+    expect(screen.queryByTestId('turn-head-retrying')).toBeNull();
+  });
+
   it('壳头耗时按粗档写(31s 而不是 31.0s)', () => {
     const [shell] = shellsOf(call('t1', 'Bash', { command: 'ls' }, { startedAt: 0, completedAt: 31_000 }), 'succeeded');
     render(<ExecutionShell shell={shell as ShellData} />);

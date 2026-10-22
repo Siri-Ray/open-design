@@ -108,6 +108,12 @@ export interface ExecutionShellProps {
    */
   odCardScope?: string;
   onBrandBrowserAssistConfirm?: BrandBrowserAssistConfirm;
+  /**
+   * The daemon is re-running this turn after a transient failure (network
+   * jitter, rate limit). P0-24 A4: the header still reads 进行中 and adds
+   * 「正在重试」. Only the running shell reads it.
+   */
+  agentRetrying?: boolean;
 }
 
 export function ExecutionShell({
@@ -121,6 +127,7 @@ export function ExecutionShell({
   concluded = false,
   odCardScope,
   onBrandBrowserAssistConfirm,
+  agentRetrying = false,
 }: ExecutionShellProps): ReactElement {
   const t = useT();
   const running = shell.status === 'running' && !shell.stopped;
@@ -263,6 +270,13 @@ export function ExecutionShell({
           {/* 不给标签:紧跟着的就是「进行中」那行字,读屏念一遍就够 */}
           <Orb state="connecting" box={24} className={styles.orb} />
           <span className={`${styles.shimmer} ${styles.head}`}>{t('chat.record.running')}</span>
+          {/*
+            P0-24 推测项 A-08(场景 A4):自动重试期间标题仍是「进行中」,后面加「正在重试」。
+            位置和样式等设计(清单 3.4);先用现有的次要文字样式,复用重连那一行的同一个词。
+          */}
+          {agentRetrying ? (
+            <span className={styles.retrying} data-testid="turn-head-retrying">{t('chat.edge.retrying')}</span>
+          ) : null}
         </>
       );
     }

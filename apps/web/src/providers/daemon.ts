@@ -1742,6 +1742,16 @@ export async function fetchRunNotices(
   }
 }
 
+/** Agent event kinds that put something the user can see on screen. */
+const AGENT_VISIBLE_OUTPUT_KINDS: ReadonlySet<string> = new Set([
+  'text',
+  'thinking',
+  'tool_use',
+  'tool_result',
+  'image',
+  'live_artifact',
+]);
+
 interface DaemonPhysicalRunResult {
   nextRunId?: string;
   strategyTask?: StrategyTaskProjectionV2;
@@ -2161,7 +2171,14 @@ async function consumeDaemonPhysicalRun({
               // This is transport telemetry, never assistant content.
               continue;
             }
-            if (translated.kind !== 'status') clearAgentSelfHealOnVisibleOutput();
+            /*
+             * Only output the user can see ends the retry/reconnect row. Every
+             * attempt opens with protocol frames (`done_key` is minted per run
+             * attempt before any model output, plus `usage` / diagnostics), and
+             * clearing on those dropped 「正在重试」 the instant the retry began —
+             * the row was never on screen (P0-24 A4, found on a real runtime).
+             */
+            if (AGENT_VISIBLE_OUTPUT_KINDS.has(translated.kind)) clearAgentSelfHealOnVisibleOutput();
             if (translated.kind === 'text') {
               acc += translated.text;
               handlers.onDelta(translated.text);

@@ -1169,6 +1169,13 @@
   30% { transform: translateY(-3px); }
 }
 
+/* P0-24 推测项 A-08:自动重试时跟在「进行中」后面的「正在重试」,先用次要文字色,等设计(清单 3.4) */
+.retrying {
+  margin-left: 6px;
+  color: var(--chat-text-soft);
+  font-size: var(--chat-t-cap);
+}
+
 /* 整轮失败时壳头的状态词 */
 .stFail { color: var(--chat-red); }
 
