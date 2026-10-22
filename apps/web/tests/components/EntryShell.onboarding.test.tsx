@@ -13,6 +13,7 @@ import {
   AMR_LOGIN_STATUS_EVENT,
   AMR_LOGIN_TIMEOUT_MS,
 } from '../../src/components/amrLoginPolling';
+import { resetWorkspaceContextCache } from '../../src/collab/useWorkspaceContext';
 import { I18nProvider } from '../../src/i18n';
 import { fetchProjectFiles } from '../../src/providers/registry';
 import type { AgentInfo, AppConfig } from '../../src/types';
@@ -752,6 +753,87 @@ describe('EntryShell onboarding OpenDesign AMR runtime', () => {
     expect(props.onConfigPersist).not.toHaveBeenCalled();
     expect(props.onModeChange).not.toHaveBeenCalled();
     expect(props.onAgentChange).not.toHaveBeenCalled();
+  });
+
+  describe('when Cloud rejects the workspace identity of a signed-in AMR session', () => {
+    const signedInStatus = {
+      loggedIn: true,
+      profile: 'prod',
+      configPath: '/x',
+      user: { id: 'u', email: 'user@example.com' },
+    };
+    const hostedConfig = () => baseConfig({
+      onboardingCompleted: true,
+      mode: 'daemon',
+      agentId: 'amr',
+      agentModels: { amr: { model: 'amr-model' } },
+    });
+
+    function recordOnboardingEntries(): () => number {
+      const entries: string[] = [];
+      const record = (url: string | URL | null | undefined) => {
+        if (url == null) return;
+        entries.push(new URL(String(url), window.location.href).pathname);
+      };
+      const push = window.history.pushState.bind(window.history);
+      const replace = window.history.replaceState.bind(window.history);
+      vi.spyOn(window.history, 'pushState').mockImplementation((data, unused, url) => {
+        record(url);
+        push(data, unused, url);
+      });
+      vi.spyOn(window.history, 'replaceState').mockImplementation((data, unused, url) => {
+        record(url);
+        replace(data, unused, url);
+      });
+      return () => entries.filter((path) => path === '/onboarding').length;
+    }
+
+    beforeEach(() => {
+      resetWorkspaceContextCache();
+    });
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+      resetWorkspaceContextCache();
+    });
+
+    it('stays on onboarding instead of bouncing back to Home while the rejection lasts', async () => {
+      globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => (
+        String(input).includes('/api/workspace/directory')
+          ? jsonResponse({ error: { code: 'UNAUTHORIZED' } }, 401)
+          : jsonResponse(signedInStatus)
+      )) as typeof fetch;
+      const onboardingEntries = recordOnboardingEntries();
+
+      const props = renderHome({ config: hostedConfig(), agents: [amrAgent()], amrLoggedIn: true });
+
+      await waitFor(() => expect(window.location.pathname).toBe('/onboarding'));
+      await act(() => new Promise((resolve) => setTimeout(resolve, 500)));
+      expect(window.location.pathname).toBe('/onboarding');
+      expect(onboardingEntries()).toBe(1);
+      expect(props.onCompleteOnboarding).not.toHaveBeenCalled();
+    });
+
+    it('returns to Home once and stays there after the rejection clears', async () => {
+      let rejectedReads = 1;
+      globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+        if (!String(input).includes('/api/workspace/directory')) return jsonResponse(signedInStatus);
+        if (rejectedReads > 0) {
+          rejectedReads -= 1;
+          return jsonResponse({ error: { code: 'UNAUTHORIZED' } }, 401);
+        }
+        return jsonResponse({ items: [], activeWorkspaceId: null });
+      }) as typeof fetch;
+      const onboardingEntries = recordOnboardingEntries();
+
+      renderHome({ config: hostedConfig(), agents: [amrAgent()], amrLoggedIn: true });
+
+      await waitFor(() => expect(window.location.pathname).toBe('/onboarding'));
+      await waitFor(() => expect(window.location.pathname).toBe('/'), { timeout: 3000 });
+      await act(() => new Promise((resolve) => setTimeout(resolve, 500)));
+      expect(window.location.pathname).toBe('/');
+      expect(onboardingEntries()).toBe(1);
+    });
   });
 
   it.each([
