@@ -103,8 +103,11 @@ test('[P0] @critical API empty stream ends without a failure title or Done', asy
   await sendPrompt(page, 'Create a login page');
 
   await runRequests.expectCount(1);
-  // The turn did settle: its empty_response marker is on screen …
-  await expect(page.getByText(/empty_response/).first()).toBeVisible();
+  // The turn did settle: the assistant row exists and is no longer streaming.
+  // P0-24 Q6 dropped the visible empty_response note, so settling is read off
+  // the footer's live state rather than a marker …
+  await expect(page.locator('.msg.assistant').first()).toBeVisible();
+  await expect(page.locator('[data-testid="assistant-footer"][data-streaming="true"]')).toHaveCount(0, { timeout: 15_000 });
   // … and nothing reads as a failure or as a completion (P0-24 Q6).
   await expect(page.locator('.assistant-label', { hasText: 'The task could not be completed' })).toHaveCount(0);
   await expect(page.getByText('This task failed to run. Please retry. If it fails again, please contact support.', { exact: true })).toHaveCount(0);
