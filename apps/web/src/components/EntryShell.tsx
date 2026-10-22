@@ -1822,6 +1822,7 @@ export function EntryShell({
             onConfigPersist={onConfigPersist}
             onRefreshAgents={onRefreshAgents}
             onAmrLoginStatusChange={onAmrLoginStatusChange}
+            cloudIdentityRejected={workspaceContextState.failure === 'reauth-required'}
             onFinish={finishOnboarding}
           />
         </main>
@@ -2303,6 +2304,7 @@ function OnboardingView({
   onConfigPersist,
   onRefreshAgents,
   onAmrLoginStatusChange,
+  cloudIdentityRejected = false,
   onFinish,
 }: {
   config: AppConfig;
@@ -2322,6 +2324,13 @@ function OnboardingView({
   onConfigPersist: (cfg: AppConfig) => Promise<void> | void;
   onRefreshAgents: () => Promise<AgentInfo[]> | AgentInfo[];
   onAmrLoginStatusChange?: (status: VelaLoginStatus | null) => void;
+  /**
+   * Cloud answered the workspace read with 401/403. The shell's auth gate sends
+   * Home back here on that answer, so onboarding must not count the AMR session
+   * as signed in until Cloud accepts it too, or the two bounce the user between
+   * them.
+   */
+  cloudIdentityRejected?: boolean;
   onFinish: () => void;
 }) {
   const t = useT();
@@ -2457,7 +2466,8 @@ function OnboardingView({
     (agent) => agent.id !== 'amr' && (agent.available || deepSeekHarnessNeedsSetup(agent)),
   );
   const visibleAgents = candidateCliAgents.filter((agent) => visibleAgentIds.includes(agent.id));
-  const amrSignedIn = isAmrSessionAuthenticated(amrStatus);
+  const amrSessionAuthenticated = isAmrSessionAuthenticated(amrStatus);
+  const amrSignedIn = amrSessionAuthenticated && !cloudIdentityRejected;
   const amrLoginBusy = amrLoginPending || amrStatus?.loginInFlight === true;
   const selectedAgent = visibleAgents.find((agent) => agent.id === config.agentId) ?? null;
   const selectedAgentChoice = selectedAgent ? (config.agentModels?.[selectedAgent.id] ?? {}) : {};
@@ -2618,6 +2628,14 @@ function OnboardingView({
     // hydrated attempt instead of leaving its stale cancel state indefinitely.
     startHydratedAmrLoginPoll();
   }, [amrLoginPending, amrStatus?.loginInFlight, runtime, step]);
+
+  useEffect(() => {
+    // A rejection recorded before this session signed in is stale, and a 401 is
+    // never retried on its own. Re-read once so it clears without waiting for
+    // the next poll; a rejection that persists keeps the user here to sign in.
+    if (!amrSessionAuthenticated || !cloudIdentityRejected) return;
+    notifyWorkspaceContextRefresh();
+  }, [amrSessionAuthenticated, cloudIdentityRejected]);
 
   useEffect(() => {
     if (
