@@ -2192,8 +2192,7 @@ export function AssistantFooter({
     !forceVisible &&
     !copyMarkdown &&
     !onFork &&
-    !feedbackControls &&
-    !onContinueRemaining
+    !feedbackControls
   )
     return null;
   return (
