@@ -11,6 +11,8 @@ import { stopVelaShare } from '../collab/vela-share-stop.js';
 import { publicFileResourceIdFor } from '../collab/public-file-resource-id.js';
 import { registerVelaTeamProjectResource } from '../collab/vela-cli-team-projects.js';
 import { resumePendingShareBinding } from '../collab/resume-pending-share-binding.js';
+import { reserveFileShareAlias } from '../collab/share-alias-recovery.js';
+import { ShareAliasIdentityMismatchError } from '../collab/share-alias-reservation.js';
 import { resumeExistingVelaShare } from '../collab/vela-share-binding.js';
 import type { RecordPublicFilePublication } from '../collab/public-file-publication-recording.js';
 import type { ShareContentFingerprints } from '../collab/share-content-fingerprint.js';
@@ -263,7 +265,7 @@ export interface RegisterCollabSyncRoutesDeps {
   recordPublicFilePublication?: RecordPublicFilePublication;
   sharePublishing?: {
     ensureProject?(scope: PublicFilePublicationScope, principal: ResourceHubPrincipal, run: typeof runVelaCommand): Promise<TeamProject>;
-    sourceFileId?(scope: PublicFilePublicationScope): string;
+    sourceFileId?(scope: PublicFilePublicationScope, project?: TeamProject | null): string;
     admitFileReceipt?(scope: PublicFilePublicationScope, resourceId: string, versionId: string, entryPath: string, run: typeof runVelaCommand): Promise<void>;
     reservations: ReturnType<typeof createShareAliasReservations>;
     outbox: ShareBindingOutbox;
@@ -1372,7 +1374,7 @@ export function registerCollabSyncRoutes(
     const publisher = deps.sharePublishing;
     if (!publisher) return res.status(503).json({ error: 'PUBLIC_SHARE_PUBLISH_UNAVAILABLE' });
     const scope = publicFilePublicationScope(projectId, filePath, principal);
-    if (publisher.sourceFileId) scope.sourceFileId = publisher.sourceFileId(scope);
+    if (publisher.sourceFileId) scope.sourceFileId = publisher.sourceFileId(scope, sharedProject);
     // A stopped link cannot be reopened by the ordinary publish/update POST:
     // that path advances the alias and transfers fresh bytes. Only an explicit
     // request may reopen the immutable generation previously bound by Vela.
@@ -1414,7 +1416,9 @@ export function registerCollabSyncRoutes(
         return fail(409, 'SHARE_STOP_IN_PROGRESS');
       }
       try {
-        if (publisher.reservations.reserve(scope).slug !== stopped.slug) {
+        const reservation = reserveFileShareAlias({ scope, history: remoteState, reservations: publisher.reservations,
+          publications: publicFilePublicationStore, outbox: publisher.outbox });
+        if (reservation.slug !== stopped.slug) {
           return fail(409, 'SHARE_ALIAS_IDENTITY_MISMATCH');
         }
         const prepared = await publisher.prepare(scope, stopped.slug);
@@ -1492,7 +1496,8 @@ export function registerCollabSyncRoutes(
         }
         return res.json(sharePublishResponse(outcome,
           presentPublicShareLink(deps.resolvePublicShareLink, projectId, stopped.slug, amrLink)));
-      } catch {
+      } catch (error) {
+        if (error instanceof ShareAliasIdentityMismatchError) return fail(409, error.message);
         return fail(502, 'PUBLIC_SHARE_RESUME_UNAVAILABLE', 'resume_prepare');
       }
     }
@@ -1535,29 +1540,28 @@ export function registerCollabSyncRoutes(
       });
     }
 
-    let prepared: Awaited<ReturnType<typeof publisher.prepare>>;
-    try {
-      const reservation = publisher.reservations.reserve(scope);
-      prepared = await publisher.prepare(scope, reservation.slug);
-    } catch {
-      return res.status(502).json({ error: 'PUBLIC_SHARE_PREPARATION_UNAVAILABLE' });
-    }
-    // Absence must be observed remotely, not inferred from a lost local row.
+    // Read history BEFORE reservation: missing local state is not evidence of
+    // a first share. Recover the exact cloud alias before preparing any write.
     // Unknown or pre-existing aliases must never be auto-stopped on a local failure.
-    const previousState = await deps.readProjectShareState?.(scope).catch(() => null);
-    if (scope.sourceFileId && (!previousState || previousState.projectId !== projectId)) {
+    const previousState = await deps.readProjectShareState?.(scope).catch(() => null) ?? null;
+    if (!previousState || previousState.projectId !== projectId) {
       return res.status(503).json({ error: 'SHARE_STATE_UNAVAILABLE' });
     }
+    let prepared: Awaited<ReturnType<typeof publisher.prepare>>;
+    let reservation: ReturnType<typeof publisher.reservations.reserve>;
     try {
-      if (previousState) currentFileSharePublication(previousState, filePath, scope.sourceFileId);
+      reservation = reserveFileShareAlias({ scope, history: previousState, reservations: publisher.reservations,
+        publications: publicFilePublicationStore, outbox: publisher.outbox });
+      prepared = await publisher.prepare(scope, reservation.slug);
     } catch (error) {
       if (error instanceof UnboundFileShareIdentityError) return res.status(409).json({ error: 'SHARE_FILE_IDENTITY_UNAVAILABLE' });
-      throw error;
+      if (error instanceof ShareAliasIdentityMismatchError) return res.status(409).json({ error: error.message });
+      return res.status(502).json({ error: 'PUBLIC_SHARE_PREPARATION_UNAVAILABLE' });
     }
     const stoppedSlug = previousState?.projectId === projectId
       ? previousState.publications.find(item => item.sourceFilePath === filePath && item.status === 'stopped'
         && (!scope.sourceFileId || item.sourceFileId === scope.sourceFileId)
-        && item.slug === publisher.reservations.reserve(scope).slug)?.slug
+        && item.slug === reservation.slug)?.slug
       : undefined;
     const resumed = await resumePendingShareBinding(scope, publicFilePublicationStore, publisher.outbox, prepared.run, stoppedSlug);
     if (resumed) {
@@ -1883,7 +1887,7 @@ export function registerCollabSyncRoutes(
       };
       return res.json(response);
     }
-    const sourceFileId = deps.sharePublishing?.sourceFileId?.(scope);
+    const sourceFileId = deps.sharePublishing?.sourceFileId?.(scope, sharedProject);
     let remote: ReturnType<typeof currentFileSharePublication>;
     try { remote = currentFileSharePublication(history, filePath, sourceFileId); }
     catch (error) {
