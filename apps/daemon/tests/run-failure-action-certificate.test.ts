@@ -33,7 +33,7 @@ function openCodeRunError(message: string): string {
     + `"error":{"name":"UnknownError","data":{"message":"${message}"}}}`;
 }
 
-function classify(error: string, agentId: string) {
+function classify(error: string, agentId: string, stderr: string[] = []) {
   return classifyRunFailure({
     result: 'failed',
     status: {
@@ -45,6 +45,7 @@ function classify(error: string, agentId: string) {
     },
     errorCode: 'AGENT_EXECUTION_FAILED',
     agentId,
+    events: stderr.map((chunk) => ({ event: 'stderr', data: { chunk } })),
   });
 }
 
@@ -68,6 +69,22 @@ describe('W23 · daemon 对证书类失败的权威判定', () => {
       failure_detail: 'stream_disconnected',
       retryable: true,
       user_action: 'retry',
+    });
+  });
+
+  it.each([
+    'self signed certificate',
+    'certificate has expired',
+    'unable to verify the first certificate',
+  ])('同一次运行里更早的握手中断不会盖过终态的证书拒绝(%s)', (message) => {
+    const failure = classify(velaComposedError(message), 'amr', [
+      'Earlier diagnostic: unknown certificate verification error',
+    ]);
+
+    expect(failure).toMatchObject({
+      failure_detail: 'certificate_failure',
+      retryable: false,
+      user_action: 'none',
     });
   });
 });

@@ -313,12 +313,20 @@ const ENDPOINT_NEVER_REACHED_RE =
 const TLS_HANDSHAKE_CUT_RE =
   /\b(unknown certificate verification error|UNKNOWN_CERTIFICATE_VERIFICATION_ERROR|TLS handshake interrupted)\b/i;
 
+/**
+ * Certificate wording left after the handshake-cut phrases are removed. The
+ * classifier reads the terminal error together with the run's stderr, so an
+ * earlier cut in that stderr must not hide a certificate the client rejected.
+ */
+function hasCertificateRejectionText(text: string): boolean {
+  return /\b(certificate|CERT_|self[- ]signed|unable to verify)\b/i
+    .test(text.replace(new RegExp(TLS_HANDSHAKE_CUT_RE.source, 'gi'), ''));
+}
+
 function clientEnvironmentFailureDetail(text: string): TrackingRunFailureDetail | null {
   if (/\b(Windows Application Control|AppLocker)\b/i.test(text)) return 'host_policy_block';
   if (/\b(SQLite|WAL).*(?:I\/O|readonly|locked|corrupt|failed)\b/i.test(text)) return 'local_storage_failure';
-  if (!TLS_HANDSHAKE_CUT_RE.test(text) && /\b(certificate|CERT_|self[- ]signed|unable to verify)\b/i.test(text)) {
-    return 'certificate_failure';
-  }
+  if (hasCertificateRejectionText(text)) return 'certificate_failure';
   if (/\b(unsupported proxy protocol|proxy configuration)\b/i.test(text)) return 'proxy_configuration';
   if (ENDPOINT_NEVER_REACHED_RE.test(text)) return 'network_configuration';
   return null;
