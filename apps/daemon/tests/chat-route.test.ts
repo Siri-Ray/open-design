@@ -693,6 +693,61 @@ process.stdin.on('end', () => {
     );
   });
 
+  it('lets a headless OpenCode run use the system temporary directory', async () => {
+    if (!process.env.OD_DATA_DIR) {
+      throw new Error('OD_DATA_DIR is required for OpenCode temp permission tests');
+    }
+
+    // Production BYOK/OpenCode runs auto-rejected reads of files the agent had
+    // just written to /tmp or os.tmpdir() (thumbnails, ffmpeg frames, probe
+    // scripts), then ended with no output.
+    const projectId = `proj-${randomUUID()}`;
+    const markerDir = await fsp.mkdtemp(join(tmpdir(), 'od-opencode-tmp-'));
+    tempDirs.push(markerDir);
+    const envFile = join(markerDir, 'opencode-config-content.json');
+
+    const createProjectResponse = await fetch(`${baseUrl}/api/projects`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: projectId, name: 'OpenCode temp permission fixture' }),
+    });
+    expect(createProjectResponse.ok).toBe(true);
+
+    await withFakeAgent(
+      'opencode',
+      `
+const fs = require('node:fs');
+process.stdin.resume();
+process.stdin.on('end', () => {
+  fs.writeFileSync(${JSON.stringify(envFile)}, process.env.OPENCODE_CONFIG_CONTENT || '');
+  console.log(JSON.stringify({ type: 'step_start' }));
+  console.log(JSON.stringify({ type: 'text', part: { text: 'tmp-permission-ok' } }));
+  console.log(JSON.stringify({ type: 'step_finish', part: { tokens: { input: 1, output: 1 } } }));
+  process.exit(0);
+});
+`,
+      async () => {
+        const response = await fetch(`${baseUrl}/api/chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ agentId: 'opencode', projectId, message: 'hello' }),
+        });
+        expect(response.ok).toBe(true);
+        expect(await response.text()).toContain('tmp-permission-ok');
+
+        const parsed = JSON.parse(await fsp.readFile(envFile, 'utf8')) as {
+          permission?: { external_directory?: Record<string, string> };
+        };
+        const externalDirectory = parsed.permission?.external_directory ?? {};
+        const expectedRoots = [tmpdir(), ...(process.platform === 'win32' ? [] : ['/tmp'])];
+        for (const root of expectedRoots) {
+          expect(externalDirectory[root]).toBe('allow');
+          expect(externalDirectory[`${root}/**`]).toBe('allow');
+        }
+      },
+    );
+  });
+
   it('allowlists the active skill root that lives outside the repository skills dir', async () => {
     if (!process.env.OD_DATA_DIR) {
       throw new Error('OD_DATA_DIR is required for OpenCode skill permission tests');
