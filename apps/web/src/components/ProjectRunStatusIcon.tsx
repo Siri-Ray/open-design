@@ -52,6 +52,15 @@ import { SiriOrb } from './SiriOrb';
 const ATTENTION = { c1: '#FF8D02', c2: '#EDC337', c5: '#FFC400' };
 
 /**
+ * P0-24 设计答复(2026-10-26,清单 3.1「以设计稿为准」):失败「用新的红色球,不用红色
+ * 感叹号」,有新结果「也改成蓝色球,无标签」。两者都是结果,所以是**静止**的球(PRD:
+ * 失败标记静止),只有执行中、等回答在转。红色取设计稿的失败红 #F34801,蓝色取设计稿
+ * 示例里的蓝色球 #578EFF;亮部按 ATTENTION 的做法往上走一档,让 14px 下仍读得出是球。
+ */
+const FAILURE = { c1: '#F34801', c2: '#FF7A45', c5: '#FFB199' };
+const NEW_RESULT = { c1: '#578EFF', c2: '#7FA9FF', c5: '#B8CEFF' };
+
+/**
  * Whether this status puts a glyph in the row's LEAD slot.
  *
  * Callers need to know BEFORE rendering: when this says no, the slot holds the
@@ -60,7 +69,7 @@ const ATTENTION = { c1: '#FF8D02', c2: '#EDC337', c5: '#FFC400' };
  * keeps the folder and reports through {@link hasCompletionNotice} instead.
  */
 export function hasRunStatusGlyph(status: ProjectDisplayStatus | undefined): boolean {
-  return status !== undefined && status !== 'not_started' && status !== 'succeeded';
+  return status !== undefined && status !== 'not_started';
 }
 
 /**
@@ -73,8 +82,9 @@ export function hasRunStatusGlyph(status: ProjectDisplayStatus | undefined): boo
  * acknowledged by opening the project, so a caller never sees it here. One
  * store, one rule, both surfaces.
  */
-export function hasCompletionNotice(status: ProjectDisplayStatus | undefined): boolean {
-  return status === 'succeeded';
+export function hasCompletionNotice(_status: ProjectDisplayStatus | undefined): boolean {
+  // P0-24 设计答复:有新结果改为行首的蓝色球(见 `ProjectRunStatusIcon`),行尾不再出蓝点。
+  return false;
 }
 
 /**
@@ -116,46 +126,6 @@ interface Props {
   size?: number;
   /** Localized status name, announced to assistive tech. */
   label?: string;
-}
-
-/**
- * Interrupted: the run stopped before it delivered — it failed, it was
- * canceled, or it ended with declared work still undone. One mark for all
- * three, because the row only has to say "this did not finish"; the reason
- * belongs to the status text next to it, not to a colour the user has to
- * decode.
- *
- * A disc with the glyph knocked out of it, the mark carried by the counter
- * rather than the disc. The rect backs ONLY that counter; the disc paints
- * everything else, so its bounds never need to match the artwork. Two
- * hardcoded fills, so it cannot go through `Icon` — that component emits a
- * single `currentColor` path; standalone two-colour marks are the repo's
- * convention here (see PlanWordmark, EditorIcon).
- *
- * The viewBox is the disc's own bounds (a circle of r=10 centred at 12,12),
- * NOT the artwork's 24-unit frame: at `size` 14 that frame left the disc
- * drawing 11.7px while the running orb — which fills its box edge to edge —
- * drew the full 14, so "running" and "failed" were visibly different sizes in
- * the same column (per product: 运行中和完成的 icon 大小一样 14px). Cropping to
- * the ink makes `size` mean the same thing for both.
- */
-function InterruptedBadge({ size, label }: { size: number; label?: string }) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="2 2 20 20"
-      fill="none"
-      focusable="false"
-      {...(label ? { role: 'img', 'aria-label': label } : { 'aria-hidden': true })}
-    >
-      <rect x="7" y="6" width="10" height="13" fill="#121212" />
-      <path
-        d="M12 22C6.47715 22 2 17.5228 2 12C2 6.47715 6.47715 2 12 2C17.5228 2 22 6.47715 22 12C22 17.5228 17.5228 22 12 22ZM12 9.5C12.8284 9.5 13.5 8.82843 13.5 8C13.5 7.17157 12.8284 6.5 12 6.5C11.1716 6.5 10.5 7.17157 10.5 8C10.5 8.82843 11.1716 9.5 12 9.5ZM14 15H13V10.5H10V12.5H11V15H10V17H14V15Z"
-        fill="#F34801"
-      />
-    </svg>
-  );
 }
 
 /**
@@ -218,13 +188,14 @@ export function ProjectCompletionDot({
 export function ProjectRunStatusIcon({ status, size = 14, label }: Props) {
   switch (status) {
     case 'succeeded':
-      // Not a lead-slot glyph: the row keeps its folder and reports through
-      // `ProjectCompletionDot` at its end (see `hasCompletionNotice`).
-      return null;
+      // A finished run the user has not opened yet: the static blue ball in the
+      // lead slot (P0-24 design reply). The store drops it once acknowledged.
+      return <SiriOrb size={size} state="still" colors={NEW_RESULT} literal label={label} />;
     case 'failed':
     case 'canceled':
     case 'incomplete':
-      return <InterruptedBadge size={size} label={label} />;
+      // P0-24 design reply: the red ball, still — not the red exclamation mark.
+      return <SiriOrb size={size} state="still" colors={FAILURE} literal label={label} />;
     case 'running':
       return <SiriOrb size={size} state="thinking" label={label} />;
     case 'queued':

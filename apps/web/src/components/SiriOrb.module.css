@@ -264,6 +264,15 @@
   animation-iteration-count: infinite;
 }
 
+/* A result, not work in progress (P0-24: failed and new-result marks are
+   static balls). Same sphere, nothing moves — the rotation is what says
+   "working", so a finished state must not carry it. */
+.isStill,
+.isStill .disc::before,
+.isStill .sheen {
+  animation: none;
+}
+
 @keyframes siri-orb-breathe {
   0%, 100% { transform: scale(1); }
   50%      { transform: scale(1.035); }

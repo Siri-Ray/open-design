@@ -12,7 +12,7 @@ import type { CSSProperties } from 'react';
 import styles from './SiriOrb.module.css';
 
 /** Speed presets. The palette is deliberately NOT part of the state. */
-export type SiriOrbState = 'idle' | 'thinking' | 'streaming';
+export type SiriOrbState = 'idle' | 'thinking' | 'streaming' | 'still';
 
 interface Props {
   /** Rendered edge length in px. */
@@ -59,6 +59,7 @@ const STATE_CLASS: Record<SiriOrbState, string | undefined> = {
   idle: styles.isIdle,
   thinking: styles.isThinking,
   streaming: styles.isStreaming,
+  still: styles.isStill,
 };
 
 export function SiriOrb({
