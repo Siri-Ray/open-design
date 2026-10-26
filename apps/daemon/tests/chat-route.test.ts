@@ -1268,7 +1268,8 @@ process.exit(1);
     expect(responseOk).toBe(true);
     expect(invocations[0]).toBe('new');
     expect(invocations[1]).toBe('set_model_rejected:claude-opus-4.8');
-    expect(invocations[2]).toMatch(/^set_model:(deepseek-v4-flash|deepseek-v3\.2)$/);
+    // The remote catalog's default, or the universal chat model before one is loaded.
+    expect(invocations[2]).toMatch(/^set_model:(deepseek-v4\.1-flash|deepseek-v3\.2)$/);
     expect(invocations[3]).toBe('prompt');
     expect(body).toContain('"label":"model_fallback"');
     expect(body).toContain('claude-opus-4.8 is no longer available in AMR.');
