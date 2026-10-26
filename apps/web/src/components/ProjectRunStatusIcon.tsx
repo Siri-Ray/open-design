@@ -53,12 +53,15 @@ const ATTENTION = { c1: '#FF8D02', c2: '#EDC337', c5: '#FFC400' };
 
 /**
  * P0-24 设计答复(2026-10-26,清单 3.1「以设计稿为准」):失败「用新的红色球,不用红色
- * 感叹号」,有新结果「也改成蓝色球,无标签」。两者都是结果,所以是**静止**的球(PRD:
- * 失败标记静止),只有执行中、等回答在转。红色取设计稿的失败红 #F34801,蓝色取设计稿
- * 示例里的蓝色球 #578EFF;亮部按 ATTENTION 的做法往上走一档,让 14px 下仍读得出是球。
+ * 感叹号」,有新结果「也改成蓝色球,无标签」。取值逐项照抄设计稿 OD-状态设计-20261015
+ * 渲染后的计算值:
+ *  · 失败(`.entry-nav-rail__failed-orb`):c1 #F34801 / c2 #FF6038 / c5 #FFE6DF,
+ *    底色 #F34801,**不**走 literal(保留默认的高光与饱和度),网格层只做模糊;
+ *  · 新结果(`r:icon:p2`):literal,三个槽位都是 #578EFF,即单色蓝球。
+ * 两者都是结果,所以是**静止**的球(PRD:失败标记静止),只有执行中、等回答在转。
  */
-const FAILURE = { c1: '#F34801', c2: '#FF7A45', c5: '#FFB199' };
-const NEW_RESULT = { c1: '#578EFF', c2: '#7FA9FF', c5: '#B8CEFF' };
+const FAILURE = { c1: '#F34801', c2: '#FF6038', c5: '#FFE6DF', fill: '#F34801' };
+const NEW_RESULT = { c1: '#578EFF' };
 
 /**
  * Whether this status puts a glyph in the row's LEAD slot.
@@ -195,7 +198,7 @@ export function ProjectRunStatusIcon({ status, size = 14, label }: Props) {
     case 'canceled':
     case 'incomplete':
       // P0-24 design reply: the red ball, still — not the red exclamation mark.
-      return <SiriOrb size={size} state="still" colors={FAILURE} literal label={label} />;
+      return <SiriOrb size={size} state="still" colors={FAILURE} filterMode="blur" label={label} />;
     case 'running':
       return <SiriOrb size={size} state="thinking" label={label} />;
     case 'queued':

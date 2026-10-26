@@ -264,6 +264,11 @@
   animation-iteration-count: infinite;
 }
 
+/* The design draft's failed orb: only the blur on the mesh (P0-24). */
+.isBlurOnly .disc::before {
+  filter: blur(var(--blur));
+}
+
 /* A result, not work in progress (P0-24: failed and new-result marks are
    static balls). Same sphere, nothing moves — the rotation is what says
    "working", so a finished state must not carry it. */
