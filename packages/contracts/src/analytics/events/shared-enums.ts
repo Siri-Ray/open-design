@@ -444,6 +444,7 @@ export type TrackingRunRepairOwner =
 export type TrackingRunAdmissionPhase = 'before_execution' | 'during_execution' | 'unknown';
 /** `none` means no affirmative policy evidence, not proof that no policy applied. */
 export type TrackingRunPolicyReason =
+  | 'content_filtered'
   | 'model_window_limit'
   | 'membership_concurrency_limit'
   | 'hard_quota'

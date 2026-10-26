@@ -238,7 +238,7 @@ function isRateLimitText(text: string): boolean {
 }
 
 const EXPLICIT_BALANCE_TEXT =
-  /insufficient[ _](?:wallet[ _])?balance|insufficient[ _](?:quota|credits?|funds)|not enough (?:balance|credits)|余额不足|预扣费额度失败/i;
+  /insufficient[ _](?:wallet[ _])?balance|insufficient[ _](?:quota|credits?|funds)|not enough (?:balance|credits)|balance is empty|balance too low|billing balance|余额不足|额度不足|预扣费额度失败/i;
 
 // A provider quota that resets within the minute. Gemini's free tier words it
 // as "exceeded your current quota" (which `isHardQuotaText` matches) followed

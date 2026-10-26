@@ -93,6 +93,8 @@ describe('provider content filter', () => {
     expect(failure).toMatchObject({
       failure_detail: 'content_filtered',
       failure_mechanism: 'policy_rejection',
+      failure_domain: 'policy_admission',
+      policy_reason: 'content_filtered',
       retryable: false,
     });
   });
@@ -123,4 +125,17 @@ describe('Gemini BYOK quota errors', () => {
     });
     expect(failure).toMatchObject({ failure_category: 'rate_limit', failure_detail: 'hard_quota', retryable: false });
   });
+});
+
+describe('explicit AMR balance signals reported as RATE_LIMITED', () => {
+  it.each(['balance is empty', 'balance too low', 'billing balance', '额度不足'])(
+    'preserves recharge guidance for %s', (error) => {
+      expect(classify({ error, errorCode: 'RATE_LIMITED', agentId: 'amr' })).toMatchObject({
+        failure_detail: 'amr_insufficient_balance',
+        policy_reason: 'amr_insufficient_balance',
+        retryable: false,
+        user_action: 'recharge',
+      });
+    },
+  );
 });
