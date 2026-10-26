@@ -152,6 +152,7 @@ import {
 // Shared with `POST /api/runs/:id/steer` so the opening prompt and a B11
 // mid-turn steering frame are encoded by the same writer.
 import { encodeStreamJsonUserMessage } from './runtimes/run-steering.js';
+import { openCodeSystemTempDirectories } from './runtimes/opencode-permissions.js';
 import { assertOdNextSemanticRequestFactProducerCoverage } from './runtimes/od-next-exact-input.js';
 import {
   normalizeRunContextSelection,
@@ -13868,7 +13869,7 @@ export async function startServer({
           enabledExternalMcp,
           oauthTokensForSpawn,
           {
-            allowedDirectories: [effectiveCwd, ...extraAllowedDirs],
+            allowedDirectories: [effectiveCwd, ...extraAllowedDirs, ...openCodeSystemTempDirectories()],
             ...(byokOpenCodeProvider
               ? { extraConfig: byokOpenCodeProvider.config }
               : {}),
