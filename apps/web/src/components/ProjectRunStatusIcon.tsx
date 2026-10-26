@@ -31,43 +31,25 @@ import { Icon } from './Icon';
 import { SiriOrb } from './SiriOrb';
 
 /**
- * Awaiting a reply: still live, but it is the user's move.
- *
- * A three-step warm ramp, ordered by the role each slot plays rather than by
- * hue: orange is the base, amber the second accent AND the outer bloom, gold
- * the narrow specular glint. Lightness climbs across them — OKLCH L 75.2 →
- * 83.1 → 85.0 — so the brightest slot is the one that draws the highlight,
- * which is what makes the dot read as a sphere at 14px.
- *
- * Gold in `c5` is what buys the glint back: `literal` bans the stock white
- * highlights because screen-blending white raises this accent's mid green
- * channel into yellow, but a lighter tone named outright is a colour the
- * design chose, not one the compositor invented.
- *
- * `literal` is not optional here. Without it the orb edits whatever it is
- * given — three slots still hold green, and the highlight, saturation and
- * texture passes each push a mid-channel accent off its hue. Not theoretical:
- * this palette came out green, then yellow, then red as each was found.
+ * P0-24 设计答复(2026-10-26,清单 3.1「以设计稿为准」;研发负责人要求四颗球与设计稿
+ * 完全一致)。取值逐项照抄设计稿 OD-状态设计-20261015 渲染后的计算值:
+ *  · 执行中 / 排队中:标准绿色球,约 6 秒一圈(`r:icon:p0`);
+ *  · 需要你回复:纯橙 #FF8D02 底 + 一道明暗扫光,约 20 秒一圈(`r:icon:p1`);
+ *  · 有新结果:单色 #578EFF,约 6 秒一圈(`r:icon:p2`);
+ *  · 失败:c1 #F34801 / c2 #FF6038 / c5 #FFE6DF,底色 #F34801,不压平颜色,网格层只做
+ *    模糊,约 6 秒一圈(`.entry-nav-rail__failed-orb`)。
+ * 四颗球都不呼吸、不缩放,只有网格在转(设计稿侧栏 `animation: none` / `transform: none`)。
+ * ⚠️ 与 PRD 显示规则①「失败标记静止」不一致,研发负责人 2026-10-26 决定以设计稿为准。
  */
-const ATTENTION = { c1: '#FF8D02', c2: '#EDC337', c5: '#FFC400' };
-
-/**
- * P0-24 设计答复(2026-10-26,清单 3.1「以设计稿为准」):失败「用新的红色球,不用红色
- * 感叹号」,有新结果「也改成蓝色球,无标签」。取值逐项照抄设计稿 OD-状态设计-20261015
- * 渲染后的计算值:
- *  · 失败(`.entry-nav-rail__failed-orb`):c1 #F34801 / c2 #FF6038 / c5 #FFE6DF,
- *    底色 #F34801,**不**走 literal(保留默认的高光与饱和度),网格层只做模糊;
- *  · 新结果(`r:icon:p2`):literal,三个槽位都是 #578EFF,即单色蓝球。
- * 两者都是结果,所以是**静止**的球(PRD:失败标记静止),只有执行中、等回答在转。
- */
+const AWAITING = { c1: '#FF8D02', c2: '#FF8D02', c5: '#FF8D02', fill: '#FF8D02' };
 const FAILURE = { c1: '#F34801', c2: '#FF6038', c5: '#FFE6DF', fill: '#F34801' };
+const NEW_RESULT = { c1: '#578EFF' };
 
 /**
  * 侧栏和顶部项目切换里状态球的直径:设计稿 10px(P0-24 设计答复 2026-10-26,两处
  * 「和侧栏一样」)。球放在原来的图标位里居中,项目名仍和文件夹那几行对齐。
  */
 export const STATUS_BALL_SIZE = 10;
-const NEW_RESULT = { c1: '#578EFF' };
 
 /**
  * Whether this status puts a glyph in the row's LEAD slot.
@@ -199,26 +181,25 @@ export function ProjectRunStatusIcon({ status, size = 14, label }: Props) {
     case 'succeeded':
       // A finished run the user has not opened yet: the static blue ball in the
       // lead slot (P0-24 design reply). The store drops it once acknowledged.
-      return <SiriOrb size={size} state="still" colors={NEW_RESULT} literal label={label} />;
+      return <SiriOrb size={size} state="thinking" colors={NEW_RESULT} literal steady label={label} />;
     case 'failed':
     case 'canceled':
     case 'incomplete':
       // P0-24 design reply: the red ball, still — not the red exclamation mark.
-      return <SiriOrb size={size} state="still" colors={FAILURE} filterMode="blur" label={label} />;
+      return <SiriOrb size={size} state="thinking" colors={FAILURE} filterMode="blur" steady label={label} />;
     case 'running':
-      return <SiriOrb size={size} state="thinking" label={label} />;
+      return <SiriOrb size={size} state="thinking" steady label={label} />;
     case 'queued':
       // P0-24 (PRD scenario A2, product answer P4): a queued run draws the same
       // spinner as a running one — the sidebar says "not finished yet", and
       // whether it has started is not a distinction the row makes. The label
       // still names it (排队中) for the tooltip and assistive tech.
-      return <SiriOrb size={size} state="thinking" label={label} />;
+      return <SiriOrb size={size} state="thinking" steady label={label} />;
     case 'awaiting_input':
-      // Running's speed, deliberately (per product). A pending question is not
-      // a paused run — the agent is live and the work is mid-flight, so the
-      // orb keeps working; colour alone carries "your move". Slowing it here
-      // would say "stalled", which is what `queued` means.
-      return <SiriOrb size={size} state="thinking" colors={ATTENTION} literal label={label} />;
+      // The design draft's orange orb: flat #FF8D02 with one wedge turning
+      // at idle pace (~20s). This replaces the earlier "running's speed"
+      // rule — the lead chose the draft verbatim on 2026-10-26.
+      return <SiriOrb size={size} state="idle" colors={AWAITING} variant="wedge" steady label={label} />;
     case 'not_started':
       return null;
     default:

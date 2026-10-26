@@ -12,7 +12,7 @@ import type { CSSProperties } from 'react';
 import styles from './SiriOrb.module.css';
 
 /** Speed presets. The palette is deliberately NOT part of the state. */
-export type SiriOrbState = 'idle' | 'thinking' | 'streaming' | 'still';
+export type SiriOrbState = 'idle' | 'thinking' | 'streaming';
 
 interface Props {
   /** Rendered edge length in px. */
@@ -33,6 +33,18 @@ interface Props {
    * (`.entry-nav-rail__failed-orb .SiriOrb_disc::before`). Default `full`.
    */
   filterMode?: 'full' | 'blur';
+  /**
+   * `wedge` swaps the eight-gradient mesh for the design draft's flat disc
+   * with one light/shadow wedge turning over it (the draft's orange orb,
+   * `[data-od-id="r:icon:p1"]`). Default `mesh`.
+   */
+  variant?: 'mesh' | 'wedge';
+  /**
+   * The design draft's sidebar orbs neither breathe nor scale: only the mesh
+   * turns (`.entry-nav-rail__recent-icon .SiriOrb_orb { animation: none }`,
+   * `.SiriOrb_disc { transform: none }`). Default false.
+   */
+  steady?: boolean;
   /**
    * Render the given accents literally — nothing lightens them and nothing
    * pushes their hue. Required to recolour the orb at all: the stock build is
@@ -65,7 +77,6 @@ const STATE_CLASS: Record<SiriOrbState, string | undefined> = {
   idle: styles.isIdle,
   thinking: styles.isThinking,
   streaming: styles.isStreaming,
-  still: styles.isStill,
 };
 
 export function SiriOrb({
@@ -74,6 +85,8 @@ export function SiriOrb({
   colors,
   literal = false,
   filterMode = 'full',
+  variant = 'mesh',
+  steady = false,
   className,
   label,
 }: Props) {
@@ -103,6 +116,8 @@ export function SiriOrb({
         m.tiny ? styles.isTiny : '',
         literal ? styles.isLiteral : '',
         filterMode === 'blur' ? styles.isBlurOnly : '',
+        variant === 'wedge' ? styles.isWedge : '',
+        steady ? styles.isSteady : '',
         className,
       ]
         .filter(Boolean)
