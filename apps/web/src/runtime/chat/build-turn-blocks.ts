@@ -560,6 +560,8 @@ export function buildTurnBlocks(input: BuildTurnInput): TurnBlock[] {
    * `null` = 有一段算不出来,合计也就算不出来。
    */
   const carriedMs = new Map<ExecutionShell, number | null>();
+  /** 第几段自动续跑合进了当前这张壳(0 = 没合并过);推理按段分格,见 `ShellText.segment` */
+  let mergedSegment = 0;
   const nextShell = (): ExecutionShell => {
     shellSeq += 1;
     const shell = makeShell(shellSeq);
@@ -838,7 +840,12 @@ export function buildTurnBlocks(input: BuildTurnInput): TurnBlock[] {
     }
     if (!text.trim()) return;
     openText = thinking
-      ? { kind: 'text', text: text.replace(/^\s+/, ''), thinking: true }
+      ? {
+        kind: 'text',
+        text: text.replace(/^\s+/, ''),
+        thinking: true,
+        ...(mergedSegment > 0 ? { segment: mergedSegment } : {}),
+      }
       : { kind: 'text', text: text.replace(/^\s+/, '') };
     arr.push(openText);
     // thinking / text 都不带时刻 —— 它们占掉的是这段空白里的时间,记上账(见 `gapLanded`)
@@ -1535,22 +1542,17 @@ export function buildTurnBlocks(input: BuildTurnInput): TurnBlock[] {
    *  · 收这个 run 的那张壳留着,后继 run 的事件继续落进它,状态仍是「进行中」;
    *  · 它在这个 run 里的时长记进 `carriedMs`,后继 run 结算时加上去 —— 「时长合计」
    *    是各段之和,两段之间 daemon 衔接的空档不算(谁也没在跑);
-   *  · 这个 run 已经出壳的结论(done 之后的正文)收回壳里:它是中间说明,不是最终答复。
+   *  · 这个 run 的结论(方案说明)**照旧留在执行记录外面**,排在最终答复之前 ——
+   *    产品对 D8 的答复是「什么都不改」(2026-10-26):只合并标题,不挪中间那段文字。
+   *    没发 done 的那段也和 `closeRun` 一样从壳里提出来,和改动前的显示位置相同。
    *
    * 同一个 run 里另开的那张壳(清单卡另起时的 `top`)照 `closeRun` 的办法定死。
    */
   function continueRun(): boolean {
     const keep = todoCard ?? top;
     if (!keep) return false;
-    const at = blocks.indexOf(keep);
-    const trailing = blocks.slice(at + 1);
-    /*
-     * 出壳的那段里挂着交互(问答卡、产物)就不合并:壳里的文字只认 `<od-card>`,
-     * 收进去这些交互就画不出来了。宁可两个标题,也不吞掉一张卡。
-     */
-    if (trailing.some((block) => block.kind !== 'prose' || INTERACTIVE_PROSE.test(block.text))) {
-      return false;
-    }
+    liftConclusion();
+    mergedSegment += 1;
     const thinkEnd = runEndedAt ?? lastEndedAt;
     if (thinkEnd != null) closeThink(thinkEnd);
     openThink = null;
@@ -1570,10 +1572,6 @@ export function buildTurnBlocks(input: BuildTurnInput): TurnBlock[] {
       shell.quietMs = null;
       if (shell.status === 'running') shell.status = 'done';
       closeRunningSegments(shell);
-    }
-    blocks.splice(at + 1);
-    for (const block of trailing as ProseBlock[]) {
-      if (block.text.trim()) keep.items.push({ kind: 'text', text: block.text });
     }
     top = keep;
     todoCard = todoCard === keep ? keep : null;
@@ -1827,9 +1825,6 @@ export function buildTurnBlocks(input: BuildTurnInput): TurnBlock[] {
  * 推翻时改为 false,恢复「每个物理 run 各一个标题」。
  */
 const MERGE_AUTO_CONTINUED_RUNS = true as boolean;
-
-/** 结论段里挂着交互的协议标签 —— 这种段不能收进执行记录(见 `continueRun`) */
-const INTERACTIVE_PROSE = /<(question-form|artifact)\b/i;
 
 /** 两段时长相加;`undefined` = 前面没有攒下的,任何一段是 `null` 合计就是 `null` */
 function sumElapsed(carried: number | null | undefined, own: number | null): number | null {

@@ -146,9 +146,9 @@ describe('OD Next 折叠轮次 · run 边界(真机库字节)', () => {
     expect(shells[0]!.items.some((it) => it.kind === 'tool')).toBe(false);
     expect(shells[1]!.items.some((it) => it.kind === 'tool')
       || shells[1]!.segments.some((seg) => seg.items.some((it) => it.kind === 'tool'))).toBe(true);
-    // 方案说明(run 1 的结论)收进了这张壳,而不是留在壳外
+    // 产品 D8 答复「什么都不改」:方案说明(run 1 的结论)照旧留在壳外,不收进执行记录
     const inside = JSON.stringify(shells[1]!.items) + JSON.stringify(shells[1]!.segments);
-    expect(inside).toContain('方向定了：');
+    expect(inside).not.toContain('方向定了：');
   });
 
   /**
@@ -213,11 +213,13 @@ describe('OD Next 折叠轮次 · run 边界(真机库字节)', () => {
       .find((el) => el.querySelector('[data-testid="question-form-summary"]'))!;
     expect(runTag(answeredBlock.textContent ?? '')).toBe('run0');
 
-    // 推测项 A-01:run 1 的方案说明收进了答完之后那张壳(壳里有 index.html,标成 run2)
+    // 推测项 A-01 + D8 答复「什么都不改」:答完之后只剩一张壳(壳里有 index.html,标成 run2),
+    // run 1 的方案说明照旧在壳外、最终答复之前
     expect(order).toEqual([
       'shell:run0',
       'answered+prose',
       'shell:run2',
+      'prose:run1',
       'prose:run2',
     ]);
   });

@@ -327,11 +327,12 @@ describe('评审 #7921 · 壳头不许借别的 run 的时钟', () => {
     expect(shells).toHaveLength(1);
     expect(shells[0]!.elapsedMs).toBe(80_000);
     expect(headText(shells[0]!)).toBe('1m 20s');
-    // run 0 的「初版给你了」是中间说明,收进了壳里;壳外只剩最终答复
-    expect(JSON.stringify(shells[0]!.items)).toContain('初版给你了');
+    // 产品 D8 答复「什么都不改」:run 0 的「初版给你了」照旧留在壳外,排在最终答复之前
+    expect(JSON.stringify(shells[0]!.items)).not.toContain('初版给你了');
     const prose = blocksOf(folded[0]!).filter((b) => b.kind === 'prose').map((b) => (b as { text: string }).text);
-    expect(prose.join('')).not.toContain('初版给你了');
-    expect(prose.join('')).toContain('已经按第二个方向改好了');
+    expect(prose).toHaveLength(2);
+    expect(prose[0]).toContain('初版给你了');
+    expect(prose[1]).toContain('已经按第二个方向改好了');
   });
 
   /** 先证语料真的造出了那个形态 —— 不然下面几条会空转。 */
