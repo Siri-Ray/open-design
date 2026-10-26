@@ -5480,6 +5480,8 @@ export const de: Dict = {
   'chat.record.thoughts': "Gedankengang",
   'chat.record.done': "Fertig",
   'chat.record.turnElapsed': "Dauer",
+  'chat.record.elapsedSeconds': "{n}s",
+  'chat.record.elapsedMinutes': "{m}m {s}s",
   'chat.record.turnStopped': "Gestoppt",
   'chat.record.failedTurn': "Lauf fehlgeschlagen",
   'chat.record.plan': "Plan · {count} Schritte",

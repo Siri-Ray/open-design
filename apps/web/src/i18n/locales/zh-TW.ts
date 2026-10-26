@@ -5920,6 +5920,8 @@ export const zhTW: Dict = {
   'chat.record.thoughts': "思考過程",
   'chat.record.done': "已完成",
   'chat.record.turnElapsed': "用時",
+  'chat.record.elapsedSeconds': "{n} 秒",
+  'chat.record.elapsedMinutes': "{m} 分 {s} 秒",
   'chat.record.turnStopped': "已停止",
   'chat.record.failedTurn': "執行失敗",
   'chat.record.plan': "執行計畫 · {count} 步",

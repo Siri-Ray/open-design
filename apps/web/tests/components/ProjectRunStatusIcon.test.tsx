@@ -24,19 +24,21 @@ function shapeOf(status: ProjectDisplayStatus) {
 }
 
 describe('ProjectRunStatusIcon', () => {
-  it('draws nothing in the lead slot for finished work', () => {
-    // OPEND-3133: a finished run keeps the folder and reports through the
-    // unread dot at the row's end (ProjectCompletionDot), never a ✓ here.
-    expect(shapeOf('succeeded').kind).toBe('none');
-    expect(hasRunStatusGlyph('succeeded')).toBe(false);
-    expect(hasCompletionNotice('succeeded')).toBe(true);
+  // P0-24 设计答复(2026-10-26):有新结果「也改成蓝色球,无标签」,失败「用新的红色球,
+  // 不用红色感叹号」。两者都是结果,所以球不转;行尾蓝点不再出现。
+  it('draws an unopened finished run as the still blue ball in the lead slot', () => {
+    const result = shapeOf('succeeded');
+    expect(result.kind).toBe('orb');
+    expect((result as { root: HTMLElement }).root.style.getPropertyValue('--c1')).toBe('#578EFF');
+    expect((result as { root: HTMLElement }).root.className).toContain('isStill');
+    expect(hasRunStatusGlyph('succeeded')).toBe(true);
   });
 
-  it('reports a completion notice for finished work only', () => {
-    const others: ProjectDisplayStatus[] = [
-      'not_started', 'queued', 'running', 'awaiting_input', 'incomplete', 'failed', 'canceled',
+  it('never reports a row-end completion notice any more', () => {
+    const all: ProjectDisplayStatus[] = [
+      'not_started', 'queued', 'running', 'awaiting_input', 'incomplete', 'failed', 'canceled', 'succeeded',
     ];
-    for (const status of others) expect(hasCompletionNotice(status), status).toBe(false);
+    for (const status of all) expect(hasCompletionNotice(status), status).toBe(false);
     expect(hasCompletionNotice(undefined)).toBe(false);
   });
 
@@ -65,21 +67,21 @@ describe('ProjectRunStatusIcon', () => {
   );
 
   it.each<[ProjectDisplayStatus]>([['failed'], ['canceled'], ['incomplete']])(
-    'draws %s as the interrupted badge, not the orb',
+    'draws %s as the still red ball',
     (status) => {
       // A stopped run must not spin: the rotation is what says "working".
-      const result = shapeOf(status);
-      expect(result.kind).toBe('badge');
-      expect(result.root!.querySelector('path')?.getAttribute('fill')).toBe('#F34801');
-      // The glyph is a knockout, so it needs the dark plate behind it.
-      expect(result.root!.querySelector('rect')?.getAttribute('fill')).toBe('#121212');
+      const result = shapeOf(status) as { kind: string; root: HTMLElement };
+      expect(result.kind).toBe('orb');
+      expect(result.root.style.getPropertyValue('--c1')).toBe('#F34801');
+      expect(result.root.className).toContain('isStill');
+      expect(result.root.className).not.toContain('isThinking');
     },
   );
 
   it('gives every interrupted status the identical mark', () => {
     // One mark for all three; the reason is carried by the status text.
     const marks = (['failed', 'canceled', 'incomplete'] as const).map(
-      (status) => (shapeOf(status) as { root: Element }).root.innerHTML,
+      (status) => (shapeOf(status) as { root: Element }).root.outerHTML,
     );
     expect(new Set(marks).size).toBe(1);
   });
@@ -164,9 +166,8 @@ describe('ProjectRunStatusIcon', () => {
     expect(orb.style.getPropertyValue('--size')).toBe('14px');
     cleanup();
 
-    const badge = render(<ProjectRunStatusIcon status="failed" size={14} />)
-      .container.firstElementChild;
-    expect(badge?.getAttribute('width')).toBe('14');
-    expect(badge?.getAttribute('height')).toBe('14');
+    const failed = render(<ProjectRunStatusIcon status="failed" size={14} />)
+      .container.firstElementChild as HTMLElement;
+    expect(failed.style.getPropertyValue('--size')).toBe('14px');
   });
 });

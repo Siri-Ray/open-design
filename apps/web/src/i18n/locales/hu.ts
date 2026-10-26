@@ -5469,6 +5469,8 @@ export const hu: Dict = {
   'chat.record.thoughts': "Gondolatmenet",
   'chat.record.done': "Kész",
   'chat.record.turnElapsed': "Időtartam",
+  'chat.record.elapsedSeconds': "{n}s",
+  'chat.record.elapsedMinutes': "{m}m {s}s",
   'chat.record.turnStopped': "Leállítva",
   'chat.record.failedTurn': "A futtatás hibára futott",
   'chat.record.plan': "Terv · {count} lépés",

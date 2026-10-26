@@ -5469,6 +5469,8 @@ export const ja: Dict = {
   'chat.record.thoughts': "思考プロセス",
   'chat.record.done': "完了",
   'chat.record.turnElapsed': "所要時間",
+  'chat.record.elapsedSeconds': "{n}s",
+  'chat.record.elapsedMinutes': "{m}m {s}s",
   'chat.record.turnStopped': "停止済み",
   'chat.record.failedTurn': "実行失敗",
   'chat.record.plan': "実行計画 · {count} ステップ",

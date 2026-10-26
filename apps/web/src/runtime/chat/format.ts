@@ -27,13 +27,30 @@ export function formatElapsed(ms: number | null | undefined): string | null {
  * 缺失、或只剩同批到达的事件时刻时这样做),这里照旧不写数字。
  */
 export function formatShellElapsed(ms: number | null | undefined): string | null {
+  const parts = shellElapsedParts(ms);
+  if (!parts) return null;
+  return parts.kind === 'seconds' ? `${parts.n}s` : `${parts.m}m ${parts.s}s`;
+}
+
+/**
+ * 同一套粗档,拆成数字和单位两半,让单位走多语言(P0-24 设计答复 2026-10-26:
+ * 中文写「0 秒」「31 秒」「1 分 20 秒」,其他语言照旧 `s` / `m`)。
+ * 档位与 {@link formatShellElapsed} 逐字相同 —— 它就是用这个拼出来的。
+ */
+export type ShellElapsedParts =
+  | { kind: 'seconds'; n: string }
+  | { kind: 'minutes'; m: string; s: string };
+
+export function shellElapsedParts(ms: number | null | undefined): ShellElapsedParts | null {
   if (ms == null || !(ms >= 0)) return null;
-  if (ms < 1000) return '0s';
-  if (ms < 10_000) return `${(ms / 1000).toFixed(1)}s`;
-  if (ms < 60_000) return `${Math.round(ms / 1000)}s`;
-  const m = Math.floor(ms / 60_000);
-  const s = Math.round((ms % 60_000) / 1000);
-  return `${m}m ${s}s`;
+  if (ms < 1000) return { kind: 'seconds', n: '0' };
+  if (ms < 10_000) return { kind: 'seconds', n: (ms / 1000).toFixed(1) };
+  if (ms < 60_000) return { kind: 'seconds', n: String(Math.round(ms / 1000)) };
+  return {
+    kind: 'minutes',
+    m: String(Math.floor(ms / 60_000)),
+    s: String(Math.round((ms % 60_000) / 1000)),
+  };
 }
 
 /**

@@ -5469,6 +5469,8 @@ export const uk: Dict = {
   'chat.record.thoughts': "Хід думок",
   'chat.record.done': "Готово",
   'chat.record.turnElapsed': "Тривалість",
+  'chat.record.elapsedSeconds': "{n}s",
+  'chat.record.elapsedMinutes': "{m}m {s}s",
   'chat.record.turnStopped': "Зупинено",
   'chat.record.failedTurn': "Запуск не вдався",
   'chat.record.plan': "План · {count} кроків",

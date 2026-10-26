@@ -5480,6 +5480,8 @@ export const ar: Dict = {
   'chat.record.thoughts': "مسار التفكير",
   'chat.record.done': "تم",
   'chat.record.turnElapsed': "استغرق",
+  'chat.record.elapsedSeconds': "{n}s",
+  'chat.record.elapsedMinutes': "{m}m {s}s",
   'chat.record.turnStopped': "تم الإيقاف",
   'chat.record.failedTurn': "فشل التشغيل",
   'chat.record.plan': "الخطة · {count} خطوات",

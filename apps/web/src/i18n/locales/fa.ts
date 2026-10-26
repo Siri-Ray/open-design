@@ -5475,6 +5475,8 @@ export const fa: Dict = {
   'chat.record.thoughts': "روند تفکر",
   'chat.record.done': "انجام شد",
   'chat.record.turnElapsed': "مدت",
+  'chat.record.elapsedSeconds': "{n}s",
+  'chat.record.elapsedMinutes': "{m}m {s}s",
   'chat.record.turnStopped': "متوقف شد",
   'chat.record.failedTurn': "اجرا ناموفق بود",
   'chat.record.plan': "برنامه · {count} مرحله",

@@ -5469,6 +5469,8 @@ export const ko: Dict = {
   'chat.record.thoughts': "사고 과정",
   'chat.record.done': "완료",
   'chat.record.turnElapsed': "소요 시간",
+  'chat.record.elapsedSeconds': "{n}s",
+  'chat.record.elapsedMinutes': "{m}m {s}s",
   'chat.record.turnStopped': "중지됨",
   'chat.record.failedTurn': "실행 실패",
   'chat.record.plan': "실행 계획 · {count}단계",

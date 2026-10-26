@@ -155,7 +155,8 @@ describe('壳头', () => {
   it('壳头耗时按粗档写(31s 而不是 31.0s)', () => {
     const [shell] = shellsOf(call('t1', 'Bash', { command: 'ls' }, { startedAt: 0, completedAt: 31_000 }), 'succeeded');
     render(<ExecutionShell shell={shell as ShellData} />);
-    expect(screen.getByText('31s')).toBeTruthy();
+    // P0-24 设计答复(2026-10-26):中文界面写「31 秒」
+    expect(screen.getByText('31 秒')).toBeTruthy();
   });
 });
 

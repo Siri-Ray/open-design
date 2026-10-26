@@ -20,7 +20,7 @@ import { useT } from '../../i18n';
 import { Icon } from '../Icon';
 import type { ExecutionShell as ShellData, ImageRow as ImageRowData, ShellItem, ThinkingTokens, TodoSegment } from '../../runtime/chat/contract';
 import { isExpandable, isStruck } from '../../runtime/chat/contract';
-import { formatElapsed, formatShellElapsed, formatThinkingTokens } from '../../runtime/chat/format';
+import { formatElapsed, shellElapsedParts, formatThinkingTokens } from '../../runtime/chat/format';
 import { CountingNumber } from './CountingNumber';
 import { groupThinking, isThinking, type GroupedShellItem } from '../../runtime/chat/group-thinking';
 import type { RecordFileScope } from '../../runtime/chat/record-file-open';
@@ -131,7 +131,16 @@ export function ExecutionShell({
 }: ExecutionShellProps): ReactElement {
   const t = useT();
   const running = shell.status === 'running' && !shell.stopped;
-  const elapsed = formatShellElapsed(shell.elapsedMs);
+  /*
+   * P0-24 设计答复(2026-10-26):时长单位走多语言 —— 中文「0 秒」「1 分 20 秒」,
+   * 其他语言照旧「0s」「1m 20s」。档位见 `shellElapsedParts`。
+   */
+  const elapsedParts = shellElapsedParts(shell.elapsedMs);
+  const elapsed = elapsedParts === null
+    ? null
+    : elapsedParts.kind === 'seconds'
+      ? t('chat.record.elapsedSeconds', { n: elapsedParts.n })
+      : t('chat.record.elapsedMinutes', { m: elapsedParts.m, s: elapsedParts.s });
   /**
    * 模型此刻在想 —— **只用来挑出哪一格是「还在写的那一格」**,不再改变壳的形态。
    *

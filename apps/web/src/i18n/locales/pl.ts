@@ -5469,6 +5469,8 @@ export const pl: Dict = {
   'chat.record.thoughts': "Tok myślenia",
   'chat.record.done': "Gotowe",
   'chat.record.turnElapsed': "Czas",
+  'chat.record.elapsedSeconds': "{n}s",
+  'chat.record.elapsedMinutes': "{m}m {s}s",
   'chat.record.turnStopped': "Zatrzymano",
   'chat.record.failedTurn': "Uruchomienie nieudane",
   'chat.record.plan': "Plan · {count} kroków",

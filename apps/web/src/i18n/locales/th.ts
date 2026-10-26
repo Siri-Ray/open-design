@@ -5469,6 +5469,8 @@ export const th: Dict = {
   'chat.record.thoughts': "กระบวนการคิด",
   'chat.record.done': "เสร็จแล้ว",
   'chat.record.turnElapsed': "ใช้เวลา",
+  'chat.record.elapsedSeconds': "{n}s",
+  'chat.record.elapsedMinutes': "{m}m {s}s",
   'chat.record.turnStopped': "หยุดแล้ว",
   'chat.record.failedTurn': "รันไม่สำเร็จ",
   'chat.record.plan': "แผน · {count} ขั้น",

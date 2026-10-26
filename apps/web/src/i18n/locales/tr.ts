@@ -5469,6 +5469,8 @@ export const tr: Dict = {
   'chat.record.thoughts': "Düşünce süreci",
   'chat.record.done': "Tamamlandı",
   'chat.record.turnElapsed': "Süre",
+  'chat.record.elapsedSeconds': "{n}s",
+  'chat.record.elapsedMinutes': "{m}m {s}s",
   'chat.record.turnStopped': "Durduruldu",
   'chat.record.failedTurn': "Çalıştırma başarısız",
   'chat.record.plan': "Plan · {count} adım",

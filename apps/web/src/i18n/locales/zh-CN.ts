@@ -5913,6 +5913,8 @@ export const zhCN: Dict = {
   'chat.record.thoughts': "思考过程",
   'chat.record.done': "已完成",
   'chat.record.turnElapsed': "用时",
+  'chat.record.elapsedSeconds': "{n} 秒",
+  'chat.record.elapsedMinutes': "{m} 分 {s} 秒",
   'chat.record.turnStopped': "已停止",
   'chat.record.failedTurn': "运行失败",
   'chat.record.plan': "执行计划 · {count} 步",

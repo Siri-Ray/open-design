@@ -5469,6 +5469,8 @@ export const ptBR: Dict = {
   'chat.record.thoughts': "Raciocínio",
   'chat.record.done': "Concluído",
   'chat.record.turnElapsed': "Duração",
+  'chat.record.elapsedSeconds': "{n}s",
+  'chat.record.elapsedMinutes': "{m}m {s}s",
   'chat.record.turnStopped': "Interrompido",
   'chat.record.failedTurn': "Execução falhou",
   'chat.record.plan': "Plano · {count} etapas",

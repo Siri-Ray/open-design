@@ -5480,6 +5480,8 @@ export const esES: Dict = {
   'chat.record.thoughts': "Razonamiento",
   'chat.record.done': "Hecho",
   'chat.record.turnElapsed': "Duración",
+  'chat.record.elapsedSeconds': "{n}s",
+  'chat.record.elapsedMinutes': "{m}m {s}s",
   'chat.record.turnStopped': "Detenido",
   'chat.record.failedTurn': "Ejecución fallida",
   'chat.record.plan': "Plan · {count} pasos",
