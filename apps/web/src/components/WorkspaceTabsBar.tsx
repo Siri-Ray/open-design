@@ -33,6 +33,7 @@ import {
   ProjectCompletionDot,
   ProjectFolderGlyph,
   ProjectRunStatusIcon,
+  STATUS_BALL_SIZE,
 } from './ProjectRunStatusIcon';
 import {
   ProjectHoverPreviewCard,
@@ -801,7 +802,7 @@ function leadGlyphFor(
     return <ProjectFolderGlyph size={14} />;
   }
   return (
-    <ProjectRunStatusIcon status={status} size={14} label={t(STATUS_LABEL_KEYS[status])} />
+    <ProjectRunStatusIcon status={status} size={STATUS_BALL_SIZE} label={t(STATUS_LABEL_KEYS[status])} />
   );
 }
 
