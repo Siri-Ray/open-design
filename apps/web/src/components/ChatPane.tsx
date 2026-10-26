@@ -4514,7 +4514,6 @@ export function ChatPane({
                   forceStreamingMessageIds={forceStreamingMessageIds}
                   lastAssistantId={lastAssistantId}
                   lastTurnAssistantId={lastTurnAssistantId}
-                  agentRetrying={reconnect?.reason === 'agent-retry' && !reconnect.exhausted}
                   activePluginSnapshot={activePluginSnapshot}
                   activeDesignSystem={activeDesignSystem}
                   hasActiveDesignSystem={hasActiveDesignSystem}
@@ -5276,7 +5275,6 @@ function ChatRows({
   forceStreamingMessageIds,
   lastAssistantId,
   lastTurnAssistantId,
-  agentRetrying = false,
   activePluginSnapshot,
   activeDesignSystem,
   hasActiveDesignSystem,
@@ -5362,8 +5360,6 @@ function ChatRows({
   forceStreamingMessageIds?: Set<string>;
   lastAssistantId: string | undefined;
   lastTurnAssistantId: string | undefined;
-  /** The daemon is re-running the current turn (`agent-retry` reconnect row). P0-24 A4. */
-  agentRetrying?: boolean;
   activePluginSnapshot?: AppliedPluginSnapshot | null;
   activeDesignSystem?: DesignSystemSummary | null;
   hasActiveDesignSystem: boolean;
@@ -5501,7 +5497,6 @@ function ChatRows({
         showRole={assistantRoleByMessageId.get(m.id) ?? true}
         isLast={m.id === lastAssistantId}
         isLastTurn={m.id === lastTurnAssistantId}
-        agentRetrying={agentRetrying && messageStreaming && m.id === lastTurnAssistantId}
         errorCardOwnerId={errorCardOwnerId}
         nextUserContent={nextUserContentByAssistantId.get(m.id)}
         previousTodos={previousTodosByMessageId.get(m.id)}
