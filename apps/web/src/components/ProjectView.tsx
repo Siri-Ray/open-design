@@ -7239,6 +7239,7 @@ export function ProjectView({
               requestOpenTurnArtifacts(turnArtifacts.open, turnArtifacts.focused);
             }
             const deliveryOutcome = resolveDesignDeliveryOutcome({
+              projectRoot: projectDetail.resolvedDir,
               sessionMode: message.sessionMode,
               runStatus: 'succeeded',
               content: replayedContent,
@@ -7781,6 +7782,7 @@ export function ProjectView({
                 const deliveryContent = needsFullReplay ? replayedContent : message.content;
                 const deliveryEvents = needsFullReplay ? replayedEvents : message.events;
                 const deliveryOutcome = resolveDesignDeliveryOutcome({
+                  projectRoot: projectDetail.resolvedDir,
                   sessionMode: message.sessionMode,
                   runStatus: 'succeeded',
                   content: deliveryContent,
@@ -10154,6 +10156,7 @@ export function ProjectView({
                 traceObjectFiles,
               };
               const deliveryOutcome = resolveDesignDeliveryOutcome({
+                projectRoot: projectDetail.resolvedDir,
                 sessionMode: deliveryCandidate.sessionMode,
                 runStatus: deliveryCandidate.runStatus,
                 content: deliveryCandidate.content,

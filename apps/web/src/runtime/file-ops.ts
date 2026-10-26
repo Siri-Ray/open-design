@@ -216,22 +216,44 @@ export function deriveFileOps(
 }
 
 /**
- * True when the run attempted any file mutation (write/edit/delete tool call,
- * or a simple Bash rm/unlink), regardless of whether the attempt succeeded.
+ * True when the run attempted a project file mutation (write/edit/delete tool
+ * call, or a simple Bash rm/unlink), regardless of whether it succeeded.
+ * With a resolved project directory, exclude only paths proven outside it.
+ * Missing scope/paths and relative paths retain the conservative fallback.
  * Tool names must stay aligned with the daemon's cross-runtime
  * `WRITE_OR_EDIT_TOOL_NAMES` set in `apps/daemon/src/runtimes/run-artifacts.ts`.
  */
-export function hasFileMutationToolUse(events: AgentEvent[] | undefined): boolean {
+export function hasFileMutationToolUse(
+  events: AgentEvent[] | undefined,
+  scope?: FileOpProjectScope,
+): boolean {
   for (const ev of events ?? []) {
     if (ev.kind !== 'tool_use') continue;
     if (ev.name === 'Bash') {
-      if (extractSimpleBashDeletes(ev.input).length > 0) return true;
+      if (extractSimpleBashDeletes(ev.input).some((file) => mayMutateProjectFile(file, scope))) return true;
       continue;
     }
     const kind = classify(ev.name);
-    if (kind === 'write' || kind === 'edit' || kind === 'delete') return true;
+    if ((kind === 'write' || kind === 'edit' || kind === 'delete')
+      && mayMutateProjectFile(extractPath(ev.input), scope)) return true;
   }
   return false;
+}
+
+function mayMutateProjectFile(file: string | null, scope: FileOpProjectScope | undefined): boolean {
+  if (!file || !scope?.resolvedDir) return true;
+  let candidate = file.replace(/\\/g, '/');
+  let root = scope.resolvedDir.replace(/\\/g, '/').replace(/\/+$/, '') || '/';
+  const absolute = (value: string) => value.startsWith('/') || /^[a-z]:\//i.test(value);
+  if (!absolute(candidate) || !absolute(root)) return true;
+  // Do not infer ownership for unnormalized paths: traversal or symlinks can
+  // change their destination. Unknown paths must not hide a delivery failure.
+  if ([candidate, root].some((value) => value.split('/').some((part) => part === '.' || part === '..'))) return true;
+  if (/^[a-z]:\//i.test(root) || root.startsWith('//')) {
+    candidate = candidate.toLowerCase();
+    root = root.toLowerCase();
+  }
+  return candidate === root || candidate.startsWith(root.endsWith('/') ? root : `${root}/`);
 }
 
 export type FileOpCounts = Record<FileOpKind, number>;
