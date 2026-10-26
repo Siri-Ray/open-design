@@ -1276,6 +1276,42 @@ process.exit(1);
     expect(body).toContain('"status":"succeeded"');
   });
 
+  // AMR 0.26.x, 10/23-10/26: 19 runs rejected the saved `deepseek-v4-flash`
+  // and none switched models. Before the remote catalog is loaded the run
+  // resolves against vela's bundled preset seed, which still lists the
+  // delisted model first, so the computed "default" was the rejected model
+  // itself and no fallback was offered.
+  it('falls back to a live chat model when the preset seed still lists the delisted default', async () => {
+    const { body, invocations, responseOk } = await runAmrModelRequest('deepseek-v4-flash', {
+      FAKE_VELA_SET_MODEL_UNAVAILABLE: 'deepseek-v4-flash',
+      // vela-cli 0.1.7 `presetModels`.
+      FAKE_VELA_MODEL_PRESET_JSON: JSON.stringify({
+        source: 'preset',
+        data: [
+          'gpt-5.5', 'gpt-5.4-mini', 'claude-opus-4.8', 'claude-sonnet-4.6',
+          'gemini-3.1-pro-preview', 'gemini-3-flash-preview', 'deepseek-v4-flash',
+          'deepseek-v4-pro', 'glm-5.1', 'kimi-k2.6', 'minimax-m2.7',
+        ].map((id) => ({ id })),
+      }),
+      FAKE_VELA_MODEL_LIST_JSON: JSON.stringify({
+        source: 'remote',
+        data: [{ id: 'deepseek-v4.1-flash' }, { id: 'deepseek-v4-pro' }, { id: 'glm-5.3-flash' }],
+      }),
+      FAKE_VELA_MODEL_LIST_DELAY_MS: '20000',
+    });
+
+    expect(responseOk).toBe(true);
+    expect(invocations.slice(0, 4)).toEqual([
+      'new',
+      'set_model_rejected:deepseek-v4-flash',
+      'set_model:deepseek-v4.1-flash',
+      'prompt',
+    ]);
+    expect(body).toContain('"label":"model_fallback"');
+    expect(body).not.toContain('AMR_MODEL_UNAVAILABLE');
+    expect(body).toContain('"status":"succeeded"');
+  });
+
   it('survives transient AMR Link catalog failures without aborting the run', async () => {
     // The run preflight resolves the AMR catalog through the shared
     // AmrModelLoadingCache, which degrades to the offline `vela model preset`
