@@ -693,14 +693,15 @@ process.stdin.on('end', () => {
     );
   });
 
-  it('lets a headless OpenCode run use the system temporary directory', async () => {
+  it.each([
+    { agentId: 'opencode', configuredTemp: false },
+    { agentId: 'opencode', configuredTemp: true },
+    { agentId: 'byok-opencode', configuredTemp: true },
+  ])('allows the system temp directory for $agentId (configured: $configuredTemp)', async ({ agentId, configuredTemp }) => {
     if (!process.env.OD_DATA_DIR) {
       throw new Error('OD_DATA_DIR is required for OpenCode temp permission tests');
     }
 
-    // Production BYOK/OpenCode runs auto-rejected reads of files the agent had
-    // just written to /tmp or os.tmpdir() (thumbnails, ffmpeg frames, probe
-    // scripts), then ended with no output.
     const projectId = `proj-${randomUUID()}`;
     const markerDir = await fsp.mkdtemp(join(tmpdir(), 'od-opencode-tmp-'));
     tempDirs.push(markerDir);
@@ -713,39 +714,61 @@ process.stdin.on('end', () => {
     });
     expect(createProjectResponse.ok).toBe(true);
 
-    await withFakeAgent(
-      'opencode',
-      `
+    const previousConfig = await readAppConfig(process.env.OD_DATA_DIR);
+    try {
+      if (configuredTemp) await writeAppConfig(process.env.OD_DATA_DIR, {
+        agentCliEnv: {
+          ...previousConfig.agentCliEnv,
+          opencode: { TMPDIR: markerDir, TMP: markerDir, TEMP: markerDir },
+        },
+      });
+      await withFakeAgent(
+        'opencode',
+        `
 const fs = require('node:fs');
 process.stdin.resume();
 process.stdin.on('end', () => {
-  fs.writeFileSync(${JSON.stringify(envFile)}, process.env.OPENCODE_CONFIG_CONTENT || '');
+  fs.writeFileSync(${JSON.stringify(envFile)}, JSON.stringify({ config: JSON.parse(process.env.OPENCODE_CONFIG_CONTENT || '{}'), tmpdir: require('node:os').tmpdir() }));
   console.log(JSON.stringify({ type: 'step_start' }));
   console.log(JSON.stringify({ type: 'text', part: { text: 'tmp-permission-ok' } }));
   console.log(JSON.stringify({ type: 'step_finish', part: { tokens: { input: 1, output: 1 } } }));
   process.exit(0);
 });
 `,
-      async () => {
-        const response = await fetch(`${baseUrl}/api/chat`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ agentId: 'opencode', projectId, message: 'hello' }),
-        });
-        expect(response.ok).toBe(true);
-        expect(await response.text()).toContain('tmp-permission-ok');
+        async () => {
+          const response = await fetch(`${baseUrl}/api/chat`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              agentId, projectId, message: 'hello',
+              ...(agentId === 'byok-opencode' ? {
+                model: 'test-model',
+                byokProvider: {
+                  protocol: 'openai', apiKey: 'sk-test', baseUrl: 'https://example.com/v1',
+                  model: 'test-model', requiresApiKey: true,
+                },
+              } : {}),
+            }),
+          });
+          expect(response.ok).toBe(true);
+          expect(await response.text()).toContain('tmp-permission-ok');
 
-        const parsed = JSON.parse(await fsp.readFile(envFile, 'utf8')) as {
-          permission?: { external_directory?: Record<string, string> };
-        };
-        const externalDirectory = parsed.permission?.external_directory ?? {};
-        const expectedRoots = [tmpdir(), ...(process.platform === 'win32' ? [] : ['/tmp'])];
-        for (const root of expectedRoots) {
-          expect(externalDirectory[root]).toBe('allow');
-          expect(externalDirectory[`${root}/**`]).toBe('allow');
-        }
-      },
-    );
+          const parsed = JSON.parse(await fsp.readFile(envFile, 'utf8')) as {
+            config: { permission?: { external_directory?: Record<string, string> } };
+            tmpdir: string;
+          };
+          const externalDirectory = parsed.config.permission?.external_directory ?? {};
+          expect(parsed.tmpdir).toBe(configuredTemp ? markerDir : tmpdir());
+          const expectedRoots = [parsed.tmpdir, ...(process.platform === 'win32' ? [] : ['/tmp'])];
+          for (const root of expectedRoots) {
+            expect(externalDirectory[root]).toBe('allow');
+            expect(externalDirectory[`${root}/**`]).toBe('allow');
+          }
+        },
+      );
+    } finally {
+      await writeAppConfig(process.env.OD_DATA_DIR, { agentCliEnv: previousConfig.agentCliEnv ?? null });
+    }
   });
 
   it('allowlists the active skill root that lives outside the repository skills dir', async () => {

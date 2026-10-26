@@ -1,5 +1,3 @@
-import os from 'node:os';
-
 import { agentCapabilities } from './capabilities.js';
 import type { RuntimeAgentDef } from './types.js';
 
@@ -62,8 +60,16 @@ export function appendOpenCodeWorkspaceDir(
  * variants, so macOS `/private/tmp` and `/private/var/folders/...` follow.
  */
 export function openCodeSystemTempDirectories(
-  tmpdir: () => string = os.tmpdir,
+  env: NodeJS.ProcessEnv = process.env,
   platform: NodeJS.Platform = process.platform,
 ): string[] {
-  return platform === 'win32' ? [tmpdir()] : Array.from(new Set([tmpdir(), '/tmp']));
+  if (platform === 'win32') {
+    const value = (key: string) => env[
+      Object.keys(env).find((name) => name.toLowerCase() === key.toLowerCase()) ?? key
+    ];
+    const root = value('TEMP') || value('TMP') || `${value('SystemRoot') || value('windir')}\\temp`;
+    return [root.length > 1 && root.endsWith('\\') && root.at(-2) !== ':' ? root.slice(0, -1) : root];
+  }
+  const root = env.TMPDIR || env.TMP || env.TEMP || '/tmp';
+  return Array.from(new Set([root.length > 1 && root.endsWith('/') ? root.slice(0, -1) : root, '/tmp']));
 }
