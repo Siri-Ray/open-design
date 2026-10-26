@@ -328,6 +328,9 @@ export type TrackingRunFailureDetail =
   | 'network_error'
   | 'provider_high_demand'
   | 'provider_routing_error'
+  // The provider withheld the response under its content policy
+  // (ContentFilterError). Deterministic for the same request.
+  | 'content_filtered'
   | 'inactivity_timeout'
   | 'timeout'
   | 'empty_output'
