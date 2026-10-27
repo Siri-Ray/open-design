@@ -45,15 +45,27 @@ describe('foldRunsToProjectStatuses', () => {
     expect(statuses.get('working')).toBe('running');
   });
 
-  it('does not count a run that is queued and has not started (P0-24 N3)', () => {
+  it('counts a run that is still preparing from the moment it was created', () => {
+    // The daemon lists a sent run as `queued` with no start until it spawns,
+    // which took 7–22 s on a slow Windows host; the row must not keep the
+    // previous result meanwhile (the chat already says 进行中).
     const statuses = foldRunsToProjectStatuses([
       run({ projectId: 'p1', status: 'succeeded', startedAt: 1, updatedAt: 2 }),
       run({ projectId: 'p1', status: 'queued', startedAt: null, createdAt: 3, updatedAt: 3 }),
       run({ projectId: 'fresh', status: 'queued', startedAt: null }),
     ]);
 
-    expect(statuses.get('p1')).toBe('succeeded');
-    expect(statuses.get('fresh')).toBe('not_started');
+    expect(statuses.get('p1')).toBe('queued');
+    expect(statuses.get('fresh')).toBe('queued');
+  });
+
+  it('shows a run that failed while preparing as this conversation\'s result', () => {
+    const statuses = foldRunsToProjectStatuses([
+      run({ projectId: 'p1', status: 'succeeded', startedAt: 1, updatedAt: 2 }),
+      run({ projectId: 'p1', status: 'failed', startedAt: null, createdAt: 3, updatedAt: 4 }),
+    ]);
+
+    expect(statuses.get('p1')).toBe('failed');
   });
 
   it('calls a succeeded run with unfinished declared work succeeded (P0-24)', () => {
@@ -241,9 +253,9 @@ describe('foldRunsToProjectRunSummaries', () => {
     expect(summaries.get('p1')).toEqual({ status: 'running' });
   });
 
-  it('carries no run identity for a project whose only run has not started', () => {
+  it('carries no run identity for a project whose only run is still preparing', () => {
     expect(foldRunsToProjectRunSummaries([run({ id: 'r1', status: 'queued', startedAt: null })]).get('p1')).toEqual({
-      status: 'not_started',
+      status: 'queued',
     });
   });
 

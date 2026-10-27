@@ -77,17 +77,20 @@ export interface ProjectRunSummary {
 }
 
 /**
- * When a run began executing, for picking the project's current conversation.
+ * When a run began, for picking the project's current conversation.
  *
- * `startedAt` is the first `start` event. A daemon that predates it only has
- * `createdAt`, which is the same instant for a run that never queued. A run
- * still `queued` with no `startedAt` has not started and does not count
- * (P0-24 N3: a queued message counts from the moment it actually starts).
+ * `startedAt` is the first `start` event. A run without one counts from
+ * `createdAt`: the daemon keeps no run waiting behind another, so a run it
+ * lists as `queued` and unstarted is one the user already sent that is still
+ * preparing to spawn — on a slow host that took 7–22 s, and skipping it kept
+ * the previous result on the row while the chat already said 进行中. A run that
+ * ends during that preparation is this conversation's result too. A message
+ * still waiting in the composer's queue has no run at all, so P0-24 N3 ("a
+ * queued message counts once it starts") holds without this function. A
+ * daemon that predates `startedAt` takes the same `createdAt` path.
  */
 function runStartedAt(run: ChatRunStatusResponse): number | null {
   if (typeof run.startedAt === 'number' && Number.isFinite(run.startedAt)) return run.startedAt;
-  if (run.startedAt === null) return null;
-  if (run.status === 'queued') return null;
   return Number.isFinite(run.createdAt) ? run.createdAt : null;
 }
 
@@ -158,8 +161,15 @@ export function foldRunsToProjectRunSummaries(
 ): Map<string, ProjectRunSummary> {
   const current = new Map<string, { run: ChatRunStatusResponse; startedAt: number }>();
   const runsById = new Map(runs.map((run) => [run.id, run]));
+  // A task's next segment speaks through the segment it continues (N13), so
+  // it never competes for "current" on its own, started or not.
+  const successorIds = new Set<string>();
   for (const run of runs) {
-    if (!run.projectId) continue;
+    const nextId = continuationRunId(run);
+    if (nextId) successorIds.add(nextId);
+  }
+  for (const run of runs) {
+    if (!run.projectId || successorIds.has(run.id)) continue;
     const startedAt = runStartedAt(run);
     if (startedAt === null) continue;
     const held = current.get(run.projectId);
