@@ -1790,6 +1790,7 @@ export type MainWindowCloseSurface = {
     (event: 'close', listener: (event: { preventDefault: () => void }) => void): unknown;
   };
   close: () => void;
+  isDestroyed: () => boolean;
 };
 
 /**
@@ -1813,7 +1814,12 @@ export function attachNonDarwinMainWindowCloseShutdown(
   const confirm = options.confirmCloseWithActiveRuns;
   if (confirm) {
     window.on("close", (event) => {
-      if (options.isStopped() || closeConfirmed) return;
+      if (options.isStopped()) return;
+      if (closeConfirmed) {
+        // Only bypass the check for this retry; beforeunload may veto it.
+        closeConfirmed = false;
+        return;
+      }
       event.preventDefault();
       if (confirming) return;
       confirming = true;
@@ -1821,7 +1827,7 @@ export function attachNonDarwinMainWindowCloseShutdown(
         .catch(() => true)
         .then((proceed) => {
           confirming = false;
-          if (!proceed) return;
+          if (!proceed || options.isStopped() || window.isDestroyed()) return;
           closeConfirmed = true;
           window.close();
         });
@@ -2802,6 +2808,7 @@ export async function createDesktopRuntime(options: DesktopRuntimeOptions): Prom
       requestQuit: options.requestQuit,
       confirmCloseWithActiveRuns: async () => {
         const safety = await checkUpdateRestartSafety({ discoverDaemonBaseUrl: discoverUpdateDaemonBaseUrl });
+        if (stopped || window.isDestroyed()) return false;
         if (safety.state !== "blocked") return true;
         const prompt = closeWithActiveRunsPrompt(safety.activeRunCount, app.getLocale());
         const { response } = await dialog.showMessageBox(window, {
