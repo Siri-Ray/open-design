@@ -2776,6 +2776,20 @@ describe('OpenCode provider verdicts (OPEND-3527)', () => {
     expect(failure?.failure_detail).not.toBe('network_error');
   });
 
+  // Windows packaged QA (head de8a9d6): a provider 405 or 415 without an
+  // isRetryable hint was retried as a network error and relaunched OpenCode.
+  it.each([
+    ['405', 'Provider returned error (HTTP 405): Method Not Allowed'],
+    ['415', 'Provider returned error (HTTP 415): Unsupported Media Type'],
+  ])('does not retry a deterministic provider %s that carries no retry hint', (_status, message) => {
+    expect(classifyForAgent('opencode', 'AGENT_EXECUTION_FAILED', message,
+      [errorEvent('AGENT_EXECUTION_FAILED', message, undefined)])).toMatchObject({
+      failure_category: 'upstream_unavailable',
+      failure_detail: 'upstream_client_error',
+      retryable: false,
+    });
+  });
+
   it('keeps a provider client error the provider marked final out of the retried network bucket', () => {
     const message = 'Provider returned error (HTTP 400): Invalid parameter: tools[3].function.name';
     expect(classifyForAgent('opencode', 'AGENT_EXECUTION_FAILED', message,
