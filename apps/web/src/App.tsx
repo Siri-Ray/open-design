@@ -21,6 +21,7 @@ import {
 import {
   deriveConfigureGlobals,
   projectKindFromMetadataToTracking,
+  projectIntentFromMetadataToTracking,
   fidelityToTracking,
 } from '@open-design/contracts/analytics';
 import type {
@@ -193,6 +194,7 @@ import { isMacPlatform } from './utils/platform';
 import { randomUUID } from './utils/uuid';
 import { summarizeProjectNameFromPrompt } from './utils/projectName';
 import { armCompletionFeedbackOnFirstGesture } from './utils/notifications';
+import { useGlobalRunNotices } from './hooks/useGlobalRunNotices';
 import {
   amrArtifactUpgradeHomeMockOffer,
   type AmrArtifactUpgradeHomeOffer,
@@ -260,7 +262,7 @@ import {
   removeProjectFromDisplaySnapshots,
   writeProjectDisplaySnapshot,
 } from './state/project-display-cache';
-import { getOpenDesignHost, type OpenDesignHostProjectImportSuccess } from '@open-design/host';
+import { getOpenDesignHost, isOpenDesignHostAvailable, type OpenDesignHostProjectImportSuccess } from '@open-design/host';
 import { useI18n } from './i18n';
 import { liveArtifactTabId } from './types';
 import type {
@@ -1078,6 +1080,15 @@ function AppInner() {
   const latestPersistedConfigRef = useRef(config);
   latestPersistedConfigRef.current = config;
   const settingsDraftConfigRef = useRef<AppConfig | null>(null);
+  // P0-24 N10: system notifications for turns that end anywhere on this
+  // machine, wherever the user is. Desktop only; the web keeps the
+  // per-conversation notifier in ProjectView.
+  useGlobalRunNotices({
+    enabled: isOpenDesignHostAvailable(),
+    workspaceContext,
+    notifications: config.notifications ?? DEFAULT_NOTIFICATIONS,
+    t,
+  });
   const completionFeedbackGestureConsumedRef = useRef(false);
   useEffect(() => {
     if (completionFeedbackGestureConsumedRef.current) return undefined;
@@ -3447,6 +3458,7 @@ function AppInner() {
             project_source: 'create_button',
             project_id: null,
             project_kind: projectKindFromMetadataToTracking(metadata),
+            project_intent: projectIntentFromMetadataToTracking(metadata),
             fidelity,
             result: 'failed',
             error_code: errorCode,
@@ -3472,6 +3484,7 @@ function AppInner() {
             project_source: 'create_button',
             project_id: null,
             project_kind: projectKindFromMetadataToTracking(metadata),
+            project_intent: projectIntentFromMetadataToTracking(metadata),
             fidelity,
             ...(input.pluginId ? { plugin_id: input.pluginId } : {}),
             ...(input.pluginType ? { plugin_type: input.pluginType } : {}),
@@ -3619,6 +3632,7 @@ function AppInner() {
             project_source: 'create_button',
             project_id: result.project.id,
             project_kind: projectKindFromMetadataToTracking(metadata),
+            project_intent: projectIntentFromMetadataToTracking(metadata),
             fidelity,
             ...(input.pluginId ? { plugin_id: input.pluginId } : {}),
             ...(input.pluginType ? { plugin_type: input.pluginType } : {}),
