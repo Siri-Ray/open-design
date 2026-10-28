@@ -2644,6 +2644,16 @@ function OnboardingView({
   }, [amrSessionAuthenticated, cloudIdentityRejected]);
 
   useEffect(() => {
+    // A sign-in that Cloud still rejected parked here. Once Cloud accepts the
+    // session, finish what that sign-in started: the passive finish below only
+    // covers a completed setup, so a first run would otherwise need a second
+    // click.
+    if (!cloudRejectedAfterSignIn || cloudIdentityRejected || !amrSessionAuthenticated) return;
+    setCloudRejectedAfterSignIn(false);
+    continueAfterCloudSignIn();
+  }, [amrSessionAuthenticated, cloudIdentityRejected, cloudRejectedAfterSignIn]);
+
+  useEffect(() => {
     if (
       !amrStatusResolved
       || !amrSignedIn
@@ -2992,8 +3002,8 @@ function OnboardingView({
   function continueAfterCloudSignIn(): void {
     if (cloudIdentityRejectedRef.current) {
       // Cloud still turns this session down, so finishing would only send Home
-      // straight back here. Re-read it and stay; the passive finish above takes
-      // over once Cloud accepts the session.
+      // straight back here. Re-read it and stay; the effect that watches
+      // cloudRejectedAfterSignIn finishes once Cloud accepts the session.
       setCloudRejectedAfterSignIn(true);
       notifyWorkspaceContextRefresh();
       return;
