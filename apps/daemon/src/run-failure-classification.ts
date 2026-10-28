@@ -418,8 +418,11 @@ function isUpstreamDetailText(text: string): boolean {
       .test(text);
 }
 
+// Statuses that reject the request itself, so repeating it unchanged gets the
+// same answer. Not here: 401/402 (auth, billing), 408/409/425 (may succeed on a
+// later attempt), 413 (prompt size, classified separately), 429 (rate limit).
 function isUpstreamClientErrorText(text: string): boolean {
-  return /\(HTTP (?:400|403|404|422)\)|\b(statusCode[\"']?\s*:\s*(?:400|403|404)|400 Bad Request|403 Forbidden|404 Not Found|404 page not found|Not Found:\s*(?:404 page not found|Not Found)|NotFoundError|OpenAIException - \{\"detail\":\"Not Found\"\}|API Error:\s*(?:400|403)\b|Invalid Responses API request|Country, region, or territory not supported|gateway or proxy|validation error|literal_error|Invalid input|Type validation failed|data did not match any variant of untagged enum InputParam)\b/i
+  return /\(HTTP (?:400|403|404|405|406|410|415|422)\)|\b(statusCode[\"']?\s*:\s*(?:400|403|404|405|406|410|415|422)|400 Bad Request|403 Forbidden|404 Not Found|404 page not found|Not Found:\s*(?:404 page not found|Not Found)|NotFoundError|OpenAIException - \{\"detail\":\"Not Found\"\}|API Error:\s*(?:400|403)\b|Invalid Responses API request|Country, region, or territory not supported|gateway or proxy|validation error|literal_error|Invalid input|Type validation failed|data did not match any variant of untagged enum InputParam)\b/i
     .test(text);
 }
 
