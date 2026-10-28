@@ -904,6 +904,27 @@ describe('EntryShell onboarding OpenDesign AMR runtime', () => {
       expect(onboardingEntries()).toBe(1);
       expect(props.onCompleteOnboarding).toHaveBeenCalledTimes(1);
     });
+
+    // First run: there is no completed setup for the passive finish to resume,
+    // so the sign-in itself has to finish onboarding once Cloud accepts it.
+    it('finishes first-run onboarding once Cloud accepts the session after signing in again', async () => {
+      const fetches = reauthenticationFetch(true);
+      const props = renderHome({
+        config: baseConfig({ mode: 'daemon', agentId: null }),
+        agents: [amrAgent()],
+        amrLoggedIn: true,
+      });
+
+      const signIn = await findCloudSignInButton();
+      vi.useFakeTimers();
+      fireEvent.click(signIn);
+      await act(async () => {});
+      await vi.advanceTimersByTimeAsync(4000);
+      await vi.waitFor(() => expect(props.onCompleteOnboarding).toHaveBeenCalledTimes(1));
+
+      expect(fetches.loginRequests()).toBe(1);
+      expect(window.location.pathname).toBe('/');
+    });
   });
 
   it.each([
