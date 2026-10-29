@@ -124,6 +124,7 @@ function migrate(db: SqliteDb): void {
       resource_state TEXT NOT NULL CHECK (resource_state IN ('active', 'frozen', 'deleted')),
       created_by_workspace_member_id TEXT,
       updated_by_workspace_member_id TEXT,
+      transferred_from_workspace_member_id TEXT,
       resource_hub_resource_id TEXT,
       cloud_tombstoned_at INTEGER,
       sync_state TEXT,
@@ -439,6 +440,9 @@ function migrate(db: SqliteDb): void {
       `ALTER TABLE workspace_projects ADD COLUMN metadata_refresh_pending INTEGER NOT NULL DEFAULT 0`,
     );
   }
+  if (!migratedWorkspaceProjectCols.some((c: DbRow) => c.name === 'transferred_from_workspace_member_id')) {
+    db.exec(`ALTER TABLE workspace_projects ADD COLUMN transferred_from_workspace_member_id TEXT`);
+  }
   const conversationCols = db.prepare(`PRAGMA table_info(conversations)`).all() as DbRow[];
   if (!conversationCols.some((c: DbRow) => c.name === 'session_mode')) {
     db.exec(`ALTER TABLE conversations ADD COLUMN session_mode TEXT NOT NULL DEFAULT 'design'`);
@@ -622,6 +626,13 @@ function migrate(db: SqliteDb): void {
       FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
     );
   `);
+
+  db.exec(`CREATE TABLE IF NOT EXISTS project_comment_seen (
+    project_id TEXT NOT NULL, viewer_scope TEXT NOT NULL, comment_id TEXT NOT NULL,
+    PRIMARY KEY(project_id, viewer_scope, comment_id),
+    FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
+    FOREIGN KEY(comment_id) REFERENCES preview_comments(id) ON DELETE CASCADE
+  )`);
 
   const deploymentCols = db.prepare(`PRAGMA table_info(deployments)`).all() as DbRow[];
   if (!deploymentCols.some((c: DbRow) => c.name === 'status')) {
@@ -1182,6 +1193,7 @@ export function getWorkspaceProject(db: SqliteDb, workspaceId: string, projectId
               resource_state AS resourceState,
               created_by_workspace_member_id AS createdByWorkspaceMemberId,
               updated_by_workspace_member_id AS updatedByWorkspaceMemberId,
+              transferred_from_workspace_member_id AS transferredFromWorkspaceMemberId,
               resource_hub_resource_id AS resourceHubResourceId,
               cloud_tombstoned_at AS cloudTombstonedAt,
               sync_state AS syncState,
@@ -1292,6 +1304,7 @@ export function getWorkspaceProjectByProjectId(db: SqliteDb, projectId: string) 
               resource_state AS resourceState,
               created_by_workspace_member_id AS createdByWorkspaceMemberId,
               updated_by_workspace_member_id AS updatedByWorkspaceMemberId,
+              transferred_from_workspace_member_id AS transferredFromWorkspaceMemberId,
               resource_hub_resource_id AS resourceHubResourceId,
               cloud_tombstoned_at AS cloudTombstonedAt,
               sync_state AS syncState,
@@ -4768,6 +4781,23 @@ export function mergeSyncedPreviewComment(
     );
   if (result.changes !== 1) throw new Error('Synced comment insert was not persisted');
   return 'changed';
+}
+
+/** File-scoped acknowledgements never infer unseen rows from a wall clock. */
+export function getFileCommentReadState(db: SqliteDb, projectId: string, viewerScope: string, filePath: string) {
+  const rows = db.prepare(`SELECT s.comment_id AS id FROM project_comment_seen s
+    JOIN preview_comments c ON c.id = s.comment_id AND c.project_id = s.project_id
+    WHERE s.project_id = ? AND s.viewer_scope = ? AND c.file_path = ?`).all(projectId, viewerScope, filePath) as Array<{id: string}>;
+  return { projectId, filePath, seenCommentIds: rows.map(row => row.id) };
+}
+
+export function markFileCommentsSeen(db: SqliteDb, projectId: string, viewerScope: string, filePath: string, ids: string[]) {
+  db.transaction(() => {
+    const insert = db.prepare(`INSERT OR IGNORE INTO project_comment_seen (project_id, viewer_scope, comment_id)
+      SELECT project_id, ?, id FROM preview_comments WHERE project_id = ? AND file_path = ? AND id = ?`);
+    for (const id of new Set(ids)) insert.run(viewerScope, projectId, filePath, id);
+  })();
+  return getFileCommentReadState(db, projectId, viewerScope, filePath);
 }
 
 export function getProjectCommentReadState(
