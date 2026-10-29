@@ -181,12 +181,11 @@ describe("Owner P1 real FileViewer export-to-share chain", () => {
       await readyViewer();
       await exportHtml('pdf');
       const guide = await screen.findByRole('status', { name: 'Share the link, invite feedback' });
-      // The impression fires from a passive effect, which can still be pending
-      // when the guide first appears in the DOM; a click before it flushes
-      // records the click first. A user cannot click inside that window.
-      await waitFor(() => expect(seam.track).toHaveBeenCalledWith(
-        'surface_view', expect.objectContaining({ area: 'share_guide' }), undefined,
-      ));
+      // DOM visibility does not guarantee that the passive exposure effect ran.
+      // Observe that real event before beginning the measured interaction.
+      await waitFor(() => expect(seam.track.mock.calls.filter(([, props]) => props.area === 'share_guide')).toEqual([
+        ['surface_view', expect.objectContaining({ page_name: 'artifact', project_id: 'project-guide', project_kind: 'prototype' }), undefined],
+      ]));
       fireEvent.click(within(guide).getByRole('button', { name: "Don't show again" }));
       expect(screen.queryByRole('status', { name: 'Share the link, invite feedback' })).toBeNull();
       expect(window.localStorage.getItem('od:after-export-share-guide:v1:p1-account')).toBe('1');

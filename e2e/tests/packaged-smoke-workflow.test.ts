@@ -7,8 +7,10 @@ import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { runInNewContext } from "node:vm";
 
 import { describe, expect, it } from "vitest";
+import { parse as parseYaml } from "yaml";
 
 import { T } from "@/timeouts";
 
@@ -2032,7 +2034,32 @@ process.stdin.on("end", () => {
       .map(([file]) => file)
       .sort();
 
-    expect(playwrightConfig).toContain("testIgnore: 'visual-*.test.ts'");
+    const explicitIgnores = playwrightConfig.match(/testIgnore:\s*\[([^\]]*)\]/)?.[1];
+    expect(explicitIgnores, "Keep visual ownership and private real-service lanes outside the generic UI pool").toBeDefined();
+    expect([...explicitIgnores!.matchAll(/'([^']+)'/g)].map((match) => match[1])).toEqual([
+      "visual-*.test.ts",
+      "workspace-depletion-sandbox.test.ts",
+      "api-security-view016.test.ts",
+      "workspace-free-concurrency-sandbox.test.ts",
+      "workspace-manual-retry-sandbox.test.ts",
+      "workspace-funding-sandbox.test.ts",
+      "qa-bill001.private.test.ts",
+      "workspace-notice-sandbox.test.ts",
+      "workspace-free-wallet-sandbox.test.ts",
+      "workspace-switch-billing-sandbox.test.ts",
+      "workspace-concurrency-sandbox.test.ts",
+      "workspace-concurrency-retry-sandbox.test.ts",
+      "workspace-api-wallet-sandbox.test.ts",
+      "workspace-api-wallet-readback-sandbox.test.ts",
+      "link-closure-sandbox.test.ts",
+      "link-f04-sandbox.test.ts",
+      "link-run013-sandbox.test.ts",
+      "link-run011-matrix-sandbox.test.ts",
+      "link-run003-latency-sandbox.test.ts",
+      "link-run012-checkout-sandbox.test.ts",
+      "link-run010-reconnect-sandbox.test.ts",
+      "link-run012-controlled-sandbox.test.ts",
+    ]);
     expect(benchmarkWorkflow).toContain("  workflow_call:");
     expect(benchmarkWorkflow).toContain('description: "Exact git ref to validate. Prerelease passes its resolved build commit."');
     expect(benchmarkWorkflow).toContain("ref: ${{ inputs.ref || github.sha }}");
@@ -2121,6 +2148,9 @@ process.stdin.on("end", () => {
 
     const e2eVitestGate = sectionBetween(tests, "  e2e_vitest:", "  daemon_unit_tests:");
     expect(e2eVitestGate).toContain("ref: ${{ inputs.commit }}");
+    expect(e2eVitestGate).toContain("uses: ./.github/actions/configure-ci-parallelism");
+    expect(e2eVitestGate.indexOf("uses: ./.github/actions/configure-ci-parallelism"))
+      .toBeLessThan(e2eVitestGate.indexOf("pnpm install --frozen-lockfile"));
     expect(e2eVitestGate).toContain("playwright install --with-deps chromium");
     expect(e2eVitestGate).toContain("Allow Chromium user namespaces on GitHub Ubuntu");
     expect(e2eVitestGate).toContain("kernel.apparmor_restrict_unprivileged_userns=0");
@@ -2441,8 +2471,9 @@ process.stdin.on("end", () => {
     const betaWinJob = sectionBetween(releaseBetaWorkflow, "  build_win_x64:", "  build_linux_x64:");
     expect(betaWinJob).not.toContain("tools\\release\\scripts\\build-platform.ps1");
     expect(betaWinJob).toContain("uses: actions/cache/restore@v5");
-    expect(betaWinJob).toContain("uses: actions/cache/save@v5");
-    expect(betaWinJob).toContain("tools-pack-win-v1-beta-$env:RUNNER_OS-");
+    expect(betaWinJob).not.toContain("uses: actions/cache/save@v5");
+    expect(betaWinJob).toContain("uses: ./.github/actions/defer-pack-cache");
+    expect(betaWinJob).toContain("tools-pack-win-v2-slim-beta-$env:RUNNER_OS-");
     expect(betaWinJob).toContain('"tools-pack", "win", "build"');
     expect(betaWinJob).toContain("tools-pack win validate-payload");
     expect(betaWinJob).toContain("pnpm exec tsx scripts/release-smoke.ts win specs/win.spec.ts");
@@ -2521,17 +2552,17 @@ process.stdin.on("end", () => {
     }
   });
 
-  it("[P2] makes a publish=false beta dispatch retrievable on both platforms without touching a channel", async () => {
+  it("[P2] makes a publish=false beta dispatch retrievable on all enabled desktop platforms without touching a channel", async () => {
     // A publish=false dispatch is the standing shape for dogfood/QA builds: they
-    // must never enter the public beta feed. mac already handed back a DMG, but
-    // the Windows job produced nothing retrievable at all, so a Windows dogfood
-    // build was impossible without also publishing. Both platforms now emit a
-    // GitHub artifact plus an R2 upload under the dogfood prefix.
+    // must never enter the public beta feed. Every enabled desktop platform must
+    // retain its installer even when public publication is disabled: a GitHub
+    // artifact plus an R2 upload under the dogfood prefix.
     const workflow = await readFile(releaseBetaWorkflowPath, "utf8");
     const macJob = sectionBetween(workflow, "  build_mac_arm64:", "  build_mac_x64:");
+    const macX64Job = sectionBetween(workflow, "  build_mac_x64:", "  build_win_x64:");
     const winJob = sectionBetween(workflow, "  build_win_x64:", "  build_linux_x64:");
 
-    for (const [label, job] of [["mac_arm64", macJob], ["win_x64", winJob]] as const) {
+    for (const [label, job] of [["mac_arm64", macJob], ["mac_x64", macX64Job], ["win_x64", winJob]] as const) {
       expect(job, label).toContain("run: pnpm exec tools-release publish-dogfood");
       expect(job, label).toContain("DOGFOOD_VERSION: ${{ needs.metadata.outputs.beta_version }}");
       expect(job, label).toContain("DOGFOOD_BUILD_ID: ${{ github.run_id }}-${{ github.run_attempt }}");
@@ -2540,6 +2571,11 @@ process.stdin.on("end", () => {
       expect(job, label).toContain("DOGFOOD_BUILD_JSON_PATH:");
       expect(job, label).toContain("DOGFOOD_BUILD_JSON_KEYS:");
     }
+
+    expect(macX64Job).toContain("name: open-design-beta-mac-x64-dmg");
+    expect(macX64Job).toContain("namespaces/release-beta-x64/**/*.dmg");
+    expect(macX64Job).toContain("DOGFOOD_BUILD_JSON_PATH: ${{ runner.temp }}/release-build/mac_x64/build.json");
+    expect(macX64Job).toContain("DOGFOOD_BUILD_JSON_KEYS: dmgPath");
 
     // The Windows installer is retrievable as a GitHub artifact too, covering
     // every win_x64_target (nsis -> setup exe, zip -> portable zip, all -> both).
@@ -2552,7 +2588,7 @@ process.stdin.on("end", () => {
     const dogfoodSteps = workflow.split("\n      - name: ").filter((step) =>
       /publish-dogfood|for manual distribution/.test(step)
     );
-    expect(dogfoodSteps).toHaveLength(4);
+    expect(dogfoodSteps).toHaveLength(6);
     for (const step of dogfoodSteps) {
       expect(step, step.split("\n")[0]).toContain("if: ${{ !cancelled() && !inputs.publish }}");
     }
@@ -3031,6 +3067,18 @@ process.stdin.on("end", () => {
     // artifact was actually built with.
     expect(smoke).toContain("OD_PACKAGED_E2E_RELEASE_VERSION: ${{ inputs.version }}");
     expect(smoke).toContain("OD_PACKAGED_E2E_RELEASE_CHANNEL: prerelease");
+
+    // The smoke command, not report persistence, determines whether the
+    // advisory validation passed. GitHub's artifact service can be temporarily
+    // unavailable after all smoke assertions have completed.
+    for (const stepName of [
+      "Upload mac arm64 smoke report",
+      "Upload mac intel smoke report",
+      "Upload windows smoke report",
+    ]) {
+      const step = sectionBetween(smoke, `      - name: ${stepName}`, "        with:");
+      expect(step, stepName).toContain("continue-on-error: true");
+    }
 
     // The staged path must stay in lockstep with resolveMacPaths().dmgPath and
     // resolveWinPaths().setupPath, which is the only file `tools-pack install`
@@ -4295,3 +4343,97 @@ ZyGlUhPCUbKdTiBJuCGaDKzeEAlC8dsar2zjg9CVue7w3CaamQpjnV0d2IHJiVAH
 QONQvdtLnZ6GeNPe06oBrq7R9SL5/tkqgSq8lCrDE6jFZnfXNMdDmZY3wTcFcdyG
 yW/DsIUs5ZzcHza5rw==
 -----END CERTIFICATE-----`;
+
+
+describe("packaging optimization workflow boundaries", () => {
+  it.each([
+    { name: "same commit", sourceSha: "current", status: "identical", accepted: true },
+    { name: "branch advanced", sourceSha: "previous", status: "ahead", accepted: true },
+    { name: "diverged history", sourceSha: "previous", status: "diverged", accepted: false },
+    { name: "future commit", sourceSha: "previous", status: "behind", accepted: false },
+    { name: "other repository", repository: "other/repo", accepted: false },
+    { name: "other branch", branch: "other", accepted: false },
+    { name: "PR event", event: "pull_request", accepted: false },
+  ])("validates cache provenance when $name", async (scenario) => {
+    const workflow = parseYaml(await readFile(join(workspaceRoot, ".github/workflows/cache-maintenance.yml"), "utf8"));
+    const script = workflow.jobs["save-windows-pack"].steps[0].with.script;
+    const outputs: Record<string, string> = {};
+    const sourceSha = scenario.sourceSha ?? "current";
+    const result = runInNewContext(`(async () => { ${script} })()`, {
+      process: { env: { SOURCE_RUN_ID: "123" } },
+      context: { repo: { owner: "nexu-io", repo: "open-design" }, ref: "refs/heads/test", sha: "current" },
+      core: { setOutput: (key: string, value: string) => { outputs[key] = value; } },
+      github: { rest: {
+        actions: { getWorkflowRun: async () => ({ data: {
+          event: scenario.event ?? "workflow_dispatch", head_repository: { full_name: scenario.repository ?? "nexu-io/open-design" },
+          head_branch: scenario.branch ?? "test", head_sha: sourceSha,
+        } }) },
+        repos: { compareCommitsWithBasehead: async (args: { basehead: string }) => {
+          expect(args.basehead).toBe(`${sourceSha}...current`);
+          return { data: { status: scenario.status } };
+        } },
+      } },
+    });
+    if (scenario.accepted) {
+      await result;
+      expect(outputs.head_sha).toBe(sourceSha);
+      expect(outputs.source_is_current).toBe(sourceSha === "current" ? "true" : "false");
+    } else {
+      await expect(result).rejects.toThrow();
+      expect(outputs).toEqual({});
+    }
+  });
+
+  it("persists Windows caches in an independent workflow after artifacts are published", async () => {
+    for (const [file, job] of [[releaseBetaWorkflowPath, "build_win_x64"], [releasePrereleaseWorkflowPath, "build_win"], [releaseStableWorkflowPath, "build_win"]] as const) {
+      const workflow = parseYaml(await readFile(file, "utf8"));
+      const steps = workflow.jobs[job].steps;
+      expect(steps.some((step: { uses?: string }) => step.uses === "actions/cache/save@v5")).toBe(false);
+      const deferred = steps.findIndex((step: { uses?: string }) => step.uses === "./.github/actions/defer-pack-cache");
+      expect(deferred).toBe(steps.length - 1);
+      expect(steps[deferred]["continue-on-error"]).toBe(true);
+      expect(steps[deferred].if).toContain("success()");
+      // actions/cache hashes the literal path spelling into the cache version.
+      // A Windows backslash/forward-slash mismatch silently misses every cache.
+      const restore = steps.find((step: { name?: string }) => step.name === "Restore Windows tools-pack cache");
+      expect(restore.with.path).toBe("${{ runner.temp }}/tools-pack-cache");
+      expect(JSON.stringify(workflow.jobs.publish.needs)).not.toContain("cache");
+    }
+    const maintenance = parseYaml(await readFile(join(workspaceRoot, ".github/workflows/cache-maintenance.yml"), "utf8"));
+    const saver = maintenance.jobs["save-windows-pack"];
+    expect(saver.steps.find((step: { id?: string }) => step.id === "save").with.path)
+      .toBe("${{ runner.temp }}/tools-pack-cache");
+    expect(saver.concurrency.group).not.toContain("release");
+    expect(saver.steps.findIndex((step: { name: string }) => step.name === "Validate source run"))
+      .toBeLessThan(saver.steps.findIndex((step: { uses?: string }) => step.uses === "actions/download-artifact@v8"));
+    const validate = saver.steps.find((step: { name: string }) => step.name === "Validate source run").with.script;
+    expect(validate).toContain("compareCommitsWithBasehead");
+    expect(validate).toContain("run.head_repository.full_name");
+    expect(validate).toContain("run.head_branch !== context.ref");
+    const extract = saver.steps.find((step: { name: string }) => step.name === "Verify and extract cache snapshot");
+    expect(extract.env.SOURCE_HEAD_SHA).toBe("${{ steps.source.outputs.head_sha }}");
+    expect(extract.run).toContain("$data.head_sha -ne $env:SOURCE_HEAD_SHA");
+    expect(validate).toContain("source_is_current");
+    const retain = saver.steps.find((step: { name: string }) => step.name === "Retain newest cache for this ref and channel");
+    expect(retain.if).toBe("steps.source.outputs.source_is_current == 'true'");
+    expect(retain.run).toContain("--sort created_at");
+    const composite = await readFile(join(workspaceRoot, ".github/actions/defer-pack-cache/action.yml"), "utf8");
+    expect(composite).toContain("handoff.py artifact-name pack-cache windows");
+    expect(composite).toContain("gh workflow run cache-maintenance.yml");
+    expect(composite).toContain("compression-level: 0");
+    expect(composite).toContain("gzip:compression-level=1");
+  });
+
+  it("checks the exact beta build commit independently without changing prerelease delivery gates", async () => {
+    const beta = parseYaml(await readFile(releaseBetaWorkflowPath, "utf8"));
+    expect(beta.jobs.typecheck.steps[0].with.ref).toBe("${{ needs.metadata.outputs.commit }}");
+    expect(beta.jobs.typecheck.steps.some((step: { run?: string }) => step.run === "pnpm --filter @open-design/web typecheck")).toBe(true);
+    for (const id of ["build_mac_arm64", "build_mac_x64", "build_win_x64", "publish"]) {
+      expect(JSON.stringify(beta.jobs[id].needs)).not.toContain("typecheck");
+    }
+    const prerelease = parseYaml(await readFile(releasePrereleaseWorkflowPath, "utf8"));
+    expect(prerelease.jobs.build_win.needs).toBe("metadata");
+    expect(prerelease.jobs.build_mac.needs).toBe("metadata");
+    expect(Object.keys(prerelease.jobs).some((id) => id.includes("cache"))).toBe(false);
+  });
+});
