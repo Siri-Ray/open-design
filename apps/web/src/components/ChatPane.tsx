@@ -6644,6 +6644,9 @@ function ConversationRow({
           onClick={(event) => event.stopPropagation()}
           onBlur={() => closeRename(true)}
           onKeyDown={(event) => {
+            if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229 || event.key === 'Process') {
+              return;
+            }
             if (event.key === 'Enter') {
               event.preventDefault();
               closeRename(true);

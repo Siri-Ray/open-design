@@ -196,6 +196,28 @@ describe('ChatPane session switcher', () => {
     expect(onRenameConversation).toHaveBeenCalledWith('conv-2', 'Checkout flow');
   });
 
+  it.each([
+    { key: 'Enter', isComposing: true },
+    { key: 'Enter', keyCode: 229 },
+    { key: 'Process', keyCode: 229 },
+  ])('keeps editing when an IME candidate is confirmed: %o', (keyEvent) => {
+    const onRenameConversation = vi.fn();
+    renderChatPane({
+      conversations: [conversation({ id: 'conv-1', title: 'Old' })],
+      activeConversationId: 'conv-1',
+      onRenameConversation,
+    });
+    fireEvent.click(screen.getByTestId('conversation-history-trigger'));
+    fireEvent.click(screen.getByTestId('conversation-rename-conv-1'));
+    const input = screen.getByTestId('conversation-rename-input-conv-1');
+    fireEvent.change(input, { target: { value: '中文' } });
+    fireEvent.keyDown(input, keyEvent);
+    expect(onRenameConversation).not.toHaveBeenCalled();
+    expect(screen.getByTestId('conversation-rename-input-conv-1')).toBeTruthy();
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(onRenameConversation).toHaveBeenCalledWith('conv-1', '中文');
+  });
+
   it('cancels a rename with Escape without closing the history menu', () => {
     const onRenameConversation = vi.fn();
     renderChatPane({
