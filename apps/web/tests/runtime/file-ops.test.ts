@@ -34,8 +34,26 @@ describe('hasFileMutationToolUse project scope', () => {
     expect(hasFileMutationToolUse([use('Edit', { file_path }, 'edit')], scope)).toBe(true);
   });
 
-  it('does not mistake a same-prefix sibling or same basename for a project file', () => {
-    expect(hasFileMutationToolUse([use('Edit', { path: '/Users/test/projects/prototype-backup/index.html' }, 'edit')], scope)).toBe(false);
+  it('keeps external non-temp paths conservative because they may alias the project', () => {
+    // A symlinked project root, or an external symlink into the project, has
+    // no traversal segment; only the daemon could canonicalize either path.
+    expect(hasFileMutationToolUse([use('Edit', { path: '/Volumes/data/prototype/index.html' }, 'alias')], scope)).toBe(true);
+    expect(hasFileMutationToolUse([use('Edit', { path: '/Users/test/projects/prototype-backup/index.html' }, 'sibling')], scope)).toBe(true);
+  });
+
+  it.each([
+    '/private/tmp/od-probe/cdp.mjs',
+    '/var/tmp/probe.js',
+    '/var/folders/xy/T/od-probe/cdp.mjs',
+    '/private/var/folders/xy/T/od-probe/cdp.mjs',
+  ])('excludes the temp scratch path %s', (filePath) => {
+    expect(hasFileMutationToolUse([use('Edit', { filePath }, 'probe')], scope)).toBe(false);
+  });
+
+  it('keeps temp edits conservative when the project itself lives in a temp directory', () => {
+    const tempScope = { resolvedDir: '/tmp/od-projects/prototype' };
+    expect(hasFileMutationToolUse([use('Edit', { filePath: '/private/tmp/od-projects/prototype/index.html' }, 'alias')], tempScope)).toBe(true);
+    expect(hasFileMutationToolUse([use('Edit', { filePath: '/tmp/od-probe/cdp.mjs' }, 'probe')], tempScope)).toBe(true);
   });
 
   it('keeps unknown scope, missing paths and traversal paths conservative', () => {
@@ -61,7 +79,9 @@ describe('hasFileMutationToolUse project scope', () => {
     const windowsScope = { resolvedDir: 'C:\\Users\\Test\\project' };
     expect(hasFileMutationToolUse([use('Edit', { filePath: 'c:\\users\\test\\PROJECT\\index.html' }, 'inside')], windowsScope)).toBe(true);
     expect(hasFileMutationToolUse([use('Edit', { filePath: 'C:\\Temp\\probe.js' }, 'outside')], windowsScope)).toBe(false);
-    expect(hasFileMutationToolUse([use('Edit', { filePath: 'C:\\Users\\Test\\project-backup\\index.html' }, 'sibling')], windowsScope)).toBe(false);
+    expect(hasFileMutationToolUse([use('Edit', { filePath: 'C:\\Users\\Test\\AppData\\Local\\Temp\\od-probe\\cdp.mjs' }, 'temp')], windowsScope)).toBe(false);
+    expect(hasFileMutationToolUse([use('Edit', { filePath: 'C:\\Users\\Test\\project-backup\\index.html' }, 'sibling')], windowsScope)).toBe(true);
+    expect(hasFileMutationToolUse([use('Edit', { filePath: 'D:\\Work\\project\\index.html' }, 'alias')], windowsScope)).toBe(true);
   });
 });
 

@@ -218,8 +218,10 @@ export function deriveFileOps(
 /**
  * True when the run attempted a project file mutation (write/edit/delete tool
  * call, or a simple Bash rm/unlink), regardless of whether it succeeded.
- * With a resolved project directory, exclude only paths proven outside it.
- * Missing scope/paths and relative paths retain the conservative fallback.
+ * With a resolved project directory, exclude only scratch paths: absolute
+ * paths under a well-known temp directory that the project is not itself in.
+ * Any other external path may alias a project file through a symlink, so it
+ * stays conservative, as do missing scope/paths and relative paths.
  * Tool names must stay aligned with the daemon's cross-runtime
  * `WRITE_OR_EDIT_TOOL_NAMES` set in `apps/daemon/src/runtimes/run-artifacts.ts`.
  */
@@ -253,8 +255,22 @@ function mayMutateProjectFile(file: string | null, scope: FileOpProjectScope | u
     candidate = candidate.toLowerCase();
     root = root.toLowerCase();
   }
-  return candidate === root || candidate.startsWith(root.endsWith('/') ? root : `${root}/`);
+  const within = (value: string, dir: string) => value === dir || value.startsWith(dir.endsWith('/') ? dir : `${dir}/`);
+  if (within(candidate, root)) return true;
+  // The Web client only sees path strings: neither the project root nor the
+  // tool path is canonicalized, so lexical containment cannot rule out a
+  // symlink alias. Only temp scratch space is safe to treat as not-project.
+  const inTemp = (value: string) => TEMP_DIR_PATTERNS.some((pattern) => pattern.test(value));
+  return !inTemp(candidate) || inTemp(root);
 }
+
+/** Well-known scratch roots (lowercased for Windows; POSIX roots are exact). */
+const TEMP_DIR_PATTERNS = [
+  /^(?:\/private)?\/(?:var\/)?tmp\//,
+  /^(?:\/private)?\/var\/folders\//,
+  /^[a-z]:\/(?:windows\/)?temp\//,
+  /^[a-z]:\/users\/[^/]+\/appdata\/local\/temp\//,
+];
 
 export type FileOpCounts = Record<FileOpKind, number>;
 
