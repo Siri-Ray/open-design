@@ -22,12 +22,14 @@ import type { ResumeInvalidationReason } from '../../agent-session-resume.js';
 
 import type { StrategyTaskProjectionV2 } from '@open-design/contracts';
 import type { OdNextCoordinatorResult } from './coordinator.js';
+import { projectTaskDisplay } from '../task-display.js';
 type SqliteDb = Database.Database;
 const TERMINAL_OUTCOMES = new Set(['completed', 'blocked', 'canceled']);
 
 export function projectStrategyTask(
   task: StrategyTaskExecutionRecord,
   viewedRunId?: string,
+  db?: SqliteDb,
 ): StrategyTaskProjectionV2 {
   const viewedIndex = viewedRunId
     ? task.runs.findIndex((mapping) => mapping.runId === viewedRunId)
@@ -48,6 +50,7 @@ export function projectStrategyTask(
     .map(({ runId, taskRunIndex }) => ({ runId, taskRunIndex }));
   return {
     taskExecutionId: task.taskExecutionId,
+    ...(db ? { display: projectTaskDisplay(db, task) } : {}),
     strategy: {
       id: task.strategyId,
       version: task.strategyVersion,
@@ -83,7 +86,7 @@ export function projectStrategyTaskByRunId(
   runId: string,
 ): StrategyTaskProjectionV2 | undefined {
   const task = getStrategyTaskExecutionByRunId(db, runId);
-  return task ? projectStrategyTask(task, runId) : undefined;
+  return task ? projectStrategyTask(task, runId, db) : undefined;
 }
 
 export interface PreparedAutomaticStrategyContinuation<TRun> {
