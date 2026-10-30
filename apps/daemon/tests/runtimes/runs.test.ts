@@ -1608,6 +1608,45 @@ describe('run event log persistence', () => {
     });
   });
 
+  it('stamps startedAt at the first start event only, and persists it (P0-24 N3)', () => {
+    const runs = createRunsWithLog(tmpDir);
+    const run = runs.create({ projectId: 'p1', conversationId: 'c1', assistantMessageId: 'm1', agentId: 'claude' });
+    const statePath = path.join(tmpDir, run.id, 'state.json');
+
+    expect(runs.statusBody(run).startedAt).toBeNull();
+    run.status = 'running';
+    runs.emit(run, 'start', { status: 'running' }, 1_000);
+    runs.emit(run, 'start', { status: 'running' }, 2_000);
+
+    expect(run.startedAt).toBe(1_000);
+    expect(runs.statusBody(run).startedAt).toBe(1_000);
+    expect(JSON.parse(fs.readFileSync(statePath, 'utf8')).startedAt).toBe(1_000);
+  });
+
+  it('keeps a pre-upgrade record without startedAt absent, not null, through hydration and persist', () => {
+    // A state.json written before the stamp existed has no startedAt. Reading it
+    // as null would say "never started" and drop the project from the sidebar
+    // fold; absent lets clients fall back to createdAt.
+    const beforeUpgrade = createRunsWithLog(tmpDir);
+    const run = beforeUpgrade.create({ projectId: 'p1', conversationId: 'c1', assistantMessageId: 'm1', agentId: 'claude' });
+    const statePath = path.join(tmpDir, run.id, 'state.json');
+    const { startedAt: _dropped, ...legacy } = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+    fs.writeFileSync(
+      statePath,
+      `${JSON.stringify({ ...legacy, status: 'succeeded', terminalAt: legacy.updatedAt })}\n`,
+      'utf8',
+    );
+
+    const afterUpgrade = createRunsWithLog(tmpDir);
+    const [listed] = afterUpgrade.list({ projectId: 'p1' });
+    expect(listed).toBeDefined();
+    expect('startedAt' in afterUpgrade.statusBody(listed!)).toBe(false);
+
+    // A later persist must not freeze null into the record either.
+    afterUpgrade.emit(listed!, 'diagnostic', { type: 'probe' });
+    expect('startedAt' in JSON.parse(fs.readFileSync(statePath, 'utf8'))).toBe(false);
+  });
+
   it('persists a restart-safe terminal state and telemetry checkpoints', () => {
     const runs = createRunsWithLog(tmpDir);
     const run = runs.create({
@@ -2105,21 +2144,21 @@ describe('run event log persistence', () => {
     });
 
     expect(reused.kind).toBe('reused');
+    // P0-24 Q5: the interrupted run is stopped, its reason kept on the record,
+    // and its replayed terminal frame says canceled with no error frame.
     expect(reused.run).toMatchObject({
       id: original.id,
-      status: 'failed',
+      status: 'canceled',
       errorCode: 'DAEMON_RESTARTED',
-      error: 'Run interrupted because the daemon restarted.',
+      error: null,
     });
     expect(afterRestart.statusBody(reused.run).terminalTrigger).toBe('daemon_restart');
-    expect(reused.run.events.slice(-2)).toMatchObject([
-      { event: 'error', data: { error: { code: 'DAEMON_RESTARTED' } } },
-      { event: 'end', data: { status: 'failed' } },
-    ]);
+    expect(reused.run.events.at(-1)).toMatchObject({ event: 'end', data: { status: 'canceled' } });
+    expect(reused.run.events.some((record: { event: string }) => record.event === 'error')).toBe(false);
     expect(fs.readdirSync(tmpDir)).toEqual([original.id]);
     expect(JSON.parse(fs.readFileSync(statePath, 'utf8'))).toMatchObject({
       id: original.id,
-      status: 'failed',
+      status: 'canceled',
       errorCode: 'DAEMON_RESTARTED',
       terminalRecoveryReason: 'daemon_restart',
     });
@@ -2295,9 +2334,7 @@ describe('work completeness vs a settled OD Next verdict', () => {
     });
   }
 
-  /** A settled OD Next task projection. `completed` is only reachable once the
-   *  coordinator saw BOTH a succeeded process AND a resolvable canonical
-   *  deliverable, so it is the strongest completion evidence the daemon holds. */
+  /** The task ended; physical status and remaining work are independent facts. */
   function completedStrategyTask() {
     return {
       taskExecutionId: 'odnext_8979d0a7452e4e65a51c666ad89f864d',
@@ -2316,22 +2353,30 @@ describe('work completeness vs a settled OD Next verdict', () => {
     };
   }
 
-  it('does not report unfinished work when OD Next settled the task as completed', () => {
+  it.each([true, false, undefined])('preserves unfinished work after task completion with file evidence %s', (deliverableValid) => {
     const runs = createRuns();
     const run = runs.create({ projectId: 'p1', conversationId: 'c1' }) as any;
-    // The agent delivered index.html plus six images and declared the task
-    // complete, but its LAST TodoWrite snapshot still carried two pending
-    // items — the exact shape QA captured on project 3ffc55f1.
     run.lastTodoSnapshot = [
-      { content: '生成品牌视觉资产', status: 'completed' },
-      { content: '写入响应式交互原型', status: 'pending' },
-      { content: '交付根目录运行入口', status: 'pending' },
+      { content: 'Write the page', status: 'completed' },
+      { content: 'Add animation', status: 'pending' },
+      { content: 'Adapt for mobile', status: 'pending' },
     ];
-    run.strategyTask = completedStrategyTask();
-    run.deliverableValid = true;
+    run.strategyTask = { ...completedStrategyTask(), deliverableValid };
+    run.deliverableValid = deliverableValid;
 
     runs.finish(run, 'succeeded', 0, null);
 
+    expect(run.status).toBe('succeeded');
+    expect(run.strategyTask.outcome).toBe('completed');
+    expect(run.endedWithUnfinishedWork).toBe(true);
+  });
+
+  it('allows an ordinary answer to finish without files or todo', () => {
+    const runs = createRuns();
+    const run = runs.create({ projectId: 'p1', conversationId: 'c1' }) as any;
+    run.strategyTask = { ...completedStrategyTask(), deliverableValid: false };
+    runs.finish(run, 'succeeded', 0, null);
+    expect(run.status).toBe('succeeded');
     expect(run.endedWithUnfinishedWork).toBe(false);
   });
 
