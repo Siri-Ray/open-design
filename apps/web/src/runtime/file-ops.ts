@@ -266,10 +266,10 @@ function mayMutateProjectFile(file: string | null, scope: FileOpProjectScope | u
 
 /** Well-known scratch roots (lowercased for Windows; POSIX roots are exact). */
 const TEMP_DIR_PATTERNS = [
-  /^(?:\/private)?\/(?:var\/)?tmp\//,
-  /^(?:\/private)?\/var\/folders\//,
-  /^[a-z]:\/(?:windows\/)?temp\//,
-  /^[a-z]:\/users\/[^/]+\/appdata\/local\/temp\//,
+  /^(?:\/private)?\/(?:var\/)?tmp(?:\/|$)/,
+  /^(?:\/private)?\/var\/folders(?:\/|$)/,
+  /^[a-z]:\/(?:windows\/)?temp(?:\/|$)/,
+  /^[a-z]:\/users\/[^/]+\/appdata\/local\/temp(?:\/|$)/,
 ];
 
 export type FileOpCounts = Record<FileOpKind, number>;

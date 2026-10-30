@@ -56,6 +56,24 @@ describe('hasFileMutationToolUse project scope', () => {
     expect(hasFileMutationToolUse([use('Edit', { filePath: '/tmp/od-probe/cdp.mjs' }, 'probe')], tempScope)).toBe(true);
   });
 
+  it.each([
+    ['/tmp', '/private/tmp/prototype/index.html'],
+    ['/private/tmp', '/tmp/prototype/index.html'],
+    ['/var/tmp', '/tmp/prototype/index.html'],
+    ['/var/folders', '/tmp/prototype/index.html'],
+    ['/private/var/folders', '/tmp/prototype/index.html'],
+    ['C:\\Temp', 'C:\\Windows\\Temp\\prototype\\index.html'],
+    ['C:\\Windows\\Temp', 'C:\\Temp\\prototype\\index.html'],
+    ['C:\\Users\\Test\\AppData\\Local\\Temp', 'C:\\Temp\\prototype\\index.html'],
+  ])('keeps edits conservative for an exact temp project root %s', (resolvedDir, filePath) => {
+    expect(hasFileMutationToolUse([use('Edit', { filePath }, 'alias')], { resolvedDir })).toBe(true);
+  });
+
+  it('does not treat a temp root prefix as a temp directory', () => {
+    expect(hasFileMutationToolUse([use('Edit', { filePath: '/tmp-backup/probe.js' }, 'edit')], scope)).toBe(true);
+    expect(hasFileMutationToolUse([use('Edit', { filePath: '/tmp/probe.js' }, 'edit')], { resolvedDir: '/tmp-project' })).toBe(false);
+  });
+
   it('keeps unknown scope, missing paths and traversal paths conservative', () => {
     expect(hasFileMutationToolUse([use('Edit', { filePath: '/tmp/od-probe/cdp.mjs' }, 'edit')])).toBe(true);
     expect(hasFileMutationToolUse([use('Edit', {}, 'edit')], scope)).toBe(true);
