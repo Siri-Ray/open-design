@@ -36,6 +36,17 @@ function explicitLocaleKeys(locale: Locale): string[] {
 }
 
 describe('i18n locales', () => {
+  it('localizes the home invitation entry and member tooltip in every language', async () => {
+    const keys = ['homeInvite.banner', 'homeInvite.invite', 'homeInvite.dismiss', 'homeInvite.sent', 'workspaceInvite.teamPlanBody'] as const;
+    for (const locale of LOCALES) {
+      const dict = await loadDict(locale);
+      for (const key of keys) {
+        expect(dict[key], `${locale}.${key}`).toBeTruthy();
+        expect(placeholders(dict[key]), `${locale}.${key} placeholders`).toEqual(placeholders(en[key]));
+        if (locale !== 'en') expect(dict[key], `${locale}.${key}`).not.toBe(en[key]);
+      }
+    }
+  });
   it('resolves the initial locale from browser language preferences', () => {
     expect(resolveSystemLocale(['zh-Hans-CN', 'en-US'])).toBe('zh-CN');
     expect(resolveSystemLocale(['zh-Hant-HK', 'en-US'])).toBe('zh-TW');
@@ -93,10 +104,10 @@ describe('i18n locales', () => {
     const zh = await loadDict('zh-CN');
     expect(zh['chat.runError.title.cliSessionRefused']).toBe('智能体版本不兼容');
     expect(zh['chat.runError.cliSessionRefusedMessage']).toBe(
-      '{agent} 拒绝开始会话。通常是当前版本与 Open Design 不兼容，换一个版本后重试。',
+      'Open Design 暂不支持当前智能体版本，请更换为支持的版本后再试。',
     );
 
-    // `{agent}` is the ONLY slot the card fills. A locale that carries a
+    // Product supplementary copy revision 96 has no interpolation slots. A locale with a
     // `{version}` placeholder would render a literal `{version}` at the user,
     // because nothing supplies one — which is exactly how a half-reverted
     // version variant would escape into production copy.
@@ -105,7 +116,7 @@ describe('i18n locales', () => {
       expect(
         dict['chat.runError.cliSessionRefusedMessage'],
         `${locale}.cliSessionRefusedMessage`,
-      ).not.toMatch(/\{version\}/);
+      ).not.toMatch(/\{\w+\}/);
     }
 
     // No locale may quietly fall back to English prose for these keys.

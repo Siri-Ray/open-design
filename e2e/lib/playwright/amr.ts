@@ -4,7 +4,7 @@ import type {
   WorkspaceCollabContext,
   WorkspaceDirectoryItem,
 } from '@open-design/contracts';
-import { ensureRailOpen } from './rail.js';
+import { dismissWhatsNewPopup, ensureRailOpen } from './rail.js';
 import { T } from '@/timeouts';
 
 export const STORAGE_KEY = 'open-design:config';
@@ -24,6 +24,7 @@ type MockAmrPersonalWorkspaceOptions = {
   accountPlan?: string;
   accountSummaryAvailable?: boolean;
   workspaceBalanceAvailable?: boolean;
+  fundingCheck?: 'available' | 'insufficient' | 'unknown';
 };
 
 export const AMR_PERSONAL_WORKSPACE_ITEM = {
@@ -117,6 +118,23 @@ export async function mockAmrPersonalWorkspace(
   await page.route('**/api/workspace/billing**', async (route) => {
     const request = route.request();
     const url = new URL(request.url());
+    if (request.method() === 'GET' && url.pathname === '/api/workspace/billing/preflight'
+      && options.fundingCheck !== undefined) {
+      if (url.searchParams.get('workspaceId') !== AMR_PERSONAL_WORKSPACE_CONTEXT.workspaceId) {
+        await route.fulfill({ status: 404, json: { error: 'workspace_not_found' } });
+        return;
+      }
+      await route.fulfill({ json: { preflight: {
+        schemaVersion: 1,
+        workspaceId: AMR_PERSONAL_WORKSPACE_CONTEXT.workspaceId,
+        workspaceMemberId: AMR_PERSONAL_WORKSPACE_CONTEXT.workspaceMemberId,
+        modelId: url.searchParams.get('modelId'),
+        generatedAt: new Date().toISOString(),
+        balanceUsd: accountBalanceUsd,
+        fundingCheck: options.fundingCheck,
+      } } });
+      return;
+    }
     if (request.method() !== 'GET' || url.pathname !== '/api/workspace/billing') {
       await route.fallback();
       return;
@@ -383,6 +401,7 @@ export async function openSettingsDialog(page: Page) {
     if (await dialog.isVisible().catch(() => false)) return dialog;
 
     await dismissPrivacyDialog(page);
+    await dismissWhatsNewPopup(page);
     if (await settingsTrigger.isVisible({ timeout: 1_000 }).catch(() => false)) {
       await settingsTrigger.evaluate((element: HTMLElement) => element.click());
     } else if (!(await openSettingsFromProjectSurface(page))) {

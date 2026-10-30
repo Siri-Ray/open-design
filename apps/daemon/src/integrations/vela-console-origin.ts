@@ -1,3 +1,4 @@
+import { readAmrEndpointBinding } from './amr-endpoint-binding.js';
 import { resolveAmrProfile } from './vela-profile.js';
 
 type EnvMap = NodeJS.ProcessEnv | Record<string, string | undefined>;
@@ -18,8 +19,10 @@ type EnvMap = NodeJS.ProcessEnv | Record<string, string | undefined>;
 // deployment's hostname is internal. It is supplied at packaging time through
 // OD_VELA_WEB_URLS / OD_VELA_WEB_URL, so an un-injected build resolves nothing
 // for it and the client falls back to the public console instead of guessing.
+export const DEFAULT_VELA_CONSOLE_ORIGIN = 'https://open-design.ai/cloud';
+
 const PUBLIC_ORIGINS: Partial<Record<string, string>> = {
-  prod: 'https://open-design.ai/cloud',
+  prod: DEFAULT_VELA_CONSOLE_ORIGIN,
   test: 'https://open-design.powerformer.net/cloud',
   local: 'http://localhost:5173',
 };
@@ -60,6 +63,8 @@ export function resolveEffectiveVelaConsoleOrigin(
   env: EnvMap = process.env,
   configuredEnv: EnvMap = {},
 ): string | undefined {
+  const binding = readAmrEndpointBinding(env);
+  if (binding) return binding.webUrl;
   const packagedProfile = resolveAmrProfile(env);
   const selectedProfile = resolveAmrProfile({ ...env, ...configuredEnv });
   const mapped = originsByProfile(env)[selectedProfile];

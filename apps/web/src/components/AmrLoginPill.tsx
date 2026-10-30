@@ -39,9 +39,11 @@ import {
 } from '../collab/useWorkspaceContext';
 import { Icon, type IconName } from './Icon';
 import { SignOutConfirmDialog } from './SignOutConfirmDialog';
-import { amrConsoleUrlForProfile, amrProfileBadgeLabel } from '../runtime/amr-guidance';
+import { amrConsoleUrlForProfile, amrProfileBadgeLabel, amrWorkspaceUrl } from '../runtime/amr-guidance';
+import { AmrActivationHintText } from './AmrActivationHintText';
 
 interface AmrLoginPillProps {
+  workspaceId?: string | null;
   className?: string;
   hideSignedOutStatus?: boolean;
   hideSignedInStatus?: boolean;
@@ -75,6 +77,7 @@ export type AmrAccountControlStatus =
   | 'error';
 
 export interface AmrAccountControlProps {
+  workspaceId?: string | null;
   status: AmrAccountControlStatus;
   className?: string;
   compact?: boolean;
@@ -124,6 +127,7 @@ function classNames(...names: Array<string | false | null | undefined>): string 
 }
 
 export function AmrAccountControl({
+  workspaceId,
   status,
   className,
   compact = false,
@@ -157,7 +161,8 @@ export function AmrAccountControl({
   const hasError = status === 'error';
   const badgeLabel = showProfileBadge ? amrProfileBadgeLabel(profile) : null;
   const visibleBadgeLabel = isSignedIn ? badgeLabel : null;
-  const resolvedConsoleUrl = consoleUrl ?? amrConsoleUrlForProfile(profile);
+  const consoleBaseUrl = consoleUrl ?? amrConsoleUrlForProfile(profile);
+  const resolvedConsoleUrl = amrWorkspaceUrl(consoleBaseUrl, workspaceId) ?? consoleBaseUrl;
   const loginErrorText = errorMessage || t('settings.amrLoginErrorCompact');
   const statusText = isSignedIn
     ? hideSignedInStatus
@@ -258,9 +263,7 @@ export function AmrAccountControl({
       {isSigningIn && activationUrl ? (
         <div className="amr-login-activation" role="group">
           <span className="amr-login-activation__hint">
-            {browserOpenFailed
-              ? t('settings.amrActivationBrowserFailed')
-              : t('settings.amrActivationHint')}
+            <AmrActivationHintText browserOpenFailed={Boolean(browserOpenFailed)} />
           </span>
           <div className="amr-login-activation__actions">
             <a
@@ -282,6 +285,7 @@ export function AmrAccountControl({
 // agent card. The pill polls `/api/integrations/vela/status` after a Sign-in
 // click until the daemon reports loggedIn=true.
 export function AmrLoginPill({
+  workspaceId,
   className,
   hideSignedOutStatus = false,
   hideSignedInStatus = false,
@@ -303,6 +307,7 @@ export function AmrLoginPill({
   const { t } = useI18n();
   const analytics = useAnalytics();
   const [status, setStatus] = useState<VelaLoginStatus | null>(initialStatus);
+  const statusRef = useRef<VelaLoginStatus | null>(initialStatus);
   const [pending, setPending] = useState<null | 'login' | 'logout' | 'cancel'>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [canceledVisible, setCanceledVisible] = useState(false);
@@ -312,6 +317,16 @@ export function AmrLoginPill({
   const loginStartPendingRef = useRef(false);
   const loginCancelRequestedRef = useRef(false);
   const authAttemptIdRef = useRef<string | null>(null);
+
+  // Status received through `initialStatus` is parent-owned. Only publish
+  // snapshots produced locally (a refresh, poll, or local cancellation) so
+  // two controlled pills cannot echo the same status through their shared
+  // Settings state indefinitely.
+  const publishStatus = useCallback((next: VelaLoginStatus | null) => {
+    statusRef.current = next;
+    setStatus(next);
+    onStatusChange?.(next);
+  }, [onStatusChange]);
 
   const stopPolling = useCallback(() => {
     if (pollRef.current !== null) {
@@ -328,11 +343,10 @@ export function AmrLoginPill({
       observeAmrAuthTracking(analytics.track, next, authAttemptId);
     }
     if (next) {
-      setStatus(next);
-      onStatusChange?.(next);
+      publishStatus(next);
     }
     return next;
-  }, [analytics.track, onStatusChange]);
+  }, [analytics.track, publishStatus]);
 
   useEffect(() => {
     if (!skipInitialRefresh) void refresh();
@@ -344,6 +358,7 @@ export function AmrLoginPill({
   }, [refresh, skipInitialRefresh, stopPolling]);
 
   useEffect(() => {
+    statusRef.current = initialStatus;
     setStatus(initialStatus);
     if (initialStatus?.authAttemptId) {
       authAttemptIdRef.current = initialStatus.authAttemptId;
@@ -370,10 +385,6 @@ export function AmrLoginPill({
     }, AMR_CANCELED_RESET_MS);
     return () => window.clearTimeout(timeout);
   }, [canceledVisible]);
-
-  useEffect(() => {
-    onStatusChange?.(status);
-  }, [onStatusChange, status]);
 
   const startPolling = useCallback((
     startedAt = Date.now(),
@@ -478,9 +489,9 @@ export function AmrLoginPill({
         // explicit refresh (mount, user interaction, or a
         // `status-changed` event) will pick up the daemon's confirmed
         // state once the child has actually exited.
-        setStatus((current) => (
-          current ? { ...current, loginInFlight: false } : current
-        ));
+        publishStatus(
+          statusRef.current ? { ...statusRef.current, loginInFlight: false } : null,
+        );
         return;
       }
       void refresh().then((next) => {
@@ -599,11 +610,11 @@ export function AmrLoginPill({
           loginCancelRequestedRef.current = false;
           loginStartedAtRef.current = null;
           loginPendingRef.current = false;
-          setStatus((current) => (
-            current
-              ? { ...current, loggedIn: false, loginInFlight: false, user: null }
-              : current
-          ));
+          publishStatus(
+            statusRef.current
+              ? { ...statusRef.current, loggedIn: false, loginInFlight: false, user: null }
+              : null,
+          );
           setPending(null);
           setCanceledVisible(true);
           notifyAmrLoginStatusChanged('login-canceled');
@@ -701,17 +712,17 @@ export function AmrLoginPill({
       closeAmrActivationWindowBestEffort();
       loginStartedAtRef.current = null;
       loginPendingRef.current = false;
-      setStatus((current) => (
-        current
-          ? { ...current, loggedIn: false, loginInFlight: false, user: null }
+      publishStatus(
+        statusRef.current
+          ? { ...statusRef.current, loggedIn: false, loginInFlight: false, user: null }
           : {
               loggedIn: false,
               loginInFlight: false,
               profile: 'default',
               user: null,
               configPath: '',
-            }
-      ));
+            },
+      );
       setPending(null);
       setCanceledVisible(true);
       notifyAmrLoginStatusChanged('login-canceled');
@@ -750,10 +761,11 @@ export function AmrLoginPill({
   // visible profile badge and account data. The module-level runtime origin is
   // only a compatibility fallback; it can be reset by a dev hot reload while
   // React retains the feature-test status shown on this card.
-  const statusConsoleUrl = amrConsoleUrlForProfile(
+  const statusConsoleBaseUrl = amrConsoleUrlForProfile(
     status?.profile,
     status?.consoleOrigin,
   );
+  const statusConsoleUrl = amrWorkspaceUrl(statusConsoleBaseUrl, workspaceId) ?? statusConsoleBaseUrl;
 
   const handleConsoleClick = useCallback(
     (event: MouseEvent<HTMLAnchorElement>) => {
@@ -820,6 +832,7 @@ export function AmrLoginPill({
         signInIcon={signInIcon}
         showConsoleAction={showConsoleAction}
         consoleUrl={statusConsoleUrl}
+        workspaceId={workspaceId}
         iconOnlySignOut={iconOnlySignOut}
         signInDisabled={loginInFlight}
         signOutDisabled={logoutInFlight}

@@ -51,11 +51,33 @@ describe('AmrArtifactUpgradeDialog', () => {
     const [url, target, features] = open.mock.calls[0] ?? [];
     const plansUrl = new URL(String(url));
     expect(`${plansUrl.origin}${plansUrl.pathname}`).toBe(
-      'https://open-design.ai/amr/dashboard',
+      'https://open-design.ai/cloud/dashboard',
     );
     expect(plansUrl.searchParams.get('billing')).toBe('plan');
     expect(target).toBe('_blank');
     expect(features).toBe('noopener,noreferrer');
+  });
+
+  it('opens the plans view for the supplied workspace', () => {
+    const open = vi.spyOn(window, 'open').mockImplementation(() => null);
+    render(
+      <AmrArtifactUpgradeDialog
+        profile="prod"
+        workspaceId="workspace-artifact"
+        metricsConsent={false}
+        installationId={null}
+        onClose={vi.fn()}
+        onContinue={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('amr-artifact-upgrade-plans'));
+
+    expect(open).toHaveBeenCalledWith(
+      expect.stringContaining('https://open-design.ai/cloud/dashboard?workspaceId=workspace-artifact&source=open_design&billing=plan&'),
+      '_blank',
+      'noopener,noreferrer',
+    );
   });
 
   it('restarts the seven-day offer countdown at the cycle boundary', () => {

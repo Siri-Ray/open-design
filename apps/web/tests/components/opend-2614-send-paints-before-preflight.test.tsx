@@ -205,6 +205,9 @@ vi.mock('../../src/state/projects', async () => {
   );
   return {
     ...actual,
+    registerQueuedSubmission: vi.fn(async (projectId, submission) => ({
+      id: submission.id, projectId, conversationId: submission.conversationId, acceptedAt: submission.submittedAt,
+    })),
     createConversation: vi.fn(),
     listConversations: vi.fn(),
     listMessages: vi.fn(),
@@ -233,7 +236,8 @@ vi.mock('../../src/components/Loading', () => ({
  * ChatPane 自带半个应用,这一层把它换成一块**只报事实**的板子:
  * 流水里有哪些消息、这一轮是不是进行中。屏幕上「消息上屏了没有」就是这两格。
  */
-vi.mock('../../src/components/ChatPane', () => ({
+vi.mock('../../src/components/ChatPane', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/components/ChatPane')>()),
   ChatPane: (props: {
     messages?: ChatMessage[];
     streaming?: boolean;

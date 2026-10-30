@@ -1,3 +1,4 @@
+import type { RunSubmission, UserSubmissionReceipt } from "@open-design/contracts";
 /**
  * Daemon provider — fetch-based SSE client for /api/runs. The daemon can
  * emit three event streams depending on the agent's streamFormat:
@@ -39,9 +40,9 @@ import type {
   RunContextSelection,
   SseErrorPayload,
   StrategyTaskProjectionV2,
+  RunNoticesResponse,
   WorkspaceCollabContext,
 } from '@open-design/contracts';
-import { OD_NEXT_AGENT_DECLARED_BLOCK_REASON } from '@open-design/contracts';
 import type { StreamHandlers } from './anthropic';
 
 /**
@@ -60,6 +61,7 @@ function isRunCancelOrigin(value: unknown): value is RunCancelOrigin {
 }
 import { workspaceProjectHeaders } from '../state/projects';
 import { setRuntimeAmrConsoleOrigin } from '../runtime/amr-guidance';
+import { canRetainSuccessfulRunForBlockedStrategy } from '../runtime/blocked-strategy-result';
 import { coalescedGet } from '../lib/coalesced-get';
 import { currentWorkspaceAccountGeneration } from '../collab/workspace-identity';
 
@@ -82,9 +84,11 @@ function detectClientType(): 'desktop' | 'web' | 'unknown' {
 import { BackoffController } from '../lib/backoff';
 import { parseSseFrame } from './sse';
 import {
+  persistedArtifactFilesOf,
   summarizeArtifactsForTranscript,
+  summarizeHistoricalQuestionForms,
   type PersistedArtifactFileRef,
-} from '../artifacts/strip';
+} from '@open-design/contracts';
 import { trackRunProgress, trackRunStart, trackRunTerminal } from '../observability/stuck-run';
 import { setChatCorrelation } from '../observability/chat-context';
 import { chatSurfaceRunEnded, chatSurfaceRunStarted } from '../observability/chat-health';
@@ -231,80 +235,14 @@ function isSameTranscriptAgentFamily(agentId: string, targetAgentId: string): bo
   return API_MODE_AGENT_IDS.has(agentId);
 }
 
-// Strip OD-specific markup that the agent emitted on a prior turn but
-// that the model would otherwise pattern-match as a template to echo.
-// Today this is `<question-form>` blocks (and the `<ask-question>` alias the
-// UI parser and the daemon open-tag matcher both accept) and the ```json
-// fenced schemas
-// some models (GPT-OSS-120B Medium, Gemini 3.5 Flash) emit alongside
-// them — leaving those literal in the transcript causes weak/medium
-// plain-stream models to re-emit an identical form on the user's
-// follow-up turn, looking like the discovery form loop never breaks
-// (see PR #3157 form-loop investigation). If we only scrubbed the canonical
-// tag, an alias-form turn would replay verbatim and re-trigger that loop.
-//
-// User content is preserved verbatim — a user message that legitimately
-// quotes `<question-form>` (e.g. discussing the markup with the agent)
-// must not be mangled.
+/** Format previous assistant output as context without inferring user answers. */
 export function sanitizePriorAssistantTurnForTranscript(
   content: string,
   persistedArtifactFiles: ReadonlyArray<PersistedArtifactFileRef> = [],
 ): string {
-  let sanitized = content.replace(
-    // `\1` backreference keeps the open/close tag names matched so we never
-    // splice across a `<question-form>…</ask-question>` mismatch.
-    /<(question-form|ask-question)\b[^>]*>[\s\S]*?<\/\1>/g,
-    '[question-form was emitted here on a prior turn; the user already answered, see their reply below.]',
+  return summarizeHistoricalQuestionForms(
+    summarizeArtifactsForTranscript(content, persistedArtifactFiles),
   );
-  // Strip ```json (or plain ```) fenced blocks whose body matches the
-  // form schema shape — `"questions": [` is the strongest tell. A
-  // generic JSON snippet without that key (e.g. an API response the
-  // agent shared) is left intact.
-  sanitized = sanitized.replace(
-    /```(?:json)?\s*\n([\s\S]*?)\n```/g,
-    (match, body: string) => {
-      if (/"questions"\s*:\s*\[/.test(body)) {
-        return '[form schema was echoed here on a prior turn; stripped to avoid a loop.]';
-      }
-      return match;
-    },
-  );
-  // Replace prior-turn `<artifact>` HTML with a one-line summary — but ONLY
-  // for artifacts whose save to the project files is confirmed by the
-  // message's producedFiles record. persistArtifact has refusal and
-  // write-failure branches; on those paths the transcript copy is the only
-  // surviving artifact body, so an unconfirmed block stays verbatim (the
-  // 12K truncation below still bounds it) and a follow-up turn can repair it.
-  // For confirmed saves the agent reads/edits the file from disk, never from
-  // this transcript copy, so re-sending the whole document each turn is pure
-  // waste — the summary keeps identifier/title/type plus the saved file name.
-  // Runs before truncateForTranscript so the summarized message no longer
-  // trips the 12K cap. Uses markdown-aware detection so a literal
-  // `<artifact>` recited in a code fence survives.
-  sanitized = summarizeArtifactsForTranscript(sanitized, persistedArtifactFiles);
-  return sanitized;
-}
-
-// producedFiles → the persistence evidence summarizeArtifactsForTranscript
-// matches artifact blocks against. producedFiles is the whole per-turn file
-// diff — tool-written files included — so a name collision with an unrelated
-// same-turn file must not count as proof the <artifact> body was saved. Only
-// artifact-originated saves qualify: persistArtifact always writes an explicit
-// (non-inferred) manifest, whereas tool-written files surface with no manifest
-// or a daemon-inferred one (`metadata.inferred === true`). Within that
-// narrowed set, the manifest identifier is the strongest link (it survives
-// `-2`/`-3` collision renames); the file name is the fallback for artifact
-// saves whose manifest predates identifier metadata.
-function persistedArtifactFilesOf(message: ChatMessage): PersistedArtifactFileRef[] {
-  return (message.producedFiles ?? [])
-    .filter((file) => file.artifactManifest && file.artifactManifest.metadata?.inferred !== true)
-    .map((file) => {
-      const identifier = file.artifactManifest?.metadata?.identifier;
-      return {
-        name: file.name,
-        identifier: typeof identifier === 'string' && identifier ? identifier : undefined,
-      };
-    });
 }
 
 export function buildDaemonTranscript(history: ChatMessage[], targetAgentId?: string): string {
@@ -385,6 +323,12 @@ export interface DaemonAgentRetryState {
    * 一闪而过,最需要解释的那 30 秒照旧沉默。
    */
   phase: 'retrying' | 'cleared';
+  /**
+   * 这次重跑是因为什么。只在 daemon 判为限流(`failure_category: 'rate_limit'`,
+   * 逐字取自 `run_retry_attempted`)时带上 —— 那一行要改说「模型服务请求繁忙」
+   * (产品《报错文案》S09a,OPEND-2849)。其他原因不带,那一行照旧说「正在重试」。
+   */
+  cause?: 'rate_limit';
 }
 
 /** Upstream reconnect progress emitted by an agent runtime (not browser SSE). */
@@ -533,6 +477,8 @@ function daemonAnsweredWithError(bodyText: string): boolean {
 }
 
 export interface DaemonStreamOptions {
+  submission?: RunSubmission;
+  onUserSubmissionAccepted?: (receipt: UserSubmissionReceipt) => void;
   agentId: string;
   history: ChatMessage[];
   /** Legacy field accepted by older tests/callers. Daemon-owned prompt composition ignores it. */
@@ -573,6 +519,8 @@ export interface DaemonStreamOptions {
   research?: ResearchOptions;
   context?: RunContextSelection;
   appliedPluginSnapshotId?: string | null;
+  pluginId?: string;
+  pluginInputs?: Record<string, unknown>;
   mediaExecution?: MediaExecutionPolicy;
   titleGeneration?: { enabled?: boolean };
   locale?: string;
@@ -742,7 +690,7 @@ export const STRATEGY_TASK_BLOCKED_MESSAGE =
  * resolver, and the error analytics can all name the gate. A projection from a
  * daemon too old to send `blockedContext` still fails, just anonymously.
  */
-function createStrategyTaskBlockedError(
+export function createStrategyTaskBlockedError(
   strategyTask: StrategyTaskProjectionV2,
 ): Error & { code?: string } {
   const error = new Error(STRATEGY_TASK_BLOCKED_MESSAGE) as Error & { code?: string };
@@ -1042,6 +990,8 @@ export async function streamViaDaemon({
   userMessageId,
   assistantMessageId,
   clientRequestId,
+  submission,
+  onUserSubmissionAccepted,
   skillId,
   skillIds,
   designSystemId,
@@ -1055,6 +1005,8 @@ export async function streamViaDaemon({
   research,
   context,
   appliedPluginSnapshotId,
+  pluginId,
+  pluginInputs,
   mediaExecution,
   titleGeneration,
   locale,
@@ -1089,6 +1041,7 @@ export async function streamViaDaemon({
     userMessageId: userMessageId ?? null,
     assistantMessageId: assistantMessageId ?? null,
     clientRequestId: clientRequestId ?? null,
+    submission,
     skillId: skillId ?? null,
     skillIds: Array.isArray(skillIds) ? skillIds : [],
     designSystemId: designSystemId ?? null,
@@ -1100,7 +1053,11 @@ export async function streamViaDaemon({
     ...(byokProvider ? { byokProvider } : {}),
     ...(byokMediaDefaults ? { byokMediaDefaults } : {}),
     locale,
-    ...(appliedPluginSnapshotId ? { appliedPluginSnapshotId } : {}),
+    ...(appliedPluginSnapshotId
+      ? { appliedPluginSnapshotId }
+      : pluginId
+        ? { pluginId, ...(pluginInputs ? { pluginInputs } : {}) }
+        : {}),
     ...(context ? { context } : {}),
     ...(research ? { research } : {}),
     ...(mediaExecution ? { mediaExecution } : {}),
@@ -1154,6 +1111,7 @@ export async function streamViaDaemon({
 
     const created = (await createResp.json()) as ChatRunCreateResponse;
     const runId = created.runId;
+    if (created.userSubmission) onUserSubmissionAccepted?.(created.userSubmission);
     if (created.strategyTask) onRunCreated?.(runId, created.strategyTask);
     else onRunCreated?.(runId);
     // Start the stuck-run watchdog. trackRunProgress is called inside the
@@ -1303,6 +1261,20 @@ export function formatVelaBalanceUsd(raw?: string | null): string | null {
   return `${sign}$${Math.abs(amount).toFixed(2)}`;
 }
 
+/**
+ * Format a raw wallet `balanceUsd` string into the bare amount (e.g. "12.30")
+ * for surfaces that already name the currency some other way — the top-right
+ * credits pill leads with the plan wordmark and shows the number beside it.
+ * Same null contract as `formatVelaBalanceUsd`.
+ */
+export function formatVelaBalanceAmount(raw?: string | null): string | null {
+  if (raw == null || raw === '') return null;
+  const amount = Number(raw);
+  if (!Number.isFinite(amount)) return null;
+  const sign = amount < 0 ? '-' : '';
+  return `${sign}${Math.abs(amount).toFixed(2)}`;
+}
+
 /** Top subscription tier — no upgrade affordance is shown at/above this. */
 export const VELA_TOP_PLAN_TIER = 'max';
 
@@ -1331,6 +1303,8 @@ export interface VelaLiveAccount {
 }
 
 export interface VelaLoginStatus {
+  /** One-time AMR new-registration claim persisted by the CLI. */
+  registrationInvite?: { accountId: string; deviceAuthorizationId: string };
   loggedIn: boolean;
   sessionState?: import('@open-design/contracts').AmrSessionState;
   credentialRevision?: string;
@@ -1456,9 +1430,15 @@ export async function fetchAmrWalletSnapshot(options: { refresh?: boolean } = {}
   }
 }
 
-export async function fetchAmrModels(): Promise<AmrModelsResponse | null> {
+export async function fetchAmrModels(
+  context?: WorkspaceCollabContext | null,
+  options?: { refresh?: boolean },
+): Promise<AmrModelsResponse | null> {
   try {
-    const resp = await fetch('/api/amr/models', { cache: 'no-store' });
+    const resp = await fetch(options?.refresh ? '/api/amr/models?refresh=1' : '/api/amr/models', {
+      cache: 'no-store',
+      ...(context ? { headers: workspaceProjectHeaders(context) } : {}),
+    });
     if (!resp.ok) return null;
     return (await resp.json()) as AmrModelsResponse;
   } catch {
@@ -1668,19 +1648,124 @@ export async function listActiveChatRuns(
 export async function listProjectRuns(
   workspaceContext?: WorkspaceCollabContext | null,
 ): Promise<ChatRunStatusResponse[]> {
+  return (await listProjectRunsWithScope(workspaceContext)).runs;
+}
+
+/**
+ * The catalogue-wide listing, plus whether the daemon refused it outright.
+ *
+ * `scopeRequired` is the deterministic 400 `PROJECT_SCOPE_REQUIRED` answer once
+ * any run belongs to a Workspace-bound project. Asking again cannot change it,
+ * so interval pollers must stop instead of repeating the same failed request
+ * (each one was also captured as a diagnostic incident).
+ */
+export async function listProjectRunsWithScope(
+  workspaceContext?: WorkspaceCollabContext | null,
+): Promise<{ runs: ChatRunStatusResponse[]; scopeRequired: boolean }> {
   try {
     const resp = await fetch('/api/runs', {
       ...(workspaceContext
         ? { headers: workspaceProjectHeaders(workspaceContext) }
         : {}),
     });
-    if (!resp.ok) return [];
+    if (!resp.ok) {
+      const body = (await resp.json().catch(() => null)) as
+        | { error?: { code?: string } }
+        | null;
+      return {
+        runs: [],
+        scopeRequired: resp.status === 400 && body?.error?.code === 'PROJECT_SCOPE_REQUIRED',
+      };
+    }
     const body = (await resp.json()) as ChatRunListResponse;
-    return body.runs ?? [];
+    return { runs: body.runs ?? [], scopeRequired: false };
   } catch {
-    return [];
+    return { runs: [], scopeRequired: false };
   }
 }
+
+/**
+ * One project's runs plus the awaiting-input flag the run bodies cannot carry.
+ *
+ * Scoped to a single project ON PURPOSE. The catalogue-wide `listProjectRuns`
+ * above 400s (`PROJECT_SCOPE_REQUIRED`) the moment any run belongs to a
+ * workspace-bound project — which, in a workspace session, is all of them — so
+ * it silently returns `[]` there. Asking per project id takes the route's
+ * authorized branch instead and actually works.
+ *
+ * Without a workspace context the request carries no Workspace headers: that
+ * is the local CLI / BYOK shell asking about an unbound local project, which
+ * the route serves through its headerless branch (OPEND-3140). A bound
+ * project asked about headerlessly is filtered to its non-AMR runs by the
+ * daemon, never refused, so a local row can only under-report, not error.
+ *
+ * Returns `null` when the project is unreadable or the daemon is unreachable,
+ * so a caller can tell "no runs" apart from "could not ask".
+ */
+export async function listRunsForProject(
+  projectId: string,
+  workspaceContext?: WorkspaceCollabContext | null,
+): Promise<{
+  runs: ChatRunStatusResponse[];
+  awaitingInputProjectIds: string[];
+  /** `undefined` when the daemon predates the per-conversation set. */
+  awaitingInputConversationIds?: string[];
+} | null> {
+  try {
+    const resp = await fetch(`/api/runs?projectId=${encodeURIComponent(projectId)}`, {
+      ...(workspaceContext
+        ? { headers: workspaceProjectHeaders(workspaceContext) }
+        : {}),
+    });
+    if (!resp.ok) return null;
+    const body = (await resp.json()) as ChatRunListResponse;
+    return {
+      runs: body.runs ?? [],
+      // Absent on daemons older than this field; treat as "no pending
+      // question" rather than failing the whole read.
+      awaitingInputProjectIds: body.awaitingInputProjectIds ?? [],
+      ...(Array.isArray(body.awaitingInputConversationIds)
+        ? { awaitingInputConversationIds: body.awaitingInputConversationIds }
+        : {}),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The global run-notice feed after `after` (P0-24 N10). `null` when the daemon
+ * is unreachable or refuses, so the poller keeps its cursor and tries again.
+ */
+export async function fetchRunNotices(
+  after: number,
+  workspaceContext?: WorkspaceCollabContext | null,
+): Promise<RunNoticesResponse | null> {
+  try {
+    const resp = await fetch(`/api/run-notices?after=${Math.max(0, Math.floor(after))}`, {
+      cache: 'no-store',
+      ...(workspaceContext
+        ? { headers: workspaceProjectHeaders(workspaceContext) }
+        : {}),
+    });
+    if (!resp.ok) return null;
+    const body = (await resp.json()) as RunNoticesResponse;
+    if (typeof body?.epoch !== 'string' || !Array.isArray(body.notices)) return null;
+    return body;
+  } catch {
+    return null;
+  }
+}
+
+/** Agent event kinds that put something the user can see on screen. */
+const AGENT_VISIBLE_OUTPUT_KINDS: ReadonlySet<string> = new Set([
+  'text',
+  'thinking',
+  'tool_use',
+  'tool_result',
+  'image',
+  'live_artifact',
+]);
 
 interface DaemonPhysicalRunResult {
   nextRunId?: string;
@@ -1991,7 +2076,12 @@ async function consumeDaemonPhysicalRun({
           }
           if (parsed.kind !== 'event') continue;
           sawStreamProgress = true;
-          sawRunEvent = true;
+          if (!sawRunEvent) {
+            sawRunEvent = true;
+            // A resumed run event proves transport recovery while the reader
+            // may stay open. Keepalive comments above do not clear the UI.
+            clearReconnect();
+          }
           trackRunProgress(runId);
           /*
            * S12 的静默计时就认这一刻 —— **上游给过我们东西**的唯一如实证据。
@@ -2062,6 +2152,7 @@ async function consumeDaemonPhysicalRun({
                 attempt,
                 max: Number.isFinite(max) && max > 0 ? max : attempt,
                 phase: 'retrying',
+                ...(data.failure_category === 'rate_limit' ? { cause: 'rate_limit' as const } : {}),
               });
             }
             continue;
@@ -2095,7 +2186,14 @@ async function consumeDaemonPhysicalRun({
               // This is transport telemetry, never assistant content.
               continue;
             }
-            if (translated.kind !== 'status') clearAgentSelfHealOnVisibleOutput();
+            /*
+             * Only output the user can see ends the retry/reconnect row. Every
+             * attempt opens with protocol frames (`done_key` is minted per run
+             * attempt before any model output, plus `usage` / diagnostics), and
+             * clearing on those dropped 「正在重试」 the instant the retry began —
+             * the row was never on screen (P0-24 A4, found on a real runtime).
+             */
+            if (AGENT_VISIBLE_OUTPUT_KINDS.has(translated.kind)) clearAgentSelfHealOnVisibleOutput();
             if (translated.kind === 'text') {
               acc += translated.text;
               handlers.onDelta(translated.text);
@@ -2106,6 +2204,7 @@ async function consumeDaemonPhysicalRun({
 
           if (event.event === 'start') {
             const data = event.data as ChatSseStartPayload;
+            if (data.strategyTask) onStrategyTaskSettled?.(data.strategyTask);
             onRunStatus?.('running');
             handlers.onAgentEvent({
               kind: 'status',
@@ -2220,7 +2319,10 @@ async function consumeDaemonPhysicalRun({
         // 在这里再发一次会让 blocked/canceled 的改写被旧值盖掉。
         clearReconnect();
       } else {
-        onRunStatus?.('failed');
+        // P0-24 N15:浏览器重连用尽**不是**这一轮的结局,以运行记录为准。daemon
+        // 还说在跑、或者根本问不到时,这里不替它判 `failed` —— 回合标题保持
+        // 「进行中」,恢复后由运行记录给出真实结果。下面的 `onError` 仍然发出,
+        // 消费方靠它收起这条流、排队恢复。
         // 预算用尽、这一轮还没落终态 —— 组件 22-3:停止自动重连,交回给人。
         // 这条要在 onError 之前发:报错卡与重连行今天在抢同一件事(盘点 R9),
         // 先把「已经交回给人」这个事实摆出来,分流由消费方决定。
@@ -2240,6 +2342,7 @@ async function consumeDaemonPhysicalRun({
       }
     }
 
+    // `completed` ends orchestration; only the physical Run can declare success.
     if (endStrategyTask?.terminal) {
       // Surface the terminal projection before the status/error handlers run,
       // so a blocked verdict (with its gate attribution) is stamped onto the
@@ -2259,43 +2362,54 @@ async function consumeDaemonPhysicalRun({
         // The strategy contract is explicit that a post-claim failure keeps the
         // current Run's own result rather than inventing a new one, so only a
         // Run that did NOT succeed-and-deliver falls through to the failure
-        // branch. `deliverableValid` is filesystem-backed (entry resolved, this
-        // Run touched it, kind matches) — never the agent's own assertion — and
-        // an unreachable daemon fails closed to the previous behaviour.
-        const deliveredDespiteBlock = endStatus === 'succeeded'
-          && (await fetchChatRunStatus(runId, workspaceContext))?.deliverableValid === true;
-        // A block the agent declared on itself is not a failure to report.
-        // Asked for a prototype with nothing to build on, the agent answers in
-        // the chat — "the requirement was skipped, so there is no runnable plan
-        // this round" — and that reply is the turn's outcome. Raising a run
-        // error on top of it restated the same sentence inside a red "task
-        // execution failed" card, so a turn that had simply asked for more
-        // detail read as a crash (OPEND-2565).
+        // branch. Both fields are filesystem-backed — never the agent's own
+        // assertion — and an unreachable daemon fails closed to the previous
+        // behaviour.
         //
-        // Keyed on the reason code, NOT on the presence of visible text. Every
-        // other block is a gate the agent did not ask for — a missing Runtime
-        // State, an unresolvable deliverable, an unproven session — and the
-        // prose sitting next to it is the agent's ordinary reply ("sure, three
-        // pages, here is the plan"), not an account of the stop. Treating that
-        // as an explanation would hide a real protocol failure behind a
-        // cheerful sentence.
+        // `projectDeliverableValid` is the one that answers the question this
+        // branch is actually asking. `deliverableValid` asks "did THIS run
+        // write the entry", which the strategy contract needs for accepting a
+        // completion claim but which is `false` for the most ordinary shape of
+        // this failure: the user says "继续", the agent re-checks work an
+        // earlier turn already finished, correctly rewrites nothing, and the
+        // turn is refused over a machine-block defect. That put a red card over
+        // a finished 16-page deck the user could see rendered beside it. The
+        // OR keeps the stricter field meaningful on its own — a run that did
+        // deliver has obviously delivered.
         //
-        // Also requires a Run that reached the end on its own: a Run that
-        // failed keeps its error even when the agent narrated the failure,
-        // because narration is not a substitute for the failure the user has
-        // to act on.
-        const agentDeclaredBlock = endStrategyTask.blockedContext?.reasonCodes
-          .includes(OD_NEXT_AGENT_DECLARED_BLOCK_REASON) === true;
-        const explainedToUser = endStatus === 'succeeded'
-          && agentDeclaredBlock
-          && (endStrategyTask.blockedContext?.visibleText?.trim().length ?? 0) > 0;
-        if (!deliveredDespiteBlock && !explainedToUser) {
+        // The looser field additionally requires that this turn actually SAID
+        // something. It credits a file an EARLIER turn wrote, and that only
+        // means "nothing was lost here" if the user got a reply to go with it.
+        // Without the guard, a turn that returned a bare newline into a project
+        // that already holds a prototype would go silent too — which is the
+        // false-success half of this same conflation (#7564), and swapping one
+        // wrong answer for the other is not a fix. The stricter field keeps its
+        // existing behaviour: a run that wrote the entry delivered, prose or no
+        // prose.
+        //
+        // The same rule decides here, on cold history load, and on artifact
+        // recovery — `canRetainSuccessfulRunForBlockedStrategy` is the one
+        // place it is written. Two more cases keep the success there: a block
+        // the agent declared on itself and explained (OPEND-2565), and a task
+        // refused before production while the agent replied — the greeting or
+        // off-topic turn, where the reply is the whole outcome. A Run that
+        // failed keeps its error whatever the agent narrated, because narration
+        // is not a substitute for the failure the user has to act on.
+        const blockedRunStatus = endStatus === 'succeeded'
+          ? await fetchChatRunStatus(runId, workspaceContext)
+          : null;
+        const retainSuccess = endStatus === 'succeeded'
+          && canRetainSuccessfulRunForBlockedStrategy(
+            endStatus,
+            endStrategyTask,
+            blockedRunStatus?.deliverableValid,
+            blockedRunStatus?.projectDeliverableValid,
+            acc,
+          );
+        if (!retainSuccess) {
           endStatus = 'failed';
           pendingStructuredError ??= createStrategyTaskBlockedError(endStrategyTask);
         }
-      } else if (endStrategyTask.outcome === 'completed') {
-        endStatus = 'succeeded';
-        serverDeclaredSuccess = true;
       }
     }
 

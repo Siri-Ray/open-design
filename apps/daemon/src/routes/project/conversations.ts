@@ -1,5 +1,6 @@
 import type { Express } from 'express';
-import { type ChatSessionMode } from '@open-design/contracts';
+import { MESSAGES_STREAM_CONTENT_TYPE, type ChatMessage, type ChatSessionMode, type TaskDisplayProjection } from '@open-design/contracts';
+import { streamMessages } from '../../http/message-stream.js';
 import { readAnalyticsContext } from '../../analytics.js';
 import { nextForkedConversationTitle } from '../../conversation-fork-title.js';
 import { backfillBrandExtractionTranscriptForProject } from '../../brands/index.js';
@@ -8,6 +9,7 @@ import type { BoundWorkspaceResourceMutationGate } from '../../collab/workspace-
 import type { AuthorizeProjectRequest } from '../../collab/project-request-authority.js';
 import { TERMINAL_RUN_STATUSES } from '../../runtimes/runs.js';
 import { strategyTaskTurnsForRunIds } from '../../strategies/task-store.js';
+import { projectStrategyTaskByRunId } from '../../strategies/od-next/automatic-simple-production.js';
 
 import { registerProjectCommentRoutes } from './comments.js';
 import { cancelRunsOwnedBy } from './cancel-owned-runs.js';
@@ -16,6 +18,7 @@ import {
   countMessages,
   deleteConversationAndRepairTeamCommentAnchor,
   isProjectCommentAnchorConversationId,
+  listSiblingRunDoneKeys,
 } from '../../db.js';
 
 export interface RegisterProjectConversationRoutesDeps extends RouteDeps<'db' | 'design' | 'http' | 'paths' | 'projectStore' | 'conversations' | 'ids' | 'telemetry' | 'appConfig' | 'agents'> {
@@ -63,30 +66,6 @@ function isChatSessionMode(value: unknown): value is ChatSessionMode {
  */
 function settledForkVerdict(status: unknown): string | undefined {
   return typeof status === 'string' && TERMINAL_RUN_STATUSES.has(status) ? status : undefined;
-}
-
-/**
- * The `done_key` a Run stamps on its own assistant row, if it has one.
- *
- * Each physical Run mints exactly one key (`mintRunDoneKey`, emitted as the
- * `done_key` agent event before any model output), so the FIRST key in a row's
- * event list is that row's Run identity. Later keys in the same list are not
- * identity — they are the damage this guard exists to stop — which is why only
- * the first one counts.
- */
-function ownDoneKeyOfPersistedEvents(events: unknown): string | null {
-  if (!Array.isArray(events)) return null;
-  for (const event of events) {
-    if (
-      event
-      && typeof event === 'object'
-      && (event as Record<string, unknown>).kind === 'done_key'
-    ) {
-      const key = (event as Record<string, unknown>).key;
-      if (typeof key === 'string' && key) return key;
-    }
-  }
-  return null;
 }
 
 /**
@@ -416,7 +395,7 @@ export function registerProjectConversationRoutes(app: Express, ctx: RegisterPro
     // A Full Plan turn spans several physical Runs and the daemon-issued
     // continuation carries no user prompt, so the client needs each message's
     // logical-task position to render one turn instead of an orphan answer.
-    const messages = listMessages(db, req.params.cid) as Array<Record<string, unknown>>;
+    const messages = listMessages(db, req.params.cid) as ChatMessage[];
     const turns = strategyTaskTurnsForRunIds(
       db,
       messages
@@ -424,23 +403,34 @@ export function registerProjectConversationRoutes(app: Express, ctx: RegisterPro
         .filter((runId): runId is string => typeof runId === 'string' && runId.length > 0),
       { projectId: req.params.id, conversationId: req.params.cid },
     );
-    res.json({
-      messages: messages.map((message) => {
-        const runId = typeof message['runId'] === 'string' ? message['runId'] : null;
-        const turn = runId ? turns.get(runId) : undefined;
-        if (!turn) return message;
-        return {
-          ...message,
-          strategyTaskExecutionId: turn.taskExecutionId,
-          strategyTaskRunIndex: turn.taskRunIndex,
-          ...(turn.delivered ? { strategyTaskDelivered: true } : {}),
-          ...(turn.blocked ? {
-            strategyTaskBlocked: true,
-            strategyTaskBlockedText: turn.blockedText,
-          } : {}),
-        };
-      }),
+    const taskDisplays = new Map<string, TaskDisplayProjection | undefined>();
+    const responseMessages = messages.map((message) => {
+      const runId = typeof message.runId === 'string' ? message.runId : null;
+      const turn = runId ? turns.get(runId) : undefined;
+      if (!turn) return message;
+      if (!taskDisplays.has(turn.taskExecutionId)) {
+        let display;
+        try { display = projectStrategyTaskByRunId(db, runId!)?.display; }
+        catch { /* Unreadable legacy task facts must not prevent transcript loading. */ }
+        taskDisplays.set(turn.taskExecutionId, display);
+      }
+      const taskDisplay = taskDisplays.get(turn.taskExecutionId);
+      return {
+        ...message,
+        strategyTaskExecutionId: turn.taskExecutionId,
+        strategyTaskRunIndex: turn.taskRunIndex,
+        strategyTaskDelivered: turn.delivered,
+        strategyTaskBlocked: turn.blocked,
+        strategyTaskBlockedText: turn.blockedText,
+        ...(taskDisplay ? { taskDisplay } : {}),
+      };
     });
+    res.vary('Accept');
+    if (req.accepts(['application/json', MESSAGES_STREAM_CONTENT_TYPE]) === MESSAGES_STREAM_CONTENT_TYPE) {
+      await streamMessages(res, responseMessages);
+      return;
+    }
+    res.json({ messages: responseMessages });
   });
 
   // #6396: the daemon is the single writer of a daemon-backed assistant
@@ -468,41 +458,6 @@ export function registerProjectConversationRoutes(app: Express, ctx: RegisterPro
   // daemon never persisted events/status there, so the web is the legitimate
   // writer) and lets UI metadata (feedback, comment attachments, telemetry)
   // land on every PUT.
-  /**
-   * The `done_key` every OTHER assistant row in this conversation was recorded
-   * with — i.e. the Run identities this row must never be allowed to absorb.
-   * Only each sibling's FIRST key counts (see `ownDoneKeyOfPersistedEvents`),
-   * so an already-damaged sibling cannot re-export the key it absorbed.
-   */
-  const siblingRunDoneKeys = (
-    conversationId: string,
-    messageId: string,
-  ): ReadonlySet<string> => {
-    const rows = db
-      .prepare(
-        `SELECT events_json AS eventsJson
-           FROM messages
-          WHERE conversation_id = ?
-            AND role = 'assistant'
-            AND id <> ?
-            AND events_json IS NOT NULL
-            AND events_json LIKE '%"done_key"%'`,
-      )
-      .all(conversationId, messageId) as Array<{ eventsJson: string | null }>;
-    const keys = new Set<string>();
-    for (const row of rows) {
-      let parsed: unknown;
-      try {
-        parsed = row.eventsJson ? JSON.parse(row.eventsJson) : null;
-      } catch {
-        continue;
-      }
-      const key = ownDoneKeyOfPersistedEvents(parsed);
-      if (key) keys.add(key);
-    }
-    return keys;
-  };
-
   const mergeMessageWriteForDaemonBacked = (
     stored: ReturnType<typeof getMessage>,
     incoming: Record<string, unknown>,
@@ -521,6 +476,7 @@ export function registerProjectConversationRoutes(app: Express, ctx: RegisterPro
         runStatus: stored.runStatus,
         events: stored.events ?? [],
         content: stored.content ?? '',
+        producedFiles: stored.producedFiles,
         lastRunEventId: stored.lastRunEventId,
         startedAt: stored.startedAt,
         endedAt: stored.endedAt,
@@ -539,6 +495,7 @@ export function registerProjectConversationRoutes(app: Express, ctx: RegisterPro
         runStatus: stored.runStatus,
         events: stored.events ?? [],
         content: stored.content ?? '',
+        producedFiles: stored.producedFiles,
         lastRunEventId: stored.lastRunEventId,
         startedAt: stored.startedAt,
         endedAt: stored.endedAt,
@@ -775,7 +732,9 @@ export function registerProjectConversationRoutes(app: Express, ctx: RegisterPro
       ...mergeMessageWriteForDaemonBacked(
         existing,
         normalizedMessage,
-        siblingRunDoneKeys(req.params.cid, req.params.mid),
+        // Read in SQLite: this runs on every PUT, and a sibling's event log can
+        // hold any amount of tool output (see `listSiblingRunDoneKeys`).
+        listSiblingRunDoneKeys(db, req.params.cid, req.params.mid),
       ),
       id: req.params.mid,
     });

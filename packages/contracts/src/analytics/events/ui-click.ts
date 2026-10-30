@@ -1,3 +1,4 @@
+import type { WorkspaceJourneyClickProps } from './workspace.js';
 /**
  * @module analytics/events/ui-click
  * ui_click event prop types and their union.
@@ -86,6 +87,7 @@ export interface SettingsPopoverClickProps {
     | 'share_channel'
     | 'workspace_teams'
     | 'join_discord'
+    | 'join_feishu'
     | 'follow_x'
     | 'follow_threads'
     | 'open_youtube'
@@ -140,6 +142,12 @@ export interface HomeChatComposerClickProps {
     // "Recent folders" submenu.
     | 'working_dir_recent'
     | 'task_chip'
+    // The × the composer's type pill reveals on hover: clears the picked task
+    // type back to none (the pill then disappears; the entry point in the
+    // accessory row stays). Fires only once no sub-category is left to clear —
+    // that step sends `subcategory_chip` with `subcategory: 'all'` instead.
+    // `chip_id` is the type being cleared.
+    | 'task_chip_clear'
     // Sub-category filter pill under the task rail (全部 / Landing / Brand /
     // Dashboards / …). `subcategory` carries the picked slug; '全部' sends
     // `subcategory: 'all'`. `chip_id` is the parent task type.
@@ -935,7 +943,7 @@ export interface QuestionsFormClickProps {
 }
 
 // Hosted-AMR nudge shown under a non-AMR agent's model/auth/quota failure.
-// `go_amr` is the link that opens https://open-design.ai/amr.
+// `go_amr` is the link that opens https://open-design.ai/cloud/dashboard.
 export interface RunFailedToastClickProps {
   page_name: 'chat_panel';
   area: 'chat_panel';
@@ -959,6 +967,10 @@ export interface RunRecoveryActionClickProps {
 }
 
 export interface AmrEntryClickProps {
+  block_id?: string;
+  workspace_key?: string;
+  reason?: 'credit_exhausted' | 'concurrency_limit';
+  stage?: 'before_run' | 'mid_run' | 'unknown';
   page_name: TrackingPageName;
   area: 'amr_entry';
   element: TrackingAmrEntrySource;
@@ -1229,6 +1241,8 @@ export interface CommentPopoverClickProps {
   page_name: 'artifact';
   area: 'comment_popover';
   element: 'save_comment' | 'send_to_chat' | 'add_note';
+  /** Saved comments selected at click time; does not imply queue acceptance. */
+  submitted_comment_ids?: string[];
   artifact_id?: string;
   artifact_kind?: TrackingArtifactKind;
   project_id: string;
@@ -1378,6 +1392,15 @@ export interface DeckViewerClickProps {
   slide_count?: number;
 }
 
+export interface ShareGuideClickProps {
+  page_name: 'artifact';
+  area: 'share_guide';
+  element: 'try_share' | 'close' | 'never_show_again';
+  project_id: string;
+  project_kind: TrackingProjectKind | null;
+  artifact_id: string;
+}
+
 export interface ShareOptionPopoverClickProps {
   page_name: 'artifact';
   area: 'share_option_popover';
@@ -1392,6 +1415,8 @@ export interface ShareOptionPopoverClickProps {
     | 'publish_required_guide'
     | 'publish_file'
     | 'copy_publish_link';
+  /** Existing stable alias at click time, if known. */
+  publish_id?: string;
   artifact_id: string;
   artifact_kind: TrackingArtifactKind;
   project_id: string;
@@ -1401,7 +1426,7 @@ export interface ShareOptionPopoverClickProps {
 // Provenance of an HTML file version, mirroring the daemon's
 // ProjectFileVersion.source: 'ai' = written by a run, 'manual' = manual
 // edit/undo/redo, 'restore' = created by restoring an older version.
-export type TrackingFileVersionSource = 'ai' | 'manual' | 'restore';
+export type TrackingFileVersionSource = 'ai' | 'manual' | 'restore' | 'sync';
 
 // Clicks inside the HTML file version history modal (opened via the artifact
 // toolbar `versions` element). `restore` opens the confirm popover;
@@ -1675,6 +1700,7 @@ export interface SettingsExternalMcpClickProps {
 
 // Discriminated union of every supported ui_click payload.
 export type UiClickProps =
+  | WorkspaceJourneyClickProps
   | EntryNavigationClickProps
   | AccountMenuClickProps
   | WorkspaceSwitcherClickProps
@@ -1753,6 +1779,7 @@ export type UiClickProps =
   | PresentPopoverClickProps
   | DeckViewerClickProps
   | ShareOptionPopoverClickProps
+  | ShareGuideClickProps
   | FileVersionModalClickProps
   | ConversationForkClickProps
   | AssistantFeedbackButtonClickProps

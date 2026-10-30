@@ -19,7 +19,7 @@
 // 裁决(用户 2026-09-08):这种时候也要画一张**能说话、能操作**的卡。
 //
 // 这个文件的两半互为对照,缺一半都会让另一半变成空洞断言:
-//   · 前半(会红):终态失败 + 三条来源全空 → 卡在场、说得出话、点得动重试;
+//   · 前半(会红):终态失败 + 三条来源全空 → 卡在场、说得出话、点得动对应运行来源的恢复动作;
 //   · 后半(修前修后都必须绿)= 反向锚点,钉住「别修过头」:
 //     空回复那一档、交接给别的 UI 那一档、成功的一轮,都仍然不出卡。
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
@@ -86,8 +86,10 @@ function renderChat(
   } = {},
 ) {
   const onRetry = overrides.onRetry === null ? undefined : (overrides.onRetry ?? vi.fn());
+  const onSwitchToAmrAndRetry = vi.fn();
   return {
     onRetry,
+    onSwitchToAmrAndRetry,
     ...render(
       <ChatPane
         messages={[message]}
@@ -98,6 +100,7 @@ function renderChat(
         onEnsureProject={async () => 'project-1'}
         onSend={vi.fn()}
         onStop={vi.fn()}
+        onSwitchToAmrAndRetry={onSwitchToAmrAndRetry}
         {...(onRetry ? { onRetry: onRetry as never } : {})}
         {...(overrides.reconnect ? { reconnect: overrides.reconnect } : {})}
         conversations={[
@@ -128,8 +131,7 @@ function failedRunWithNothingToSay(): ChatMessage {
 
 /**
  * 交付失败:agent 进程 `succeeded`,却什么都没交出来。
- * `isRetryableAssistantTerminalFailure` 把它和 `runStatus:'failed'` 一视同仁
- * 走同一条重试路,所以兜底卡必须同样覆盖它。
+ * P0-24 起本轮是否失败只看运行记录,产物有没有交出来不改变状态,所以这一轮不再出卡。
  */
 function deliveryFailedRun(
   state: 'no_result' | 'delivery_failed',
@@ -159,16 +161,14 @@ describe('终态失败 + 说不出原因:兜底报错卡', () => {
     );
   });
 
-  it('那张卡上的〔重试〕真的能把这一轮推下去', () => {
-    const { onRetry } = renderChat(failedRunWithNothingToSay());
+  it('CLI 失败卡上的 Cloud 动作传回原消息，不重试本地运行', () => {
+    const message = failedRunWithNothingToSay();
+    const { onRetry, onSwitchToAmrAndRetry } = renderChat(message);
 
-    const retry = screen.getByTestId('chat-error-retry');
-    fireEvent.click(retry);
-    expect(onRetry).toHaveBeenCalledTimes(1);
-    expect(onRetry).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'msg-failed' }),
-      'manual_retry',
-    );
+    fireEvent.click(screen.getByTestId('chat-error-switch-to-cloud'));
+    expect(onSwitchToAmrAndRetry).toHaveBeenCalledExactlyOnceWith(message);
+    expect(screen.queryByTestId('chat-error-retry')).toBeNull();
+    expect(onRetry).not.toHaveBeenCalled();
   });
 
   it('〔联系支持〕〔导出日志〕这两条不挑失败类型的出路也在', () => {
@@ -179,18 +179,12 @@ describe('终态失败 + 说不出原因:兜底报错卡', () => {
   });
 
   it.each(['no_result', 'delivery_failed'] as const)(
-    '交付失败(resultDeliveryState=%s)同样出卡、同样带得动重试',
+    'CLI 交付失败(resultDeliveryState=%s)不出卡:运行正常结束就不是失败(P0-24)',
     (state) => {
-      const { onRetry } = renderChat(deliveryFailedRun(state));
+      renderChat(deliveryFailedRun(state));
 
-      expect(screen.getByTestId('chat-run-error-description').textContent).toBe(
-        'chat.runError.fallbackMessage',
-      );
-      fireEvent.click(screen.getByTestId('chat-error-retry'));
-      expect(onRetry).toHaveBeenCalledWith(
-        expect.objectContaining({ id: 'msg-delivery' }),
-        'manual_retry',
-      );
+      expect(screen.queryByTestId('chat-run-error-card')).toBeNull();
+      expect(screen.queryByTestId('chat-error-switch-to-cloud')).toBeNull();
     },
   );
 
@@ -220,7 +214,9 @@ describe('反向锚点:兜底不许铺到这三档上', () => {
    * 「没有输出」,由 `e2e/ui/api-empty-response.test.ts` 那条 P0 钉死。
    * 那一格自己已经在说话,再压一张白卡就是两块 UI 说同一件事。
    */
-  it('空回复那一档仍然只显示「没有输出」,不出兜底卡', () => {
+  // P0-24 Q6:回合末尾整行删除,旧会话里落库为 failed 的空回复也不再出「任务未能完成」;
+  // 兜底卡照旧不出(新产生的空回复已按正常结束)。
+  it('空回复那一档(旧会话)不出兜底卡,回合末尾也不再出状态词', () => {
     const message = {
       id: 'msg-empty',
       role: 'assistant',
@@ -238,9 +234,7 @@ describe('反向锚点:兜底不许铺到这三档上', () => {
     renderChat(message);
 
     expect(screen.queryByTestId('chat-run-error-card')).toBeNull();
-    expect(screen.getByTestId('assistant-label').textContent).toContain(
-      'assistant.emptyResponseLabel',
-    );
+    expect(screen.queryByTestId('assistant-label')).toBeNull();
   });
 
   /*
@@ -274,6 +268,22 @@ describe('反向锚点:兜底不许铺到这三档上', () => {
 
     // 接手方在场 —— 这一行就是那句话的主人。
     expect(screen.getByTestId('chat-reconnect')).toBeTruthy();
+    expect(screen.queryByTestId('chat-run-error-card')).toBeNull();
+  });
+
+  it('keeps the aggregated process running while a disconnect awaits the Run record', () => {
+    const message: ChatMessage = {
+      ...failedRunWithNothingToSay(),
+      taskDisplay: { id: 'automatic-task', revision: 2, currentRunId: 'run-1',
+        runIds: ['plan-run', 'run-1'], state: 'running',
+        elapsedMs: 2_000, observedAt: Date.now(), ticking: true },
+      events: [{ kind: 'thinking', text: 'Checking layout' },
+        { kind: 'status', label: 'error', code: RECONNECT_OWNED_FAILURE_CODE }],
+    };
+    const view = renderChat(message);
+    const summary = view.container.querySelector('[data-testid="assistant-flow"] > details > summary');
+    expect(summary).toHaveTextContent('chat.record.running');
+    expect(summary).not.toHaveTextContent('chat.record.failed');
     expect(screen.queryByTestId('chat-run-error-card')).toBeNull();
   });
 

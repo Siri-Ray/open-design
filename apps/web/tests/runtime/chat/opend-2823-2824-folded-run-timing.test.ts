@@ -59,10 +59,12 @@ const LIVE: ChatMessage[] = RELOAD.map((m) => {
 const RUNS = LIVE.filter((m) => m.role === 'assistant');
 
 function blocksOf(message: ChatMessage): TurnBlock[] {
+  // Match AssistantMessage's run clock, including rebound message rows.
+  const startedAt = message.startedAt ?? message.createdAt;
   return buildTurnBlocks({
     events: (message.events ?? []) as PersistedAgentEvent[],
     runStatus: message.runStatus ?? 'succeeded',
-    ...(message.createdAt != null ? { startedAtMs: message.createdAt } : {}),
+    ...(startedAt != null ? { startedAtMs: startedAt } : {}),
     ...(message.endedAt != null ? { endedAtMs: message.endedAt } : {}),
   });
 }
@@ -94,10 +96,20 @@ describe('OPEND-2823 · 折叠轮次里每张壳都要报得出耗时', () => {
    * 先证「量法看得见」:live 那三条各自都报得出耗时,而且就是库里那三个真实跨度。
    * 这一条绿是下面那条断言不空转的前提 —— 没见过绿的对照组,红读数说明不了问题。
    */
-  it('对照组 · live 三个 run 各自报得出真实跨度', () => {
-    const live = RUNS.map((run) => shellsOf(blocksOf(run)));
+  it('legacy 对照组 · 没有 startedAt 时保留原创建时间跨度', () => {
+    const live = RUNS.map((run) => shellsOf(blocksOf({ ...run, startedAt: undefined })));
     expect(live.map((shells) => shells.length)).toEqual([1, 1, 1]);
     expect(live.map(([shell]) => shell!.elapsedMs)).toEqual([79_779, 159_066, 282_314]);
+    expect(live.map(([shell]) => headText(shell!))).toEqual(['1m 20s', '2m 39s', '4m 42s']);
+  });
+
+  it('真实 DTO 对照组 · live 使用每个 run 的 startedAt 精确跨度', () => {
+    // The original recorded JSON is unchanged. Its physical starts precede
+    // row creation by 22/21/32ms; legacy rounding must not erase that fact.
+    const live = RUNS.map((run) => shellsOf(blocksOf(run)));
+    expect(live.map((shells) => shells.length)).toEqual([1, 1, 1]);
+    expect(RUNS.map(run => run.startedAt)).not.toContain(undefined);
+    expect(live.map(([shell]) => shell!.elapsedMs)).toEqual(RUNS.map(run => run.endedAt! - run.startedAt!));
     expect(live.map(([shell]) => headText(shell!))).toEqual(['1m 20s', '2m 39s', '4m 42s']);
   });
 
@@ -108,10 +120,15 @@ describe('OPEND-2823 · 折叠轮次里每张壳都要报得出耗时', () => {
    * 红的样子(`origin/main`):`['1m 20s','2m 39s','4m 42s']` → `[null, null, '1m 45s']`。
    * 前两张壳的「已完成」旁边一个数都没有,第三张还少报了整整三分钟。
    */
-  it('重新打开之后,每张壳的耗时和 live 时逐字相同', () => {
-    const liveHeads = RUNS.map((run) => headText(shellsOf(blocksOf(run))[0]!));
+  /*
+   * P0-24 推测项 A-01:用户答完表单之后 daemon 自动接着跑的 run 1 + run 2 合成一张壳,
+   * 壳头是两段各自时长之和(2m 39s + 4m 42s),段间衔接的空档不算;提问那段(run 0)照旧单独一张。
+   */
+  it('重新打开之后,每张壳的耗时由 live 时各段的耗时逐字得出', () => {
+    const live = RUNS.map((run) => shellsOf(blocksOf(run))[0]!.elapsedMs!);
     const reloadHeads = shellsOf(blocksOf(foldedTurn())).map(headText);
-    expect(reloadHeads).toEqual(liveHeads);
+    expect(reloadHeads).toEqual([formatShellElapsed(live[0]!), formatShellElapsed(live[1]! + live[2]!)]);
+    expect(reloadHeads).toEqual(['1m 20s', '7m 21s']);
   });
 
   /**
@@ -158,7 +175,7 @@ describe('OPEND-2824 · 卡头的总耗时不得小于卡里的阶段耗时', ()
     const shells = shellsOf(buildTurnBlocks({
       events: (folded.events ?? []) as PersistedAgentEvent[],
       runStatus: 'running',
-      startedAtMs: folded.createdAt,
+      startedAtMs: folded.startedAt ?? folded.createdAt,
       nowMs: folded.endedAt! + 60_000,
     }));
     for (const shell of shells) {
@@ -288,11 +305,35 @@ describe('评审 #7921 · 壳头不许借别的 run 的时钟', () => {
     ],
   } as unknown as ChatMessage;
 
+  /** 用户读完 run 0 的产出之后回的那句话 —— run 1 是被它带起来的,不是 daemon 自动接的 */
+  const REPLY: ChatMessage = {
+    id: 'reply', role: 'user', content: '第二个方向', createdAt: 1_290_000,
+  } as unknown as ChatMessage;
+
   const foldedPair = (): ChatMessage => {
-    const folded = foldStrategyTaskTurns([RUN0, RUN1]).filter((m) => m.role === 'assistant');
+    const folded = foldStrategyTaskTurns([RUN0, REPLY, RUN1]).filter((m) => m.role === 'assistant');
     expect(folded, '两个 run 要折成一条').toHaveLength(1);
     return folded[0]!;
   };
+
+  /*
+   * P0-24 推测项 A-01 的反面:中间没有用户回话 = daemon 自动接着跑,两段合成一个标题,
+   * 时长是两段各自的跨度相加(60s + 20s),两段之间那四分钟谁也没在跑,不算。
+   */
+  it('没有用户回话时两段合成一张壳,时长相加、不含段间空白(推测项 A-01)', () => {
+    const folded = foldStrategyTaskTurns([RUN0, RUN1]).filter((m) => m.role === 'assistant');
+    expect(folded).toHaveLength(1);
+    const shells = shellsOf(blocksOf(folded[0]!));
+    expect(shells).toHaveLength(1);
+    expect(shells[0]!.elapsedMs).toBe(80_000);
+    expect(headText(shells[0]!)).toBe('1m 20s');
+    // 产品 D8 答复「什么都不改」:run 0 的「初版给你了」照旧留在壳外,排在最终答复之前
+    expect(JSON.stringify(shells[0]!.items)).not.toContain('初版给你了');
+    const prose = blocksOf(folded[0]!).filter((b) => b.kind === 'prose').map((b) => (b as { text: string }).text);
+    expect(prose).toHaveLength(2);
+    expect(prose[0]).toContain('初版给你了');
+    expect(prose[1]).toContain('已经按第二个方向改好了');
+  });
 
   /** 先证语料真的造出了那个形态 —— 不然下面几条会空转。 */
   it('对照组 · run 1 确实一个带时刻的事件都没有', () => {
